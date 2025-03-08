@@ -41,6 +41,7 @@ union VectorID {
         uint32_t a3;
     };
 
+    VectorID() : _id(INVALID_VECTOR_ID) {}
     VectorID(const uint64_t& ID) : _id(ID) {}
     VectorID(const VectorID& ID) : _id(ID._id) {}
 

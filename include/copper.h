@@ -5,70 +5,77 @@
 #include "vector_utils.h"
 #include "buffer.h"
 
-#include "queue"
+#include <algorithm>
 
 namespace copper {
 
-template <typename T, uint16_t min_size, uint16_t max_size>
+template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE>
 class Copper_Node {
-static_assert(min_size > 0);
-static_assert(max_size > min_size);
+static_assert(_MIN_SIZE > 0);
+static_assert(_MAX_SIZE > _MIN_SIZE);
+static_assert(_DIM > 0);
 public:
-// Distance<T>* _dist;
-// uint16_t _dimention;
-// VectorID _centroid_id;
-// Vector _centroid;
-// VectorSet _bucket;
-// void* parent;
-
     /* todo to be removed: buffer manager should be the creator of nodes*/
     // Copper_Node() {
 
     // }
 
-    inline RetStatus Insert(const Vector& vec, VectorID vec_id) {
-        AssertFatal(_bucket._size < max_size, LOG_TAG_DEFAULT, 
-                    "Node is full: size=%hu, max_size=%hu", _bucket._size, max_size);
+    inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID vec_id) {
+        AssertFatal(_bucket.Size() < _MAX_SIZE, LOG_TAG_DEFAULT, 
+                    "Node is full: size=%hu, _MAX_SIZE=%hu", _bucket.Size(), _MAX_SIZE);
 
-        _bucket.Insert<T>(vec, vec_id, _dimention);
+        _bucket.Insert(vec, vec_id);
         return RetStatus::Success();
     }
 
-    inline RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector& swapped_vec) {
-        AssertFatal(_bucket._size > min_size, LOG_TAG_DEFAULT, 
-                    "Node does not have enough elements: size=%hu, min_size=%hu.", _bucket._size, min_size);
+    inline RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector<T, _DIM>& swapped_vec) {
+        AssertFatal(_bucket.Size() > _MIN_SIZE, LOG_TAG_DEFAULT, 
+                    "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
 
-        _bucket.Delete<T>(vec_id, _dimention, swapped_vec_id, swapped_vec);
+        _bucket.Delete(vec_id, swapped_vec_id, swapped_vec);
         return RetStatus::Success();
     }
 
-    inline RetStatus KNearestNeighbours(const Vector& query, size_t k, 
-            std::priority_queue<std::pair<double, VectorID>, 
-            std::vector<std::pair<double, VectorID>>, 
-            Similarity<T>>& neighbours) {
+    inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k, uint16_t sample_size,
+            std::vector<std::pair<double, VectorID>>& neighbours, Reverse_Similarity<T, _DIM> _cmp) const {
 
         AssertFatal(k > 0, LOG_TAG_DEFAULT, "Number of neighbours should not be 0");
-        AssertFatal(_bucket._size >= min_size, LOG_TAG_DEFAULT, 
-            "Node does not have enough elements: size=%hu, min_size=%hu.", _bucket._size, min_size);
-            AssertFatal(_bucket._size <= max_size, LOG_TAG_DEFAULT, 
-                "Node has too many elements: size=%hu, max_size=%hu.", _bucket._size, max_size);
+        AssertFatal(_bucket.Size() >= _MIN_SIZE, LOG_TAG_DEFAULT, 
+            "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
+        AssertFatal(_bucket.Size() <= _MAX_SIZE, LOG_TAG_DEFAULT, 
+            "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
 
-        AssertFatal(neighbours.size() < k, LOG_TAG_DEFAULT, 
-                "Node cannot give more vectors than it contains. size=%lu, k=%lu", neighbours.size(), k);
+        AssertFatal(sample_size > 0, LOG_TAG_DEFAULT, 
+                "sample_size cannot be 0");
+    
+        AssertFatal(neighbours.size() <= k, LOG_TAG_DEFAULT, 
+            "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
+        
+        if (sample_size > _bucket.Size()) {
+            sample_size = _bucket.Size()
+        }
 
-        for (uint16_t i = 0; i < _bucket._size; ++i) {
-            double distance = (*_dist)(query, _bucket.Get_Vector<T>(i, _dimention));
-            neighbours.push({distance, _bucket.Get_VectorID(i)});
-            if (neighbours.size() == k) {
-                break;
+        // TODO a more efficient and accurate sampling method should be implemented rather than only checking the n first elements
+        // TODO after using a more efficient sampling method, we should also handle the case where there is no sampling
+        for (uint16_t i = 0; i < sample_size; ++i) {
+            const VectorPair<T, _DIM> vec = _bucket[i];
+            double distance = (*_dist)(query, vec.vector);
+            neighbours.emplace_back(distance vec.id);
+            std::push_heap(neighbours.begin(), neighbours.end(), _cmp);
+            if (neighbours.size() > k) {
+                std::pop_heap(neighbours.begin(), neighbours.end(), _cmp)
+                neighbours.pop_back();
             }
         }
+
+        AssertFatal(neighbours.size() <= k, LOG_TAG_DEFAULT, 
+            "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
         return RetStatus::Success();
     }
  
     inline uint16_t Size() const {
-        return _bucket._size;
+        return _bucket.Size();
     }
 
     inline bool Is_Leaf() {
@@ -76,68 +83,76 @@ public:
     }
 
     inline bool Is_Full() {
-        return _bucket._size == max_size;
+        return _bucket.Size() == _MAX_SIZE;
     }
 
     inline bool Is_Almost_Empty() {
-        return _bucket._size == min_size;
+        return _bucket.Size() == _MIN_SIZE;
     }
 
-    inline VectorID Find_Nearest(const Vector& query) const {
-        double best_dist = (*_dist)(query, _bucket.beg, _dimention);
-        VectorID best_vect = _bucket._ids[0];
+    inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
+        AssertFatal(_bucket.Size() >= _MIN_SIZE, LOG_TAG_DEFAULT, 
+            "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
+        AssertFatal(_bucket.Size() <= _MAX_SIZE, LOG_TAG_DEFAULT, 
+            "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
+
+        VectorPair<T, _DIM> best_vec = _bucket[0];
+        double best_dist = (*_dist)(query, best_vec.vector);
         
-        for (uint16_t i = 1; i < _bucket._size; ++i) {
-            Vector next_vec = (T*)(_bucket.beg) + (i * _dimention);
-            double new_dist = (*_dist)(query, next_vec, _dimention);
+        for (uint16_t i = 1; i < _bucket.Size(); ++i) {
+            VectorPair<T, _DIM> next_vec = _bucket[i];
+            double new_dist = (*_dist)(query, next_vec.vector);
             if ((*_dist)(new_dist, best_dist)) {
                 best_dist = new_dist;
-                best_vect = _bucket._ids[i];
+                best_vec = std::move(next_vec);
             }
         }
 
-        return best_vect;
+        return best_vec.id;
     }
 
     inline void* Get_Parent_Node() {
         return parent;
     }
 
+    inline bool Is_Leaf() const {
+        return _centroid_id.Is_Leaf();
+    }
+
+    inline uint8_t Level() const {
+        return _centroid_id._level;
+    }
+
 protected:
 
-    Distance<T>* _dist;
-    uint16_t _dimention;
+    Distance<T, _DIM>* _dist;
     VectorID _centroid_id;
-    Vector _centroid;
-    VectorSet _bucket;
+    Vector<T, _DIM> _centroid;
+    VectorSet<T, _DIM, _MAX_SIZE> _bucket;
     void* parent;
 
 // friend class VectorIndex;
 };
 
-template <typename T, uint16_t ki_min, uint16_t ki_max, uint16_t kl_min, uint16_t kl_max>
+template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX>
 class VectorIndex {
-static_assert(ki_min > 0);
-static_assert(ki_max > ki_min);
-static_assert(kl_min > 0);
-static_assert(kl_max > kl_min);
+static_assert(KI_MIN > 0);
+static_assert(KI_MAX > KI_MIN);
+static_assert(KL_MIN > 0);
+static_assert(KL_MAX > KL_MIN);
 
 protected:
-    typedef Copper_Node<T, ki_min, ki_max> Internal_Node;
-    typedef Copper_Node<T, kl_min, kl_max> Leaf_Node;
+    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX> Internal_Node;
+    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX> Leaf_Node;
 
-    Distance<T>* _dist;
-    uint16_t _dimention;
+    Distance<T, _DIM>* _dist;
     size_t _size;
-    Buffer_Manager<T, ki_min, ki_max, kl_min, kl_max> _bufmgr;
+    Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX> _bufmgr;
     VectorID _root;
     std::vector<VectorID> _last_id_per_level;
-    uint16_t _internal_search;
-    uint16_t _leaf_search;
-    uint16_t _vector_search;
     uint8_t _levels;
 
-    inline Leaf_Node* Find_Leaf(const Vector& query) const {
+    inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
         AssertFatal(_root != INVALID_VECTOR_ID, LOG_TAG_DEFAULT, "Invalid root ID.");
         AssertFatal(_root.Is_Centroid(), LOG_TAG_DEFAULT, "Invalid root ID -> root should be a centroid.");
         AssertFatal(_levels > 1, LOG_TAG_DEFAULT, "Height of the tree should be at least two but is %hhu.", _levels);
@@ -148,15 +163,19 @@ protected:
         VectorID next = _root;
 
         while (!next.Is_Leaf()) {
+            AssertFatal(next != INVALID_VECTOR_ID, LOG_TAG_DEFAULT, "Invalid vector id:%lu", next._id);
             Internal_Node* node = _bufmgr.Get_Node(next);
-            AssertFatal(node != nullptr, LOG_TAG_DEFAULT, "Invisible Node with id %lu.", next._id);
+            AssertFatal(node != nullptr, LOG_TAG_DEFAULT, "Invisible node with id %lu.", next._id);
             next = node->Find_Nearest(query);
         }
 
+        AssertFatal(next != INVALID_VECTOR_ID, LOG_TAG_DEFAULT, "Invalid vector id:%lu", next._id);
+        AssertFatal(next.Is_Leaf(), LOG_TAG_DEFAULT, "Invalid leaf vector id:%lu", next._id);
         return _bufmgr.Get_Leaf(next);
     }
 
     inline VectorID Next_ID(uint8_t level) {
+        AssertFatal(_levels == _last_id_per_level.size(), LOG_TAG_DEFAULT, "Height info is corrupted: _levels=%hhu, Height=%lu.", _levels, _last_id_per_level.size());
         AssertFatal(_levels > 1, LOG_TAG_DEFAULT, "Height of the tree should be at least two but is %hhu.", _levels);
         AssertFatal(level < _levels, LOG_TAG_DEFAULT, "Input level(%hhu) should be less than height of the tree(%hhu)."
                 , level, _levels);
@@ -166,13 +185,13 @@ protected:
     }
 public:
 
-    inline RetStatus Insert(const Vector& vec, VectorID& vec_id) {
-        vec_id = Next_ID(0);
+    inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id) {
+        vec_id = Next_ID(0); // vectors are at level 0
         Leaf_Node* leaf = Find_Leaf(vec);
         RetStatus rc = RetStatus::Success();
         AssertFatal(leaf != nullptr, LOG_TAG_DEFAULT, "Leaf not found.");
-
-        if (leaf.Is_Full()) {
+        
+        if (leaf->Is_Full()) {
             // todo split
             CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Split is not implemented.");
         }
@@ -201,7 +220,7 @@ public:
             CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Merge is not implemented.");
         }
 
-        Vector swapped_vector = INVALID_VECTOR;
+        Vector<T, _DIM> swapped_vector = Vector<T, _DIM>::NEW_INVALID();
         VectorID swapped_vector_id = INVALID_VECTOR_ID;
 
         rc = leaf->Delete(vec_id, swapped_vector_id, swapped_vector);
@@ -215,16 +234,33 @@ public:
         return rc;
     }
 
-    inline RetStatus KNearestNeighbours(const Vector& query, size_t k, std::vector<VectorID>& neighbours) {
+    inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k,
+                                        uint16_t _internal_k, uint16_t _leaf_k,
+                                        std::vector<VectorID>& neighbours, 
+                                        uint16_t _internal_search = KI_MAX,
+                                        uint16_t _leaf_search = KI_MAX, uint16_t _vector_search = KL_MAX, 
+                                        bool sort = true) {
+
         AssertFatal(_root != INVALID_VECTOR_ID, LOG_TAG_DEFAULT, "Invalid root ID.");
         AssertFatal(_root.Is_Centroid(), LOG_TAG_DEFAULT, "Invalid root ID -> root should be a centroid.");
-        AssertFatal(query != INVALID_VECTOR, LOG_TAG_DEFAULT, "Invalid query vector.");
+        AssertFatal(query.Is_Valid(), LOG_TAG_DEFAULT, "Invalid query vector.");
         AssertFatal(k > 0, LOG_TAG_DEFAULT, "Number of neighbours cannot be 0.");
         AssertFatal(_levels > 1, LOG_TAG_DEFAULT, "Height of the tree should be at least two but is %hhu.", _levels);
 
-        std::priority_queue<std::pair<double, VectorID>
-            , std::vector<std::pair<double, VectorID>>, Similarity<T>> 
-                heap_stack{_dist}, heap_store{_dist};
+        AssertFatal(_internal_k > 0, LOG_TAG_DEFAULT, "Number of internal node neighbours cannot be 0.");
+        AssertFatal(_leaf_k > 0, LOG_TAG_DEFAULT, "Number of leaf neighbours cannot be 0.");
+
+        AssertFatal(_internal_search > 0, LOG_TAG_DEFAULT, "Internal search sample size cannot be 0.");
+        AssertFatal(_leaf_search > 0, LOG_TAG_DEFAULT, "Leaf search sample size cannot be 0.");
+        AssertFatal(_vector_search > 0, LOG_TAG_DEFAULT, "Vector search sample size cannot be 0.");
+        
+        Reverse_Similarity<T, _DIM> _rcmp{_dist};
+        
+        std::vector<std::pair<double, VectorID>> heap_stack;
+        heap_stack.reserve(k + 1);
+        neighbours.clear();
+        neighbours.reserve(k + 1);
+
         RetStatus rc = RetStatus::Success();
 
         VectorID node_id;
@@ -235,23 +271,34 @@ public:
             Leaf_Node* root = _bufmgr.Get_Leaf(_root);
             AssertFatal(root != nullptr, LOG_TAG_DEFAULT, "Root vector is null.");
 
-            rc = root->KNearestNeighbours(query, _vector_search, heap_store);
+            rc = root->ApproximateKNearestNeighbours(query, k, _vector_search, neighbours, _rcmp);
             AssertFatal(rc.Is_OK(), LOG_TAG_DEFAULT, "ANN search failed at leaf root with err(%s).", rc.Msg());
-            goto Neighbour_Extraction;
+            if (sort) {
+                std::sort_heap(neighbours.begin(), neighbours.end(), Similarity<T, _DIM>{_dist})
+            }
+            return rc;
         }
 
         node_id = _root;
         node = _bufmgr.Get_Node(node_id);
         AssertFatal(node != nullptr, LOG_TAG_DEFAULT, "Failed to get node with id %lu.", node_id._id);
-        heap_stack.push({(*_dist)(query, node, _dimention), node_id});
+        heap_stack.push_back({(*_dist)(query, node), node_id});
+        std::push_heap(heap_stack.begin(), heap_stack.end(), _rcmp);
         level = node_id._level;
 
         while (level > 1) {
-            uint16_t search_threshold = (level > 2 ? _internal_search : _leaf_search);
+            uint16_t search_k = _internal_k;
+            uint16_t search_sampling = _internal_search;
+            if (level == 2) { // todo unlikely
+                search_k = _leaf_k;
+                search_sampling = _leaf_search;
+            }
 
-            while (!heap_stack.empty() && heap_store.size() < search_threshold) {
-                std::pair<double, VectorID> dist_id_pair = heap_stack.top();
-                heap_stack.pop();
+            while (!heap_stack.empty()) {
+                std::pop_heap(heap_stack.begin(), heap_stack.end(), _rcmp);
+                std::pair<double, VectorID> dist_id_pair = heap_stack.back();
+                heap_stack.pop_back();
+
                 AssertFatal(level == dist_id_pair.second._level, LOG_TAG_DEFAULT, 
                     "Level mismatch detected: level(%hhu) != dist_id_pair.level(%hhu).",
                     level, dist_id_pair.second._level);
@@ -262,12 +309,12 @@ public:
                 node = _bufmgr.Get_Node(dist_id_pair.second);
                 AssertFatal(node != nullptr, LOG_TAG_DEFAULT, "Failed to get node with id %lu.",
                             dist_id_pair.second);
-                rc = node->KNearestNeighbours(query, search_threshold, heap_store);
+                rc = node->ApproximateKNearestNeighbours(query, search_k, search_sampling, neighbours, _rcmp);
                 AssertFatal(rc.Is_OK(), LOG_TAG_DEFAULT, "ANN search failed at node(%lu) with err(%s).", 
                             dist_id_pair.second, rc.Msg());
             }
 
-            std::swap(heap_stack, heap_store);
+            std::swap(heap_stack, neighbours);
             --level;
         }
         
@@ -278,9 +325,11 @@ public:
         AssertFatal(level == 1, LOG_TAG_DEFAULT, 
             "level(%hhu) is not 1", level);
 
-        while (!heap_stack.empty() && heap_store.size() < _vector_search) {
-            std::pair<double, VectorID> dist_id_pair = heap_stack.top();
-            heap_stack.pop();
+        while (!heap_stack.empty()) {
+            std::pop_heap(heap_stack.begin(), heap_stack.end(), _rcmp);
+            std::pair<double, VectorID> dist_id_pair = heap_stack.back();
+            heap_stack.pop_back();
+
             AssertFatal(level == dist_id_pair.second._level, LOG_TAG_DEFAULT, 
                     "Level mismatch detected: level(%hhu) != dist_id_pair.level(%hhu).",
                     level, dist_id_pair.second._level);
@@ -291,28 +340,13 @@ public:
             node = _bufmgr.Get_Leaf(dist_id_pair.second);
             AssertFatal(node != nullptr, LOG_TAG_DEFAULT, "Failed to get node with id %lu.",
                             dist_id_pair.second);
-            rc = node->KNearestNeighbours(query, _vector_search, heap_store);
+            rc = node->ApproximateKNearestNeighbours(query, k, _vector_search, neighbours, _rcmp);
             AssertFatal(rc.Is_OK(), LOG_TAG_DEFAULT, "ANN search failed at node(%lu) with err(%s).", 
                             dist_id_pair.second, rc.Msg());
         }
         
-        Neighbour_Extraction:
-        
-        neighbours.clear();
-        size_t num_neigbours = std::min(k, heap_store.size());
-        neighbours.resize(num_neigbours);
-
-        while (num_neigbours > 0) {
-            AssertFatal(!heap_store.empty(), LOG_TAG_DEFAULT, "Heap store should not be empty.");
-            --num_neigbours;
-            neighbours[num_neigbours] = heap_store.top().second;
-
-            AssertFatal(neighbours[num_neigbours] != INVALID_VECTOR_ID, LOG_TAG_DEFAULT,
-                "Invalid vector id in the heap store.");
-
-            AssertFatal(neighbours[num_neigbours].Is_Vector(), LOG_TAG_DEFAULT, "Centroid vector in the heap_store");
-            
-            heap_store.pop();
+        if (sort) {
+            std::sort_heap(neighbours.begin(), neighbours.end(), Similarity<T, _DIM>{_dist})
         }
         return rc;
     }

@@ -180,34 +180,54 @@ inline bool Pass_Level(uint8_t level) {
 #ifdef ENABLE_TEST_LOGGING
 
 #define CLOG(level, tag, msg, ...) \
-    if (copper::Pass_Min_Level((level)) || copper::Pass_Tag((tag))) {\
-        if (copper::Pass_Level((level))){\
-            copper::Log((level), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
-                        std::chrono::system_clock::to_time_t\
-                            (std::chrono::system_clock::now()),\
-                        __FILE__, __PRETTY_FUNCTION__, __LINE__,\
-                        std::hash<std::thread::id>{}(std::this_thread::get_id()));\
+    do {\
+        if (copper::Pass_Min_Level((level)) || copper::Pass_Tag((tag))) {\
+            if (copper::Pass_Level((level))){\
+                copper::Log((level), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
+                            std::chrono::system_clock::to_time_t\
+                                (std::chrono::system_clock::now()),\
+                            __FILE__, __PRETTY_FUNCTION__, __LINE__,\
+                            std::hash<std::thread::id>{}(std::this_thread::get_id()));\
+            }\
         }\
-    }
+    } while(0)
+
+#define CLOG_IF_TRUE(cond, level, tag, msg, ...) \
+    do {\
+        if ((cond)){\
+            CLOG((level), (tag),  (msg) __VA_OPT__(,) __VA_ARGS__);\
+        }\
+    } while(0)
+
+#define CLOG_IF_FALSE(cond, level, tag, msg, ...) \
+    do {\
+        if (!(cond)){\
+            CLOG((level), (tag),  (msg) __VA_OPT__(,) __VA_ARGS__);\
+        }\
+    } while(0)
 
 // todo add unlikely to assert conditions
 #ifdef ENABLE_ASSERTS
 #define AssertFatal(cond, tag, msg, ...) \
-    if (!(cond)){\
-        char _TMP_DEBUG[sizeof((msg))+19] = "Assertion Failed: ";\
-        strcat(_TMP_DEBUG+18, (msg));\
-        CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
-    }
+    do {\
+        if (!(cond)){\
+            char _TMP_DEBUG[sizeof((msg))+19] = "Assertion Failed: ";\
+            strcat(_TMP_DEBUG+18, (msg));\
+            CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+        }\
+    } while(0)
 
 #ifdef ASSERT_ERROR_PANIC
 #define AssertError(cond, tag, msg, ...) AssertFatal((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
 #else
 #define AssertError(cond, tag, msg, ...) \
-    if (!(cond)){\
-        char _TMP_DEBUG[sizeof((msg))+19] = "Assertion Failed: ";\
-        strcat(_TMP_DEBUG+18, (msg));\
-        CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
-    }
+    do {\
+        if (!(cond)){\
+            char _TMP_DEBUG[sizeof((msg))+19] = "Assertion Failed: ";\
+            strcat(_TMP_DEBUG+18, (msg));\
+            CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+        }\
+    } while(0)
 #endif
 
 #else
@@ -217,6 +237,9 @@ inline bool Pass_Level(uint8_t level) {
 #else
 
 #define CLOG(level, tag, msg, ...)
+#define CLOG_IF_TRUE(cond, level, tag, msg, ...)
+#define CLOG_IF_FALSE(cond, level, tag, msg, ...)
+
 #ifdef ENABLE_ASSERTS
 #define AssertFatal(cond, tag, msg, ...) assert((cond))
 #else
