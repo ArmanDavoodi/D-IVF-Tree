@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 #include "debug.h"
 

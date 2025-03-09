@@ -377,53 +377,22 @@ protected:
     uint16_t _size;
 };
 
-template<typename T, uint16_t _DIM>
-class Distance {
+template<typename V_TYPE, uint16_t _DIM, typename D_TYPE = double>
+class L2_Distance {
 public:
-    virtual double operator()(const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) const = 0;
-    virtual bool operator()(const double& a, const double& b) const = 0;
-};
-
-template<typename T, uint16_t _DIM>
-class L2_Distance : public Distance<T, _DIM> {
-public:
-    double operator()(const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) const {
+    D_TYPE operator()(const Vector<V_TYPE, _DIM>& a, const Vector<V_TYPE, _DIM>& b) const {
         AssertFatal(a.Is_Valid(), LOG_TAG_ANY, "a is invalid");
         AssertFatal(b.Is_Valid(), LOG_TAG_ANY, "b is invalid");
 
-        double dist = 0;
+        D_TYPE dist = 0;
         for (size_t i = 0; i < _DIM; ++i) {
-            dist += (double)(a[i] - b[i]) * (double)(a[i] - b[i]);
+            dist += (D_TYPE)(a[i] - b[i]) * (D_TYPE)(a[i] - b[i]);
         }
         return dist;
     }
 
-    bool operator()(const double& a, const double& b) const {
+    bool operator()(const D_TYPE& a, const D_TYPE& b) const {
         return a < b;
-    }
-};
-
-template<typename T, uint16_t _DIM>
-struct Reverse_Similarity {
-public:
-    Distance<T, _DIM>* _dist;
-
-    Reverse_Similarity(Distance<T, _DIM>* dist) : _dist(dist) {}
-
-    bool operator()(const std::pair<double, VectorID>& a, const std::pair<double, VectorID>& b) const {
-        return (*_dist)(a.first, b.first);
-    }
-};
-
-template<typename T, uint16_t _DIM>
-struct Similarity {
-public:
-    Distance<T, _DIM>* _dist;
-
-    Similarity(Distance<T, _DIM>* dist) : _dist(dist) {}
-
-    bool operator()(const std::pair<double, VectorID>& a, const std::pair<double, VectorID>& b) const {
-        return !((*_dist)(a.first, b.first));
     }
 };
 
