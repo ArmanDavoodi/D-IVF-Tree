@@ -199,27 +199,28 @@ protected:
         memcpy(_data, &vec[0], _DIM * sizeof(T));
     }
 
-    inline Vector<T, _DIM> Deep_Copy(T* loc = nullptr, bool delete_on_destroy = true) const {
+    inline Vector<T, _DIM> Deep_Copy(T* loc, bool delete_on_destroy = true) const {
         return Vector<T, _DIM>(*this, loc, delete_on_destroy);
     }
 
 friend class VectorSet;
 friend class VectorPair;
+friend class Buffer_Manager;
 };
 
 template<typename T, uint16_t _DIM>
 struct VectorPair {
-    VectorPair(VectorID _id, T* data) : id(_id), vector(data, false) {}
+    VectorPair(VectorID _id, T* data, bool delete_on_destroy=true) : id(_id), vector(data, delete_on_destroy) {}
     VectorPair(const VectorPair<T, _DIM>& other) : id(other.id), vector(other.vector) {}
     VectorPair(VectorPai<T, _DIM>&& other) noexcept : id(other.id), vector(std::move(other.vector)) {}
 
-    inline VectorPai<T, _DIM>& operator=(const VectorPair<T, _DIM>& other) {
+    inline VectorPair<T, _DIM>& operator=(const VectorPair<T, _DIM>& other) {
         id = other.id;
         vector = other.vector;
         return *this;
     }
 
-    inline VectorPai<T, _DIM>& operator=(VectorPair<T, _DIM>&& other) {
+    inline VectorPair<T, _DIM>& operator=(VectorPair<T, _DIM>&& other) {
         id = other.id;
         vector = std::move(other.vector);
         return *this;
@@ -278,6 +279,16 @@ public:
         return _ids[idx]; 
     }
 
+    inline bool Contains(VectorID id) const {
+        for (uint16_t index = 0; index < _size; ++index) {
+            if (_ids[index] == id) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     inline uint16_t Get_Index(VectorID id) const {
         AssertFatal(_size > 0, LOG_TAG_ANY, "Bucket is Empty");
 
@@ -288,6 +299,7 @@ public:
             }
         }
 
+        AssertFatal(index < _size, LOG_TAG_ANY, "vector id:%lu not found", id._id);
         AssertFatal(_ids[index] == id, LOG_TAG_ANY, "_ids[%hu](%lu) != id(%lu)", index, _ids[index]._id, id._id);
         return index;
     }
@@ -295,7 +307,7 @@ public:
     inline Vector<T, _DIM> Get_Vector(uint16_t idx) {
         AssertFatal(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
         
-        return Vector<T, _DIM>(_beg + idx, false);
+        return Vector<T, _DIM>(_beg + (idx * _DIM), false);
     }
 
     inline Vector<T, _DIM> Get_Vector_By_ID(VectorID id) {
@@ -305,7 +317,7 @@ public:
     inline const Vector<T, _DIM> Get_Vector(uint16_t idx) const {
         AssertFatal(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
         
-        return Vector<T, _DIM>(_beg + idx, false);
+        return Vector<T, _DIM>(_beg + (idx * _DIM), false);
     }
 
     inline const Vector<T, _DIM> Get_Vector_By_ID(VectorID id) const {
@@ -313,17 +325,17 @@ public:
     }
 
     inline VectorPair<T, _DIM> operator[](uint16_t idx) {
-        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + idx, false)
+        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + (idx * _DIM), false)
     }
 
     inline const VectorPair<T, _DIM> operator[](uint16_t idx) const {
-        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + idx, false)
+        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + (idx * _DIM), false)
     }
 
     inline Vector<T, _DIM> Get_Vector_Copy(uint16_t idx) const {
         AssertFatal(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
         
-        return Vector<T, _DIM>(_beg + idx);
+        return Vector<T, _DIM>(_beg + (idx * _DIM));
     }
 
     inline Vector<T, _DIM> Get_Vector_Copy_By_ID(VectorID id) const {
@@ -336,10 +348,9 @@ public:
         uint16_t idx = Get_Index(id);
         
         if (idx != _size - 1) {
-            swapped_vec = Get_Vector(_size - 1, _DIM);
+            memcpy(_beg + (idx * _DIM * sizeof(T)), _beg + ((_size - 1) * _DIM), _DIM * sizeof(T));
             swapped_vec_id = Get_VectorID(_size - 1);
-
-            memcpy(_beg + (idx * _DIM * sizeof(T)), swapped_vec._data, _DIM * sizeof(T));
+            swapped_vec = Get_Vector(idx, _DIM);
             _ids[idx] = swapped_vec_id;
         }
         else {

@@ -36,10 +36,9 @@ constexpr uint64_t INVALID_VECTOR_ID = 0;
 union VectorID {
     uint64_t _id;
     struct {
-        uint8_t _creator_node_id;
-        uint8_t _level; // == 0 for leaves
-        uint16_t a2;
-        uint32_t a3;
+        uint64_t _creator_node_id : 8;
+        uint64_t _level : 8; // == 0 for vectors, == 1 for leaves
+        uint64_t val : 48;
     };
 
     VectorID() : _id(INVALID_VECTOR_ID) {}
@@ -48,13 +47,15 @@ union VectorID {
 
     inline VectorID Get_Next_ID() {
         VectorID new_id(_id);
-        new_id.a3++;
-        if (new_id.a3 == 0) {
-            new_id.a2++;
+        new_id.val++;
+        if (new_id.val == 0) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_BASIC, "Vector ID overflow. Base ID:%lu.", _id);
+            new_id._level = _level;
+            if (new_id == INVALID_VECTOR_ID) {
+                new_id.val++;
+            }
         }
-        if (new_id == INVALID_VECTOR_ID) {
-            new_id.a3++;
-        }
+
         return new_id;
     }
 
@@ -68,6 +69,10 @@ union VectorID {
 
     inline bool Is_Leaf() const {
         return _level == 1;
+    }
+
+    inline bool Is_Internal_Node() const {
+        return _level > 1;
     }
 
     inline void operator=(const VectorID& ID) {
@@ -126,6 +131,10 @@ union VectorID {
     //     return _id > ID;
     // }
 };
+
+typedef void* Address;
+
+constexpr Address INVALID_ADDRESS = nullptr;
 
 };
 

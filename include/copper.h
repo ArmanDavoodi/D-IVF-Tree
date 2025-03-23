@@ -14,6 +14,7 @@ template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
 class Copper_Node {
 static_assert(_MIN_SIZE > 0);
 static_assert(_MAX_SIZE > _MIN_SIZE);
+static_assert(_MAX_SIZE / 2 >= _MIN_SIZE);
 static_assert(_DIM > 0);
 public:
 
@@ -44,6 +45,17 @@ public:
 
         _bucket.Delete(vec_id, swapped_vec_id, swapped_vec);
         return RetStatus::Success();
+    }
+
+    inline RetStatus MigrateTo(VectorID vec_id, Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _DIST>* other, 
+                               VectorID& swapped_vec_id, Vector<T, _DIM>& swapped_vec) {
+        
+        // todo
+    }
+
+    inline RetStatus MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _DIST>* other) {
+
+        // todo
     }
 
     inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k, uint16_t sample_size,
@@ -87,23 +99,7 @@ public:
 
         return RetStatus::Success();
     }
- 
-    inline uint16_t Size() const {
-        return _bucket.Size();
-    }
-
-    inline bool Is_Leaf() {
-        return _centroid_id._level == 1;
-    }
-
-    inline bool Is_Full() {
-        return _bucket.Size() == _MAX_SIZE;
-    }
-
-    inline bool Is_Almost_Empty() {
-        return _bucket.Size() == _MIN_SIZE;
-    }
-
+    
     inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
         AssertFatal(_bucket.Size() >= _MIN_SIZE, LOG_TAG_DEFAULT, 
             "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
@@ -125,29 +121,45 @@ public:
         return best_vec.id;
     }
 
-    inline void* Get_Parent_Node() {
-        return parent;
+    inline uint16_t Size() const {
+        return _bucket.Size();
+    }
+
+    inline VectorID CentroidID() const {
+        return _centroid_id;
     }
 
     inline bool Is_Leaf() const {
-        return _centroid_id.Is_Leaf();
+        return _centroid_id._level == 1;
+    }
+
+    inline bool Is_Full() const {
+        return _bucket.Size() >= _MAX_SIZE;
+    }
+
+    inline bool Is_Almost_Empty() const {
+        return _bucket.Size() <= _MIN_SIZE;
     }
 
     inline uint8_t Level() const {
         return _centroid_id._level;
     }
 
+    inline bool Contains(VectorID id) const {
+        return _bucket.Contains(id)
+    }
+
+    inline Vector<T, _DIM> Compute_Current_Centroid() const {
+        // todo
+    }
+
 protected:
-
-    
-
     _DIST _dist;
     _DIST_ID_PAIR_SIMILARITY _more_similar{_dist};
 
     VectorID _centroid_id;
     Vector<T, _DIM> _centroid;
     VectorSet<T, _DIM, _MAX_SIZE> _bucket;
-    void* parent; // it is always an Internal_Node
 
 // friend class VectorIndex;
 };
@@ -158,8 +170,10 @@ template <typename T, uint16_t _DIM,
 class VectorIndex {
 static_assert(KI_MIN > 0);
 static_assert(KI_MAX > KI_MIN);
+static_assert(KI_MAX / 2 >= KI_MIN);
 static_assert(KL_MIN > 0);
 static_assert(KL_MAX > KL_MIN);
+static_assert(KL_MAX / 2 >= KL_MIN);
 static_assert(std::is_invocable_r_v<DIST_TYPE, _DIST(), const Vector<T, _DIM>&, const Vector<T, _DIM>&>, 
               "_DIST must be callable on two vectors and return DIST_TYPE");
 static_assert(std::is_invocable_r_v<bool(), _DIST(), const DIST_TYPE&, const DIST_TYPE&>, 
@@ -196,11 +210,14 @@ protected:
     VectorID _root;
     std::vector<VectorID> _last_id_per_level;
     uint8_t _levels;
+    uint16_t _split_internal;
+    uint16_t _split_leaf;
 
     inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
         AssertFatal(_root != INVALID_VECTOR_ID, LOG_TAG_DEFAULT, "Invalid root ID.");
         AssertFatal(_root.Is_Centroid(), LOG_TAG_DEFAULT, "Invalid root ID -> root should be a centroid.");
         AssertFatal(_levels > 1, LOG_TAG_DEFAULT, "Height of the tree should be at least two but is %hhu.", _levels);
+        AssertFatal(_levels == (uint8_t)(_last_id_per_level.size()), LOG_TAG_DEFAULT, "_levels:%hhu dose not represent num levels:%lu.", _levels, _last_id_per_level.size());
 
         if (_root.Is_Leaf()) {
             return _bufmgr.Get_Leaf(_root);
@@ -228,6 +245,51 @@ protected:
         _last_id_per_level[level] = _last_id_per_level[level].Get_Next_ID();
         return _last_id_per_level[level];
     }
+    
+    inline Internal_Node* Internal_Split(Internal_Node* node, const Vector<T, _DIM>& vec) {
+        
+    }
+
+    // TODO: a clustring algorithm implementation
+    inline Leaf_Node* Split(Leaf_Node* node, const Vector<T, _DIM>& vec) {
+        AssertFatal(node != nullptr, LOG_TAG_DEFAULT, "node should not be nullptr.");
+        AssertFatal(node->Is_Full(), LOG_TAG_DEFAULT, "node should be full.");
+
+        uint16_t split = (KL_MAX / _split_leaf < KL_MIN ? KL_MAX / KL_MIN : _split_leaf);
+        if (split < 2) {
+            split = 2;
+        }
+
+        uint16_t num_vec_per_node = KL_MAX / split;
+        uint16_t num_vec_rem = KL_MAX % split;
+        Leaf_Node* new_leaves[split] = {nullptr};
+        new_leaves[0] = node;
+        uint16_t leaf_idx = 0;
+        Internal_Node* Parent = _bufmgr->Get_Parent(node->CentroidID());
+
+        for (uint16_t i = num_vec_per_node + num_vec_rem; i < KL_MAX; ++i) {
+            if ((i - num_vec_rem) % num_vec_per_node == 0) {
+                leaf_idx++;
+                AssertFatal(leaf_idx < split, LOG_TAG_DEFAULT, "Too many leaves.");
+                VectorID leaf_id = Next_ID(1);
+                // we should pass the centroid address to the new_leaf function
+                // or we can remove the centroid vector from the nodes as we do not use them
+                // we use buffer manager and their id to get the vector
+                // also consumes less memory
+                new_leaves[leaf_idx] = _bufmgr->New_Leaf(leaf_id);
+            }
+            node->MigrateLastVectorTo(new_leaves[leaf_idx]);
+            if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
+                // compute centroid
+                // insert to parent
+                // update buffer -> parent address and centroid address
+            }
+        }
+
+        // compute centroid for new_leaves[0] and update buffer
+
+    }
+
 public:
 
     inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id) {
@@ -307,7 +369,7 @@ public:
         RetStatus rc = RetStatus::Success();
 
         VectorID node_id = _root;
-        uint8_t level = node_id._level;
+        uint8_t level = (uint8_t)node_id._level;
         Vector<T, _DIM> node_centroid_vector = _bufmgr->Get_Vector(node_id);
         AssertFatal(node_centroid_vector.Is_Valid(), LOG_TAG_DEFAULT, "Could not get vector with id %lu.", node_id._id);
         
@@ -334,8 +396,8 @@ public:
                 
                 AssertFatal(dist_id_pair.first != INVALID_VECTOR_ID, LOG_TAG_DEFAULT,
                             "Invalid vector id at top of the stack.");
-                AssertFatal(level == dist_id_pair.first._level, LOG_TAG_DEFAULT, 
-                    "Level mismatch detected: level(%hhu) != dist_id_pair.level(%hhu).",
+                AssertFatal(level == (uint8_t)(dist_id_pair.first._level), LOG_TAG_DEFAULT, 
+                    "Level mismatch detected: level(%hhu) != dist_id_pair.level(%lu).",
                     level, dist_id_pair.first._level);
 
                 // TODO pin and unpin for eviction in disaggregated setup
@@ -355,9 +417,9 @@ NEIGHBOUR_EXTRACTION:
         
         AssertFatal(!heap_stack.empty(), LOG_TAG_DEFAULT, "Heap stack should not be empty.");
         
-        AssertFatal(heap_stack.top().first._level == 1, LOG_TAG_DEFAULT, 
-                    "node level of the current stack top(%hhu) is not 1", heap_stack.top().first._level);
-        AssertFatal(level == 1, LOG_TAG_DEFAULT, 
+        AssertFatal(heap_stack.top().first._level == 1ul, LOG_TAG_DEFAULT, 
+                    "node level of the current stack top(%lu) is not 1", heap_stack.top().first._level);
+        AssertFatal(level == 1hhu, LOG_TAG_DEFAULT, 
             "level(%hhu) is not 1", level);
         
         while (!heap_stack.empty()) {
@@ -367,8 +429,8 @@ NEIGHBOUR_EXTRACTION:
             
             AssertFatal(dist_id_pair.first != INVALID_VECTOR_ID, LOG_TAG_DEFAULT,
                 "Invalid vector id at top of the stack.");
-            AssertFatal(level == dist_id_pair.first._level, LOG_TAG_DEFAULT, 
-                    "Level mismatch detected: level(%hhu) != dist_id_pair.level(%hhu).",
+            AssertFatal(level == (uint8_t)(dist_id_pair.first._level), LOG_TAG_DEFAULT, 
+                    "Level mismatch detected: level(%hhu) != dist_id_pair.level(%lu).",
                     level, dist_id_pair.first._level);
 
 
