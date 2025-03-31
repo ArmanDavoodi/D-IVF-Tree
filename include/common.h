@@ -41,38 +41,28 @@ union VectorID {
         uint64_t val : 48;
     };
 
+    static constexpr uint64_t MAX_ID_PER_LEVEL = 0x0000FFFFFFFFFFFF;
+    static constexpr uint64_t VECTOR_LEVEL = 0;
+    static constexpr uint64_t LEAF_LEVEL = 1;
+
     VectorID() : _id(INVALID_VECTOR_ID) {}
     VectorID(const uint64_t& ID) : _id(ID) {}
     VectorID(const VectorID& ID) : _id(ID._id) {}
 
-    inline VectorID Get_Next_ID() {
-        VectorID new_id(_id);
-        new_id.val++;
-        if (new_id.val == 0) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_BASIC, "Vector ID overflow. Base ID:%lu.", _id);
-            new_id._level = _level;
-            if (new_id == INVALID_VECTOR_ID) {
-                new_id.val++;
-            }
-        }
-
-        return new_id;
-    }
-
     inline bool Is_Centroid() const {
-        return _level > 0;
+        return _level > VECTOR_LEVEL;
     }
 
     inline bool Is_Vector() const {
-        return _level == 0;
+        return _level == VECTOR_LEVEL;
     }
 
     inline bool Is_Leaf() const {
-        return _level == 1;
+        return _level == LEAF_LEVEL;
     }
 
     inline bool Is_Internal_Node() const {
-        return _level > 1;
+        return _level > LEAF_LEVEL;
     }
 
     inline void operator=(const VectorID& ID) {

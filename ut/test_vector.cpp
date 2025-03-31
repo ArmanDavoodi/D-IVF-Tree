@@ -105,7 +105,7 @@ int main() {
 
     copper::VectorID last_vec = 
 
-    uset.Delete<uint16_t>(2, dim, svid, sv);
+    uset.Delete<uint16_t>(2, dim, svid, sv);// delete now returns an update instead
 
     AssertError(svid == )
     //  todo check VectorSet functions
