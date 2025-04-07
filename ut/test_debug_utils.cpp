@@ -8,7 +8,7 @@ int main() {
     CLOG(LOG_LEVEL_WARNING, LOG_TAG_ANY, "Hello World! This is a WARNING.");
     CLOG(LOG_LEVEL_ERROR, LOG_TAG_ANY, "Hello World! This is a ERROR.");
     
-    CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DEFAULT, "Hello World! This is a DEBUG With DEFAULT TAG.");
+    CLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Hello World! This is a DEBUG With DEFAULT TAG.");
 
 
     AssertError(true, LOG_TAG_ANY, "This is a true assert error");

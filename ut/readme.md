@@ -12,7 +12,7 @@ To rebuild the tests without cleaning the build and out directories, use fbuild_
     * LOG_LEVEL_DEBUG    5
 
 * LOG_TAG:                  Is a bitmap used to ignore different subsets of logs
-    * LOG_TAG_DEFAULT             0b00001
+    * LOG_TAG_BASIC             0b00001
     * LOG_TAG_NOT_IMPLEMENTED     0b00010
     * LOG_TAG_TEST                0b00100
     * LOG_TAG_BASIC               0b01000

@@ -90,11 +90,10 @@ public:
         return true;
     }
 
-    inline VectorID Record_Root(Address node_address) {
-        AssertFatal(node_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Invalid node address"); 
+    inline VectorID Record_Root() {
         VectorID _id = Next_ID(directory.size());       
         directory.emplace_back();
-        directory[id._level].emplace_back(INVALID_ADDRESS, node_address);
+        directory[id._level].emplace_back(INVALID_ADDRESS, INVALID_ADDRESS);
         return _id;
     }
 
@@ -144,8 +143,8 @@ public:
 
 protected:
     inline VectorID Next_ID(uint8_t level) {
-        AssertFatal(directory.size() > 1, LOG_TAG_DEFAULT, "Height of the tree should be at least two but is %hhu.", directory.size());
-        AssertFatal((level < directory.size()) || (level == directory.size() && !directory.back().empty()), LOG_TAG_DEFAULT, "Input level(%hhu) should be less than height of the tree(%hhu)."
+        AssertFatal(directory.size() > 1, LOG_TAG_BASIC, "Height of the tree should be at least two but is %hhu.", directory.size());
+        AssertFatal((level < directory.size()) || (level == directory.size() && !directory.back().empty()), LOG_TAG_BASIC, "Input level(%hhu) should be less than height of the tree(%hhu)."
                 , level, directory.size());
 
         VectorID _id;

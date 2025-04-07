@@ -26,7 +26,7 @@
 #define LOG_LEVEL_LOG 4
 #define LOG_LEVEL_DEBUG 5
 
-#define LOG_TAG_DEFAULT 0b1
+#define LOG_TAG_BASIC 0b1
 #define LOG_TAG_NOT_IMPLEMENTED 0b10
 #define LOG_TAG_TEST 0b100
 #define LOG_TAG_BASIC 0b1000
@@ -123,39 +123,58 @@ inline void sleep(uint64_t sec) {
     std::this_thread::sleep_for(std::chrono::seconds(sec));
 }
 
-inline void tostr(const std::time_t _time, char* mbstr)
+inline void timetostr(const std::chrono::_V2::system_clock::time_point _time, char* mbstr)
 {
-    // convert to system time: = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())
-    std::strftime(mbstr, 100, "%F:%r", std::localtime(&_time));
+    std::time_t _t = std::chrono::system_clock::to_time_t(_time);
+    auto _m = _time - std::chrono::time_point_cast<std::chrono::seconds>(_time);
+    size_t num_chars = std::strftime(mbstr, 100, "%F:%r", std::localtime(&_t));
+    sprintf(mbstr + num_chars, ".%lu", std::chrono::duration_cast<std::chrono::microseconds>(_m).count());
 }
 
-inline const char* tostr(uint8_t level)
+inline const char* leveltostr(uint8_t level)
 {
     switch (level)
     {
     case LOG_LEVEL_PANIC:
-        return COLORF_PURPLE "Panic" COLORF_RESET;
+        return COLORF_PURPLE "Panic";
     case LOG_LEVEL_ERROR:
-        return COLORF_RED "Error" COLORF_RESET;
+        return COLORF_RED "Error";
     case LOG_LEVEL_WARNING:
-        return COLORF_YELLOW "Warning" COLORF_RESET;
+        return COLORF_YELLOW "Warning";
     case LOG_LEVEL_LOG:
-        return COLORF_CYAN "Log" COLORF_RESET;
+        return COLORF_CYAN "Log";
     case LOG_LEVEL_DEBUG:
-        return COLORF_GREEN "Debug" COLORF_RESET;
+        return COLORF_GREEN "Debug";
     default:
         return "Undefined";
     }
 }
 
-inline void Log(uint8_t level, const Log_Msg& msg, const std::time_t _time,
+inline const char* tagtostr(uint8_t tag)
+{
+    switch (tag)
+    {
+    case LOG_TAG_BASIC:
+        return "(Basic)" COLORF_RESET;
+    case LOG_TAG_NOT_IMPLEMENTED:
+        return "(Not Implemented)" COLORF_RESET;
+    case LOG_TAG_TEST:
+        return "(Test)" COLORF_RESET;
+    case LOG_TAG_COPPER_NODE:
+        return "(Copper Node)" COLORF_RESET;
+    default:
+        return "(Undefined)" COLORF_RESET;
+    }
+}
+
+inline void Log(uint8_t level, uint8_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
                 const char* file_name, const char* func_name, size_t line, 
                 size_t thread_id) {
 
     char time_str[100];
-    tostr(_time, time_str); // todo add coloring if needed
-    fprintf(OUT, "%s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n", 
-            tostr(level), time_str, file_name, line, func_name, thread_id, msg._msg);
+    timetostr(_time, time_str); // todo add coloring if needed 
+    fprintf(OUT, "%s%s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n", 
+        leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
     fflush(OUT);
     if (level == LOG_LEVEL_PANIC) {
         sleep(1); // wait to make sure everything is flushed
@@ -180,54 +199,67 @@ inline bool Pass_Level(uint8_t level) {
 #ifdef ENABLE_TEST_LOGGING
 
 #define CLOG(level, tag, msg, ...) \
-    do {\
+    (do {\
         if (copper::Pass_Min_Level((level)) || copper::Pass_Tag((tag))) {\
             if (copper::Pass_Level((level))){\
-                copper::Log((level), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
-                            std::chrono::system_clock::to_time_t\
-                                (std::chrono::system_clock::now()),\
+                copper::Log((level), (tag), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
+                            std::chrono::system_clock::now(),\
                             __FILE__, __PRETTY_FUNCTION__, __LINE__,\
                             std::hash<std::thread::id>{}(std::this_thread::get_id()));\
             }\
         }\
-    } while(0)
+    } while(0))
 
 #define CLOG_IF_TRUE(cond, level, tag, msg, ...) \
-    do {\
+    (do {\
         if ((cond)){\
-            CLOG((level), (tag),  (msg) __VA_OPT__(,) __VA_ARGS__);\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+19] = "Condition True(" #cond ") | ";\
+            strcat(_TMP_DEBUG+sizeof((#cond))+19, (msg));\
+            CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
-    } while(0)
+    } while(0))
 
 #define CLOG_IF_FALSE(cond, level, tag, msg, ...) \
-    do {\
+    (do {\
         if (!(cond)){\
-            CLOG((level), (tag),  (msg) __VA_OPT__(,) __VA_ARGS__);\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition False(" #cond ") | ";\
+            strcat(_TMP_DEBUG+sizeof((#cond))+20, (msg));\
+            CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
-    } while(0)
+    } while(0))
 
 // todo add unlikely to assert conditions
 #ifdef ENABLE_ASSERTS
 #define AssertFatal(cond, tag, msg, ...) \
-    do {\
+    (do {\
         if (!(cond)){\
-            char _TMP_DEBUG[sizeof((msg))+19] = "Assertion Failed: ";\
-            strcat(_TMP_DEBUG+18, (msg));\
-            CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+            if (sizeof((msg)) == 0){\
+                char _TMP_DEBUG[sizeof((#cond))+20] = "Assertion \'" #cond "\' Failed.";\
+                CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG);\
+            }\
+            else{\
+                char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
+                strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
+                CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+            }\
         }\
-    } while(0)
+    } while(0))
 
 #ifdef ASSERT_ERROR_PANIC
 #define AssertError(cond, tag, msg, ...) AssertFatal((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
 #else
 #define AssertError(cond, tag, msg, ...) \
-    do {\
-        if (!(cond)){\
-            char _TMP_DEBUG[sizeof((msg))+19] = "Assertion Failed: ";\
-            strcat(_TMP_DEBUG+18, (msg));\
+    (do {\
+        if (sizeof((msg)) == 0){\
+            char _TMP_DEBUG[sizeof((#cond))+20] = "Assertion \'" #cond "\' Failed.";\
+            CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG);\
+        }\
+        else{\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
+            strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
-    } while(0)
+    } while(0))
 #endif
 
 #else
@@ -252,7 +284,5 @@ inline bool Pass_Level(uint8_t level) {
 #define AssertError(cond, tag, msg, ...)
 #endif
 #endif
-
-
 
 #endif
