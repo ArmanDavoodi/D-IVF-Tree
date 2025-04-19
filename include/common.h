@@ -11,19 +11,23 @@
 namespace copper {
 
 struct RetStatus {
-    bool OK;
+    enum {
+        SUCCESS,
+        FAIL
+    } stat;
+
     const char* message;
 
     static inline RetStatus Success() {
-        return RetStatus{true, "OK"};
+        return RetStatus{SUCCESS, "OK"};
     }
 
     static inline RetStatus Fail(const char* msg) {
-        return RetStatus{false, msg};
+        return RetStatus{FAIL, msg};
     }
 
     inline bool Is_OK() const {
-        return OK;
+        return stat == SUCCESS;
     }
 
     inline const char* Msg() const {
@@ -38,7 +42,7 @@ union VectorID {
     struct {
         uint64_t _creator_node_id : 8;
         uint64_t _level : 8; // == 0 for vectors, == 1 for leaves
-        uint64_t val : 48;
+        uint64_t _val : 48;
     };
 
     static constexpr uint64_t MAX_ID_PER_LEVEL = 0x0000FFFFFFFFFFFF;
@@ -125,6 +129,32 @@ union VectorID {
 typedef void* Address;
 
 constexpr Address INVALID_ADDRESS = nullptr;
+
+
+// Todo: Log VectorIndex: VectorIndex(RootID:%s(%lu, %lu, %lu), # levels:lu, # nodes:lu, # vectors:lu, size:lu)
+
+#define VECTORID_LOG_FMT "%s(%lu, %lu, %lu)"
+#define VECTORID_LOG(vid) ((vid) == INVALID_VECTOR_ID ? "[INV]" : ""), vid._creator_node_id, vid._level, vid._val
+
+#define NODE_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ")"
+#define NODE_PTR_LOG(node)\
+    ((node) == nullptr ? "NULL" :\
+        ((node)->CentroidID() == INVALID_VECTOR_ID ? "INV" : ((node)->CentroidID().Is_Vector() ? "Non-Centroid" : \
+            ((node)->CentroidID().Is_Leaf() ? "Leaf" : ((node)->CentroidID().Is_Internal_Node() ? "Internal" \
+                : "UNDEF"))))),\
+    ((node) == nullptr ? 0 : decltype(*(node))::_MIN_SIZE_), ((node) == nullptr ? 0 : decltype(*(node))::_MAX_SIZE_),\
+    VECTORID_LOG(((node) == nullptr ? INVALID_VECTOR_ID : (node)->CentroidID())), ((node) == nullptr ? 0 : (node)->Size()),\
+    VECTORID_LOG(((node) == nullptr ? INVALID_VECTOR_ID : (node)->ParentID()))
+
+#define NODE_VAL_LOG(node)\
+    ((node).CentroidID() == INVALID_VECTOR_ID ? "INV" : ((node).CentroidID().Is_Vector() ? "Non-Centroid" : \
+            ((node).CentroidID().Is_Leaf() ? "Leaf" : ((node).CentroidID().Is_Internal_Node() ? "Internal" \
+                : "UNDEF")))),\
+    decltype((node))::_MIN_SIZE_, decltype((node))::_MAX_SIZE_,\
+    VECTORID_LOG((node).CentroidID()), ((node).Size()), VECTORID_LOG((node).ParentID())
+
+#define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%lu)"
+#define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
 };
 

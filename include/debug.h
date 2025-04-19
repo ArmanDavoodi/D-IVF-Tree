@@ -8,6 +8,7 @@
 #ifdef TESTING
 #undef BUILD
 #define BUILD DEBUG
+#define FAULT_INJECTION // todo: add to compile time flags
 #endif
 
 // might add other modes as well later and consider not completly disabling the logs in release
@@ -85,6 +86,9 @@
 #include <cstdio>
 #include <stdarg.h>
 #include <string.h>
+#include <atomic>
+#include <semaphore>
+#include <map>
 
 #ifdef __clang__
 #include <experimental/source_location>
@@ -230,12 +234,11 @@ inline bool Pass_Level(uint8_t level) {
 
 // todo add unlikely to assert conditions
 #ifdef ENABLE_ASSERTS
-#define AssertFatal(cond, tag, msg, ...) \
+#define FatalAssert(cond, tag, msg, ...) \
     (do {\
         if (!(cond)){\
             if (sizeof((msg)) == 0){\
-                char _TMP_DEBUG[sizeof((#cond))+20] = "Assertion \'" #cond "\' Failed.";\
-                CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG);\
+                CLOG(LOG_LEVEL_PANIC, (tag),  "Assertion \'" #cond "\' Failed.");\
             }\
             else{\
                 char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
@@ -246,13 +249,12 @@ inline bool Pass_Level(uint8_t level) {
     } while(0))
 
 #ifdef ASSERT_ERROR_PANIC
-#define AssertError(cond, tag, msg, ...) AssertFatal((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
+#define ErrorAssert(cond, tag, msg, ...) FatalAssert((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
 #else
-#define AssertError(cond, tag, msg, ...) \
+#define ErrorAssert(cond, tag, msg, ...) \
     (do {\
         if (sizeof((msg)) == 0){\
-            char _TMP_DEBUG[sizeof((#cond))+20] = "Assertion \'" #cond "\' Failed.";\
-            CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG);\
+            CLOG(LOG_LEVEL_ERROR, (tag),  "Assertion \'" #cond "\' Failed.");\
         }\
         else{\
             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
@@ -263,8 +265,8 @@ inline bool Pass_Level(uint8_t level) {
 #endif
 
 #else
-#define AssertFatal(cond, tag, msg, ...)
-#define AssertError(cond, tag, msg, ...)
+#define FatalAssert(cond, tag, msg, ...)
+#define ErrorAssert(cond, tag, msg, ...)
 #endif
 #else
 
@@ -273,16 +275,42 @@ inline bool Pass_Level(uint8_t level) {
 #define CLOG_IF_FALSE(cond, level, tag, msg, ...)
 
 #ifdef ENABLE_ASSERTS
-#define AssertFatal(cond, tag, msg, ...) assert((cond))
+#define FatalAssert(cond, tag, msg, ...) assert((cond))
 #else
-#define AssertFatal(cond, tag, msg, ...)
+#define FatalAssert(cond, tag, msg, ...)
 #endif
 
 #ifdef ASSERT_ERROR_PANIC
-#define AssertError(cond, tag, msg, ...) AssertFatal((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
+#define ErrorAssert(cond, tag, msg, ...) FatalAssert((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
 #else
-#define AssertError(cond, tag, msg, ...)
+#define ErrorAssert(cond, tag, msg, ...)
+#endif
 #endif
 #endif
 
+#ifdef FAULT_INJECTION
+static inline std::map<std::string, std::binary_semaphore> FI_MAP;
+#define FAULT_INJECTION_INIT(name) FI_MAP.try_emplace((name), 0)
+#define FAULT_INJECTION_DELETE(name) FI_MAP.erase((name))
+#define FAULT_INJECTION_WAIT(name) FI_MAP[(name)].acquire()
+#define FAULT_INJECTION_SIGNAL(name) FI_MAP[(name)].release()
+// todo:
+// #define FAULT_INJECTION_WAIT_UNTIL(name, duration) FI_MAP[(name)].try_acquire_for((duration))
+// #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...) \
+//     (do {\
+//         if (sizeof((msg)) == 0){\
+//             CLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );\
+//         }\
+//         else{\
+//             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
+//             strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
+//             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+//         }\
+//     } while(0))
+// #define FAULT_INJECTION_WAIT_UNTIL_PANIC(name, duration) FI_MAP[(name)].try_acquire_for((duration))
+#else
+#define FAULT_INJECTION_INIT(name)
+#define FAULT_INJECTION_DELETE(name)
+#define FAULT_INJECTION_WAIT(name)
+#define FAULT_INJECTION_SIGNAL(name)
 #endif

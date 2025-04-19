@@ -54,11 +54,11 @@ int main() {
                 continue;
 
             udist[i][j] = ((*_du)(uset.Get_Vector<uint16_t>(i, dim), uset.Get_Vector<uint16_t>(j, dim), dim));
-            AssertError(udist[i][j] == b_udist[i][j], LOG_TAG_TEST, 
+            ErrorAssert(udist[i][j] == b_udist[i][j], LOG_TAG_TEST, 
                         "uint16 distance calculation err: calc=%f, ground_truth=%f", udist[i][j], b_udist[i][j]);
             udist_pq.push({udist[i][j], uset.Get_Index(i)});
             fdist[i][j] = ((*_df)(fset.Get_Vector<float>(i, dim), fset.Get_Vector<float>(j, dim), dim));
-            AssertError(fdist[i][j] == b_fdist[i][j], LOG_TAG_TEST, 
+            ErrorAssert(fdist[i][j] == b_fdist[i][j], LOG_TAG_TEST, 
                 "float distance calculation err: calc=%f, ground_truth=%f", fdist[i][j], b_fdist[i][j]);
             fdist_pq.push({fdist[i][j], fset.Get_Index(i)});
         }
@@ -70,8 +70,8 @@ int main() {
         double p = udist_pq.top().first;
         udist_pq.pop();
         if (!udist_pq.empty()) {
-            AssertError(p >= udist_pq.top().first, LOG_TAG_TEST, "udist_pq: Distance should be more than the next element.(top should be the least similar)")
-            AssertError((*_du)(udist_pq.top().first, p), LOG_TAG_TEST, "udist_pq: distance comparator should show that top is less similar");
+            ErrorAssert(p >= udist_pq.top().first, LOG_TAG_TEST, "udist_pq: Distance should be more than the next element.(top should be the least similar)")
+            ErrorAssert((*_du)(udist_pq.top().first, p), LOG_TAG_TEST, "udist_pq: distance comparator should show that top is less similar");
         }
     }
 
@@ -81,8 +81,8 @@ int main() {
         double p = fdist_pq.top().first;
         fdist_pq.pop();
         if (!fdist_pq.empty()) {
-            AssertError(p >= fdist_pq.top().first, LOG_TAG_TEST, "fdist_pq: Distance should be more than the next element.(top should be the least similar)")
-            AssertError((*_df)(fdist_pq.top().first, p), LOG_TAG_TEST, "fdist_pq: distance comparator should show that top is less similar");
+            ErrorAssert(p >= fdist_pq.top().first, LOG_TAG_TEST, "fdist_pq: Distance should be more than the next element.(top should be the least similar)")
+            ErrorAssert((*_df)(fdist_pq.top().first, p), LOG_TAG_TEST, "fdist_pq: distance comparator should show that top is less similar");
         }
     }
 
@@ -107,7 +107,7 @@ int main() {
 
     uset.Delete<uint16_t>(2, dim, svid, sv);// delete now returns an update instead
 
-    AssertError(svid == )
+    ErrorAssert(svid == )
     //  todo check VectorSet functions
     
     //  todo check VectorIndex operations

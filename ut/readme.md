@@ -41,8 +41,8 @@ For example running './run_ut.sh test_debug_utils' will run the tests associated
 
 ## Notes:
 * If ENABLE_TEST_LOGGING is not defined but ENABLE_ASSERTS is, then all asserts will be changed to simple asserts
-    and all tags will be ignored. Moreover, In this case, if ASSERT_ERROR_PANIC is defined, AssertError will 
-    behave similar to AssertFatal. Otherwise, they are also ignored.
+    and all tags will be ignored. Moreover, In this case, if ASSERT_ERROR_PANIC is defined, ErrorAssert will 
+    behave similar to FatalAssert. Otherwise, they are also ignored.
 
 ## TODO
 Currently, run_ut.sh only accepts one file per run. Therefore, we can add the option to:

@@ -11,9 +11,9 @@ int main() {
     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Hello World! This is a DEBUG With DEFAULT TAG.");
 
 
-    AssertError(true, LOG_TAG_ANY, "This is a true assert error");
-    AssertError(false, LOG_TAG_ANY, "This is a false assert error %d %s", 50, "hi");
-    AssertFatal(true, LOG_TAG_ANY, "This is a true assert fatal");
-    // AssertFatal(false, LOG_TAG_ANY, "This is a true assert fatal");
+    ErrorAssert(true, LOG_TAG_ANY, "This is a true assert error");
+    ErrorAssert(false, LOG_TAG_ANY, "This is a false assert error %d %s", 50, "hi");
+    FatalAssert(true, LOG_TAG_ANY, "This is a true assert fatal");
+    // FatalAssert(false, LOG_TAG_ANY, "This is a true assert fatal");
     CLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC.");
 }
