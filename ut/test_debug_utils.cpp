@@ -270,7 +270,10 @@ protected:
 int main(int argc, char *argv[]) {
     Test test;
     std::vector<std::string> tests_to_run;
-    size_t num_runs = Parse_Args(argc, argv, test.all_tests, tests_to_run);
+    std::set<std::string> default_black_list = {"fatal_assert_tag_test", "fatal_assert_test", 
+                                                "panic_tag_comb_test", "panic_test"};
+
+    size_t num_runs = Parse_Args(argc, argv, test.all_tests, tests_to_run, default_black_list);
     if (num_runs == 0) {
         return 1;
     }

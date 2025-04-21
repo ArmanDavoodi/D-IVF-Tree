@@ -78,7 +78,7 @@ void Print_Usage() {
 }
 
 void Print_Help() {
-    fprintf(stderr, " * If no input is given, runs all of the tests.\n");
+    fprintf(stderr, " * If no input is given, runs all of the tests except the tests in the default black list.\n");
     fprintf(stderr, " * If no options are used, will only run the given tests.\n");
     fprintf(stderr, " * Black list and -u flags take priority over white list and -r\n");
     fprintf(stderr, " * Input regex syntax should follow the syntax of egrep regex.\n");
@@ -116,13 +116,14 @@ inline UT_Parse_State Parse_Flag(const char& f) {
 }
 
 size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests, 
-                std::vector<std::string>& tests_to_run) {
+                std::vector<std::string>& tests_to_run, const std::set<std::string>& default_black_list) {
     fprintf(stderr, "Start parse input...\n");
 
     UT_Input input(all_tests);
     UT_Parse_State state = INV;
     bool seen_option[NUM_STATES] = {false};
     bool non_list_option = false;
+    bool use_default = true;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
@@ -150,6 +151,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
 
             ++i;
             non_list_option = true;
+            use_default = false;
             arg = std::string(argv[i] + 1, argv[i] + strlen(argv[i]) - 1);
             input.fmt = new std::regex(arg.c_str(), std::regex_constants::egrep);
             break;
@@ -165,6 +167,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
 
             ++i;
             non_list_option = true;
+            use_default = false;
             arg = std::string(argv[i] + 1, argv[i] + strlen(argv[i]) - 1);
             input.bfmt = new std::regex(arg.c_str(), std::regex_constants::egrep);
             break;
@@ -177,6 +180,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
             }
 
             non_list_option = true;
+            use_default = false;
             ++i;
             for (; i < argc; ++i) {
                 arg = std::string(argv[i]);
@@ -204,6 +208,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
             }
 
             non_list_option = true;
+            use_default = false;
             ++i;
             for (; i < argc; ++i) {
                 arg = std::string(argv[i]);
@@ -284,6 +289,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
             }
 
             ++i;
+            use_default = false;
             for (; i < argc; ++i) {
                 arg = std::string(argv[i]);
                 if (arg.size() == 2 || arg[0] == '-') {
@@ -314,6 +320,10 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
         }
 
         seen_option[state] = true;
+    }
+
+    if (use_default) {
+        input.black_list = default_black_list;
     }
 
     input.Get_Tests_To_Run(tests_to_run);
