@@ -47,7 +47,7 @@ public:
 
     }
 
-    void level_test() {
+    bool level_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_ANY, "Hello World! This is a DEBUG."
@@ -60,9 +60,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_test.");
+
+        return true;
     }
 
-    void tag_test() {
+    bool tag_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::tag_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a basic tag."
@@ -77,9 +79,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::tag_test.");
+
+        return true;
     }
 
-    void level_tag_comb_test() {
+    bool level_tag_comb_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_tag_comb_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Hello World! This is a DEBUG with basic tag."
@@ -128,9 +132,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_tag_comb_test.");
+
+        return true;
     }
 
-    void error_assert_test() {
+    bool error_assert_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_test for %luth time...", try_count);
 
         ErrorAssert(true, LOG_TAG_ANY, "This is a true assert error."
@@ -139,9 +145,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_test.");
+
+        return true;
     }
 
-    void error_assert_tag_test() {
+    bool error_assert_tag_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_tag_test for %luth time...", try_count);
 
         ErrorAssert(true, LOG_TAG_BASIC, "This is a true assert error with basic tag."
@@ -167,9 +175,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_tag_test.");
+
+        return true;
     }
 
-    void fatal_assert_tag_test() {
+    bool fatal_assert_tag_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_tag_test for %luth time...", try_count);
 
         FatalAssert(true, LOG_TAG_BASIC, "This is a true fatal assert with basic tag."
@@ -195,9 +205,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_tag_test.");
+
+        return true;
     }
 
-    void fatal_assert_test() {
+    bool fatal_assert_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_test for %luth time...", try_count);
 
         FatalAssert(true, LOG_TAG_ANY, "This is a true fatal assert."
@@ -206,9 +218,11 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_test.");
+
+        return true;
     }
     
-    void panic_tag_comb_test() {
+    bool panic_tag_comb_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_tag_comb_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC, "Hello World! This is a PANIC with basic tag."
@@ -223,15 +237,19 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_tag_comb_test.");
+
+        return true;
     }
 
-    void panic_test() {
+    bool panic_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_test.");
+
+        return true;
     }
 
     void Init(size_t t_count) {
@@ -251,8 +269,13 @@ public:
             auto it = tests.find(test_name);
             if (it != tests.end()) {
                 fprintf(stderr, "Test found.\n");
-                void (Test::*test)() = it->second;
-                (this->*test)();
+                bool (Test::*test)() = it->second;
+                if ((this->*test)()) {
+                    fprintf(stderr, COLORF_GREEN "Test %s was ran successfully!" COLORF_RESET "\n", test_name.c_str());
+                }
+                else {
+                    fprintf(stderr, COLORF_RED "Test %s failed!" COLORF_RESET "\n", test_name.c_str());
+                }
             }  
             else {
                 fprintf(stderr, "Error: Test %s not found!\n", test_name.c_str());
@@ -262,7 +285,7 @@ public:
 
     std::set<std::string> all_tests;
 protected:
-    std::map<std::string, void (Test::*)()> tests;
+    std::map<std::string, bool (Test::*)()> tests;
     std::map<std::string, int> test_priority;
     size_t try_count = 0;
 };
