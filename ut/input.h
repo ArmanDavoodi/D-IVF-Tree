@@ -306,6 +306,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
 
     if (use_default) {
         input.black_list = default_black_list;
+        input.white_list = input._tests;
     }
 
     input.Get_Tests_To_Run(tests_to_run);
