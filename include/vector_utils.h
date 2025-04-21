@@ -216,6 +216,7 @@ protected:
 friend class VectorSet;
 friend class VectorPair;
 friend class Buffer_Manager;
+friend class Test;
 };
 
 template<typename T, uint16_t _DIM>
@@ -410,6 +411,8 @@ protected:
     T _beg[_DIM * _CAP];
     VectorID _ids[_DIM * _CAP];
     uint16_t _size;
+
+friend class Test;
 };
 
 template<typename V_TYPE, uint16_t _DIM, typename D_TYPE = double>

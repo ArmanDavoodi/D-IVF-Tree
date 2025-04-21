@@ -52,6 +52,11 @@
         "semaphore": "cpp",
         "stop_token": "cpp",
         "thread": "cpp",
-        "map": "cpp"
+        "map": "cpp",
+        "bitset": "cpp",
+        "set": "cpp",
+        "regex": "cpp",
+        "istream": "cpp",
+        "sstream": "cpp"
     }
 }

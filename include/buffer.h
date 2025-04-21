@@ -30,11 +30,11 @@ public:
         FatalAssert(node_id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Node Id");
         FatalAssert(node_id.Is_Internal_Node(), LOG_TAG_BASIC, "Node ID:%lu is not an internal node", node_id._id);
         FatalAssert(directory.size() > node_id._level, LOG_TAG_BASIC, "Node ID:%lu level is out of bounds. max_level:%lu", node_id._id, directory.size());
-        FatalAssert(directory[node_id._level].size() > node_id.val, LOG_TAG_BASIC, "Node ID:%lu val is out of bounds. max_val:%lu", node_id._id, directory[node_id._level].size());
-        FatalAssert(directory[node_id._level][node_id.val].cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Node not found in the buffer. Node ID:%lu", node_id._id);
+        FatalAssert(directory[node_id._level].size() > node_id._val, LOG_TAG_BASIC, "Node ID:%lu val is out of bounds. max_val:%lu", node_id._id, directory[node_id._level].size());
+        FatalAssert(directory[node_id._level][node_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Node not found in the buffer. Node ID:%lu", node_id._id);
         
-        Internal_Node* node = (Internal_Node*)(directory[node_id._level][node_id.val].cluster_address);
-        FatalAssert(node->_centroid_id == node_id, LOG_TAG_BASIC, "Mismatch in ID. Base ID:%lu, Found ID:%lu", node_id._id, directory[node_id._level][node_id.val]->_centroid_id._id);
+        Internal_Node* node = (Internal_Node*)(directory[node_id._level][node_id._val].cluster_address);
+        FatalAssert(node->_centroid_id == node_id, LOG_TAG_BASIC, "Mismatch in ID. Base ID:%lu, Found ID:%lu", node_id._id, directory[node_id._level][node_id._val]->_centroid_id._id);
         
         return node;
     }
@@ -43,11 +43,11 @@ public:
         FatalAssert(leaf_id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Leaf Id");
         FatalAssert(leaf_id.Is_Leaf(), LOG_TAG_BASIC, "Leaf ID:%lu is not a leaf", leaf_id._id);
         FatalAssert(directory.size() > leaf_id._level, LOG_TAG_BASIC, "Leaf ID:%lu level is out of bounds. max_level:%lu", leaf_id._id, directory.size());
-        FatalAssert(directory[leaf_id._level].size() > leaf_id.val, LOG_TAG_BASIC, "Leaf ID:%lu val is out of bounds. max_val:%lu", leaf_id._id, directory[leaf_id._level].size());
-        FatalAssert(directory[leaf_id._level][leaf_id.val].cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Leaf not found in the buffer. Leaf ID:%lu", leaf_id._id);
+        FatalAssert(directory[leaf_id._level].size() > leaf_id._val, LOG_TAG_BASIC, "Leaf ID:%lu val is out of bounds. max_val:%lu", leaf_id._id, directory[leaf_id._level].size());
+        FatalAssert(directory[leaf_id._level][leaf_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Leaf not found in the buffer. Leaf ID:%lu", leaf_id._id);
         
-        Leaf_Node* leaf = (Leaf_Node*)(directory[leaf_id._level][leaf_id.val].cluster_address);
-        FatalAssert(leaf->_centroid_id == leaf_id, LOG_TAG_BASIC, "Mismatch in ID. Base ID:%lu, Found ID:%lu", leaf_id._id, directory[leaf_id._level][leaf_id.val]->_centroid_id._id);
+        Leaf_Node* leaf = (Leaf_Node*)(directory[leaf_id._level][leaf_id._val].cluster_address);
+        FatalAssert(leaf->_centroid_id == leaf_id, LOG_TAG_BASIC, "Mismatch in ID. Base ID:%lu, Found ID:%lu", leaf_id._id, directory[leaf_id._level][leaf_id._val]->_centroid_id._id);
         
         return leaf;
     }
@@ -56,10 +56,10 @@ public:
         FatalAssert(vec_id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Vector Id");
         FatalAssert(vec_id.Is_Vector(), LOG_TAG_BASIC, "Vector ID:%lu is not a vector", vec_id._id);
         FatalAssert(directory.size() > vec_id._level, LOG_TAG_BASIC, "Vector ID:%lu level is out of bounds. max_level:%lu", vec_id._id, directory.size());
-        FatalAssert(directory[vec_id._level].size() > vec_id.val, LOG_TAG_BASIC, "Vector ID:%lu val is out of bounds. max_val:%lu", vec_id._id, directory[vec_id._level].size());
-        FatalAssert(directory[vec_id._level][vec_id.val].cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Leaf not found in the buffer. Vector ID:%lu", vec_id._id);
+        FatalAssert(directory[vec_id._level].size() > vec_id._val, LOG_TAG_BASIC, "Vector ID:%lu val is out of bounds. max_val:%lu", vec_id._id, directory[vec_id._level].size());
+        FatalAssert(directory[vec_id._level][vec_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Leaf not found in the buffer. Vector ID:%lu", vec_id._id);
 
-        Leaf_Node* leaf = (Leaf_Node*)(directory[vec_id._level][vec_id.val].cluster_address);
+        Leaf_Node* leaf = (Leaf_Node*)(directory[vec_id._level][vec_id._val].cluster_address);
         FatalAssert(leaf->_centroid_id != INVALID_VECTOR_ID, LOG_TAG_BASIC,  "Invalid Leaf ID. Vector ID:%lu", vec_id._id);
         FatalAssert(leaf->_centroid_id.Is_Leaf(), LOG_TAG_BASIC,  "Cluster %lu is not a leaf. Vector ID:%lu", leaf->_centroid_id, vec_id._id);
         FatalAssert(leaf->Contains(vec_id), LOG_TAG_BASIC, "Parent leaf:%lu dose not contain the vector:%lu", leaf->_centroid_id, vec_id._id);
@@ -70,15 +70,15 @@ public:
     inline Vector<T, _DIM> Get_Vector(VectorID id) {
         FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Vector Id");
         FatalAssert(directory.size() > id._level, LOG_TAG_BASIC, "Vector ID:%lu level is out of bounds. max_level:%lu", id._id, directory.size());
-        FatalAssert(directory[id._level].size() > id.val, LOG_TAG_BASIC, "Vector ID:%lu val is out of bounds. max_val:%lu", id._id, directory[id._level].size());
-        FatalAssert(directory[id._level][id.val].vector_address != INVALID_ADDRESS , LOG_TAG_BASIC, "Vector not found in the buffer. Vector ID:%lu", id._id);
+        FatalAssert(directory[id._level].size() > id._val, LOG_TAG_BASIC, "Vector ID:%lu val is out of bounds. max_val:%lu", id._id, directory[id._level].size());
+        FatalAssert(directory[id._level][id._val].vector_address != INVALID_ADDRESS , LOG_TAG_BASIC, "Vector not found in the buffer. Vector ID:%lu", id._id);
 
-        return Vector<T, _DIM>(directory[vec_id._level][vec_id.val].vector_address, false);
+        return Vector<T, _DIM>(directory[vec_id._level][vec_id._val].vector_address, false);
     }
 
     inline bool In_Buffer(VectorID id) {
         FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Vector Id");
-        if (directory.size() <= id._level || directory[id._level].size() <= id.val) {
+        if (directory.size() <= id._level || directory[id._level].size() <= id._val) {
             return false;
         }
 
@@ -104,7 +104,7 @@ public:
         FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Vector Id");
         FatalAssert(vector_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Invalidating vector address. Vector ID:%lu", id._id); // TODO: reconsider when adding merge logic
         FatalAssert(In_Buffer(id), LOG_TAG_BASIC, "Vector does not exist in the buffer. Vector ID:%lu", id._id);
-        vectors[id._level][id.val].vector_address = vector_address;
+        vectors[id._level][id._val].vector_address = vector_address;
         return rs;
     }
 
@@ -113,7 +113,7 @@ public:
         FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "Invalid Vector Id");
         FatalAssert(cluster_address != INVALID_ADDRESS, LOG_TAG_BASIC, "Invalidating cluster address. Vector ID:%lu", id._id);
         FatalAssert(In_Buffer(id), LOG_TAG_BASIC, "Vector does not exist in the buffer. Vector ID:%lu", id._id);
-        vectors[id._level][id.val].cluster_address = cluster_address;
+        vectors[id._level][id._val].cluster_address = cluster_address;
         return rs;
     }
 
@@ -148,22 +148,24 @@ protected:
         _id._creator_node_id = 0; // todo for disaggregated
         _id._level = level;
         if (level == directory.size()) {
-            _id.val = 0;
+            _id._val = 0;
         }
         else {
             if (directory[level].size() > VectorID::MAX_ID_PER_LEVEL) {
                 CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC, "level %hhu is full.", level);
             }
-            _id.val = directory[level].size();
+            _id._val = directory[level].size();
         }
 
         if (_id == INVALID_VECTOR_ID) {
-            _id.val++;
+            _id._val++;
         }
         return _id;
     }
 
     std::vector<std::vector<VectorInfo>> directory;
+    
+friend class Test;
 };
 
 };

@@ -203,7 +203,7 @@ inline bool Pass_Level(uint8_t level) {
 #ifdef ENABLE_TEST_LOGGING
 
 #define CLOG(level, tag, msg, ...) \
-    (do {\
+    do {\
         if (copper::Pass_Min_Level((level)) || copper::Pass_Tag((tag))) {\
             if (copper::Pass_Level((level))){\
                 copper::Log((level), (tag), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
@@ -212,30 +212,30 @@ inline bool Pass_Level(uint8_t level) {
                             std::hash<std::thread::id>{}(std::this_thread::get_id()));\
             }\
         }\
-    } while(0))
+    } while(0)
 
 #define CLOG_IF_TRUE(cond, level, tag, msg, ...) \
-    (do {\
+    do {\
         if ((cond)){\
             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+19] = "Condition True(" #cond ") | ";\
             strcat(_TMP_DEBUG+sizeof((#cond))+19, (msg));\
             CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
-    } while(0))
+    } while(0)
 
 #define CLOG_IF_FALSE(cond, level, tag, msg, ...) \
-    (do {\
+    do {\
         if (!(cond)){\
             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition False(" #cond ") | ";\
             strcat(_TMP_DEBUG+sizeof((#cond))+20, (msg));\
             CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
-    } while(0))
+    } while(0)
 
 // todo add unlikely to assert conditions
 #ifdef ENABLE_ASSERTS
 #define FatalAssert(cond, tag, msg, ...) \
-    (do {\
+    do {\
         if (!(cond)){\
             if (sizeof((msg)) == 0){\
                 CLOG(LOG_LEVEL_PANIC, (tag),  "Assertion \'" #cond "\' Failed.");\
@@ -246,13 +246,13 @@ inline bool Pass_Level(uint8_t level) {
                 CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
             }\
         }\
-    } while(0))
+    } while(0)
 
 #ifdef ASSERT_ERROR_PANIC
 #define ErrorAssert(cond, tag, msg, ...) FatalAssert((cond), (tag), (msg)__VA_OPT__(,) __VA_ARGS__)
 #else
 #define ErrorAssert(cond, tag, msg, ...) \
-    (do {\
+    do {\
         if (sizeof((msg)) == 0){\
             CLOG(LOG_LEVEL_ERROR, (tag),  "Assertion \'" #cond "\' Failed.");\
         }\
@@ -261,7 +261,7 @@ inline bool Pass_Level(uint8_t level) {
             strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
-    } while(0))
+    } while(0)
 #endif
 
 #else
@@ -297,7 +297,7 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 // todo:
 // #define FAULT_INJECTION_WAIT_UNTIL(name, duration) FI_MAP[(name)].try_acquire_for((duration))
 // #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...) \
-//     (do {\
+//     do {\
 //         if (sizeof((msg)) == 0){\
 //             CLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );\
 //         }\
@@ -306,7 +306,7 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 //             strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
 //             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
 //         }\
-//     } while(0))
+//     } while(0)
 // #define FAULT_INJECTION_WAIT_UNTIL_PANIC(name, duration) FI_MAP[(name)].try_acquire_for((duration))
 #else
 #define FAULT_INJECTION_INIT(name)
