@@ -48,7 +48,7 @@ struct UT_Input {
         fprintf(stderr, "\n____________________________\n");
         fprintf(stderr, "# tries: %lu\nTests to run:\n", num_tries);
         for (std::string t : white_list) {
-            if (black_list.contains(t)) {
+            if (!_tests.contains(t) || black_list.contains(t)) {
                 continue;
             }
             tests_to_run.push_back(t);
@@ -189,12 +189,6 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
                     break;
                 }
 
-                if (!input._tests.contains(arg)) {
-                    fprintf(stderr, "Fatal: Test %s does not exists.\n", arg.c_str());
-                    Print_Usage();
-                    return 0;
-                }
-
                 input.white_list.insert(arg);
             }
             
@@ -215,12 +209,6 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
                 if (arg.size() == 2 || arg[0] == '-') {
                     --i;
                     break;
-                }
-
-                if (!input._tests.contains(arg)) {
-                    fprintf(stderr, "Fatal: Test %s does not exists.\n", arg.c_str());
-                    Print_Usage();
-                    return 0;
                 }
 
                 input.black_list.insert(arg);
@@ -295,12 +283,6 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
                 if (arg.size() == 2 || arg[0] == '-') {
                     --i;
                     break;
-                }
-
-                if (!input._tests.contains(arg)) {
-                    fprintf(stderr, "Fatal: Test %s does not exists.\n", arg.c_str());
-                    Print_Usage();
-                    return 0;
                 }
 
                 input.white_list.insert(arg);
