@@ -12,35 +12,35 @@
 class Test {
 public:
     Test() {
-        tests["level_test"] = Test::level_test;
-        tests["tag_test"] = Test::tag_test;
-        tests["level_tag_comb_test"] = Test::level_tag_comb_test;
-        tests["error_assert_test"] = Test::error_assert_test;
-        tests["error_assert_tag_test"] = Test::error_assert_tag_test;
-        tests["fatal_assert_tag_test"] = Test::fatal_assert_tag_test;
-        tests["fatal_assert_test"] = Test::fatal_assert_test;
-        tests["panic_tag_comb_test"] = Test::panic_tag_comb_test;
-        tests["panic_test"] = Test::panic_test;
+        tests["test_debug_util::level_test"] = Test::level_test;
+        tests["test_debug_util::tag_test"] = Test::tag_test;
+        tests["test_debug_util::level_tag_comb_test"] = Test::level_tag_comb_test;
+        tests["test_debug_util::error_assert_test"] = Test::error_assert_test;
+        tests["test_debug_util::error_assert_tag_test"] = Test::error_assert_tag_test;
+        tests["test_debug_util::fatal_assert_tag_test"] = Test::fatal_assert_tag_test;
+        tests["test_debug_util::fatal_assert_test"] = Test::fatal_assert_test;
+        tests["test_debug_util::panic_tag_comb_test"] = Test::panic_tag_comb_test;
+        tests["test_debug_util::panic_test"] = Test::panic_test;
 
-        test_priority["level_test"] = 0;
-        test_priority["tag_test"] = 1;
-        test_priority["level_tag_comb_test"] = 2;
-        test_priority["error_assert_test"] = 3;
-        test_priority["error_assert_tag_test"] = 4;
-        test_priority["fatal_assert_tag_test"] = 5;
-        test_priority["fatal_assert_test"] = 6;
-        test_priority["panic_tag_comb_test"] = 7;
-        test_priority["panic_test"] = 8;
+        test_priority["test_debug_util::level_test"] = 0;
+        test_priority["test_debug_util::tag_test"] = 1;
+        test_priority["test_debug_util::level_tag_comb_test"] = 2;
+        test_priority["test_debug_util::error_assert_test"] = 3;
+        test_priority["test_debug_util::error_assert_tag_test"] = 4;
+        test_priority["test_debug_util::fatal_assert_tag_test"] = 5;
+        test_priority["test_debug_util::fatal_assert_test"] = 6;
+        test_priority["test_debug_util::panic_tag_comb_test"] = 7;
+        test_priority["test_debug_util::panic_test"] = 8;
 
-        all_tests.insert("level_test");
-        all_tests.insert("tag_test");
-        all_tests.insert("level_tag_comb_test");
-        all_tests.insert("error_assert_test");
-        all_tests.insert("error_assert_tag_test");
-        all_tests.insert("fatal_assert_tag_test");
-        all_tests.insert("fatal_assert_test");
-        all_tests.insert("panic_tag_comb_test");
-        all_tests.insert("panic_test");
+        all_tests.insert("test_debug_util::level_test");
+        all_tests.insert("test_debug_util::tag_test");
+        all_tests.insert("test_debug_util::level_tag_comb_test");
+        all_tests.insert("test_debug_util::error_assert_test");
+        all_tests.insert("test_debug_util::error_assert_tag_test");
+        all_tests.insert("test_debug_util::fatal_assert_tag_test");
+        all_tests.insert("test_debug_util::fatal_assert_test");
+        all_tests.insert("test_debug_util::panic_tag_comb_test");
+        all_tests.insert("test_debug_util::panic_test");
     }
 
     ~Test() {
@@ -48,7 +48,7 @@ public:
     }
 
     void level_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running level_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_ANY, "Hello World! This is a DEBUG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -59,11 +59,11 @@ public:
         CLOG(LOG_LEVEL_ERROR, LOG_TAG_ANY, "Hello World! This is a ERROR."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of level_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_test.");
     }
 
     void tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running tag_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::tag_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -76,11 +76,11 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_ANY, "Hello World! This is any tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of tag_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::tag_test.");
     }
 
     void level_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running level_tag_comb_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_tag_comb_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Hello World! This is a DEBUG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -127,22 +127,22 @@ public:
         CLOG(LOG_LEVEL_ERROR, LOG_TAG_ANY, "Hello World! This is a ERROR with any tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of level_tag_comb_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_tag_comb_test.");
     }
 
     void error_assert_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running error_assert_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_test for %luth time...", try_count);
 
         ErrorAssert(true, LOG_TAG_ANY, "This is a true assert error."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(false, LOG_TAG_ANY, "This is a false assert error."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of error_assert_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_test.");
     }
 
     void error_assert_tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running error_assert_tag_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_tag_test for %luth time...", try_count);
 
         ErrorAssert(true, LOG_TAG_BASIC, "This is a true assert error with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -166,11 +166,11 @@ public:
         ErrorAssert(false, LOG_TAG_ANY, "This is a false assert error with any tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of error_assert_tag_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_tag_test.");
     }
 
     void fatal_assert_tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running fatal_assert_tag_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_tag_test for %luth time...", try_count);
 
         FatalAssert(true, LOG_TAG_BASIC, "This is a true fatal assert with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -194,22 +194,22 @@ public:
         FatalAssert(false, LOG_TAG_ANY, "This is a false fatal assert with any tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of fatal_assert_tag_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_tag_test.");
     }
 
     void fatal_assert_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running fatal_assert_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_test for %luth time...", try_count);
 
         FatalAssert(true, LOG_TAG_ANY, "This is a true fatal assert."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(false, LOG_TAG_ANY, "This is a false fatal assert."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of fatal_assert_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_test.");
     }
     
     void panic_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running panic_tag_comb_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_tag_comb_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC, "Hello World! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -222,16 +222,16 @@ public:
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC with any tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of panic_tag_comb_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_tag_comb_test.");
     }
 
     void panic_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running panic_test for %luth time...", try_count);
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_test for %luth time...", try_count);
 
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
             
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of panic_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_test.");
     }
 
     void Init(size_t t_count) {
@@ -270,8 +270,8 @@ protected:
 int main(int argc, char *argv[]) {
     Test test;
     std::vector<std::string> tests_to_run;
-    std::set<std::string> default_black_list = {"fatal_assert_tag_test", "fatal_assert_test", 
-                                                "panic_tag_comb_test", "panic_test"};
+    std::set<std::string> default_black_list = {"test_debug_util::fatal_assert_tag_test", "test_debug_util::fatal_assert_test", 
+                                                "test_debug_util::panic_tag_comb_test", "test_debug_util::panic_test"};
 
     size_t num_runs = Parse_Args(argc, argv, test.all_tests, tests_to_run, default_black_list);
     if (num_runs == 0) {
@@ -287,3 +287,5 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "End of round %lu/%lu\n", i+1, num_runs);
     }
 }
+
+// Todo update run_ut so that we can use the same regexs and white/black lists across all ut files
