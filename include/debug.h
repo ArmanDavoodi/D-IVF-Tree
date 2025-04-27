@@ -30,11 +30,10 @@
 #define LOG_TAG_BASIC 0b1
 #define LOG_TAG_NOT_IMPLEMENTED 0b10
 #define LOG_TAG_TEST 0b100
-#define LOG_TAG_BASIC 0b1000
-#define LOG_TAG_COPPER_NODE 0b10000
-#define NUM_TAGS 5
+#define LOG_TAG_COPPER_NODE 0b1000
+#define NUM_TAGS 4
 
-#define LOG_TAG_ANY 0b11111
+#define LOG_TAG_ANY 0b1111
 
 
 #ifndef LOG_MIN_LEVEL
@@ -53,16 +52,26 @@
 #define OUT stdout
 #endif
 
+#define _COLORF_BLACK "\033[0;30m"
+#define _COLORF_RED "\033[0;31m"
+#define _COLORF_GREEN "\033[0;32m"
+#define _COLORF_YELLOW "\033[0;33m"
+#define _COLORF_BLUE "\033[0;34m"
+#define _COLORF_PURPLE "\033[0;35m"
+#define _COLORF_CYAN "\033[0;36m"
+#define _COLORF_WHITE "\033[0;37m"
+#define _COLORF_RESET "\033[0m"
+
 #ifdef COLORED
-#define COLORF_BLACK "\033[0;30m"
-#define COLORF_RED "\033[0;31m"
-#define COLORF_GREEN "\033[0;32m"
-#define COLORF_YELLOW "\033[0;33m"
-#define COLORF_BLUE "\033[0;34m"
-#define COLORF_PURPLE "\033[0;35m"
-#define COLORF_CYAN "\033[0;36m"
-#define COLORF_WHITE "\033[0;37m"
-#define COLORF_RESET "\033[0m"
+#define COLORF_BLACK _COLORF_BLACK
+#define COLORF_RED _COLORF_RED
+#define COLORF_GREEN _COLORF_GREEN
+#define COLORF_YELLOW _COLORF_YELLOW
+#define COLORF_BLUE _COLORF_BLUE
+#define COLORF_PURPLE _COLORF_PURPLE
+#define COLORF_CYAN _COLORF_CYAN
+#define COLORF_WHITE _COLORF_WHITE
+#define COLORF_RESET _COLORF_RESET
 #else
 #define COLORF_BLACK
 #define COLORF_RED
@@ -131,7 +140,7 @@ inline void timetostr(const std::chrono::_V2::system_clock::time_point _time, ch
 {
     std::time_t _t = std::chrono::system_clock::to_time_t(_time);
     auto _m = _time - std::chrono::time_point_cast<std::chrono::seconds>(_time);
-    size_t num_chars = std::strftime(mbstr, 100, "%F:%r", std::localtime(&_t));
+    size_t num_chars = std::strftime(mbstr, 100, "%F:%T", std::localtime(&_t));
     sprintf(mbstr + num_chars, ".%lu", std::chrono::duration_cast<std::chrono::microseconds>(_m).count());
 }
 
@@ -217,8 +226,8 @@ inline bool Pass_Level(uint8_t level) {
 #define CLOG_IF_TRUE(cond, level, tag, msg, ...) \
     do {\
         if ((cond)){\
-            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+19] = "Condition True(" #cond ") | ";\
-            strcat(_TMP_DEBUG+sizeof((#cond))+19, (msg));\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition True(" #cond ") | ";\
+            strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
             CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
     } while(0)
@@ -226,8 +235,8 @@ inline bool Pass_Level(uint8_t level) {
 #define CLOG_IF_FALSE(cond, level, tag, msg, ...) \
     do {\
         if (!(cond)){\
-            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition False(" #cond ") | ";\
-            strcat(_TMP_DEBUG+sizeof((#cond))+20, (msg));\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Condition False(" #cond ") | ";\
+            strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
             CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
     } while(0)
@@ -241,8 +250,8 @@ inline bool Pass_Level(uint8_t level) {
                 CLOG(LOG_LEVEL_PANIC, (tag),  "Assertion \'" #cond "\' Failed.");\
             }\
             else{\
-                char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
-                strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
+                char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+22] = "Assertion \'" #cond "\' Failed: ";\
+                strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
                 CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
             }\
         }\
@@ -253,13 +262,15 @@ inline bool Pass_Level(uint8_t level) {
 #else
 #define ErrorAssert(cond, tag, msg, ...) \
     do {\
-        if (sizeof((msg)) == 0){\
-            CLOG(LOG_LEVEL_ERROR, (tag),  "Assertion \'" #cond "\' Failed.");\
-        }\
-        else{\
-            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
-            strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
-            CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+        if (!(cond)) {\
+            if (sizeof((msg)) == 0){\
+                CLOG(LOG_LEVEL_ERROR, (tag),  "Assertion \'" #cond "\' Failed.");\
+            }\
+            else{\
+                char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+22] = "Assertion \'" #cond "\' Failed: ";\
+                strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
+                CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+            }\
         }\
     } while(0)
 #endif
@@ -295,17 +306,18 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 #define FAULT_INJECTION_WAIT(name) FI_MAP[(name)].acquire()
 #define FAULT_INJECTION_SIGNAL(name) FI_MAP[(name)].release()
 // todo:
+// todo: add backslash at the end of lines
 // #define FAULT_INJECTION_WAIT_UNTIL(name, duration) FI_MAP[(name)].try_acquire_for((duration))
-// #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...) \
-//     do {\
-//         if (sizeof((msg)) == 0){\
-//             CLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );\
-//         }\
-//         else{\
-//             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Assertion \'" #cond "\' Failed: ";\
-//             strcat(_TMP_DEBUG+sizeof((#cond))+21, (msg));\
-//             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
-//         }\
+// #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...) 
+//     do {
+//         if (sizeof((msg)) == 0){
+//             CLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );
+//         }
+//         else{
+//             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+22] = "Assertion \'" #cond "\' Failed: ";
+//             strcat(_TMP_DEBUG+sizeof((#cond)), (msg));
+//             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);
+//         }
 //     } while(0)
 // #define FAULT_INJECTION_WAIT_UNTIL_PANIC(name, duration) FI_MAP[(name)].try_acquire_for((duration))
 #else

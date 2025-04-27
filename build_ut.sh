@@ -1,5 +1,4 @@
 #!/bin/bash
-
 cd ut
 make clean
 rm -r out

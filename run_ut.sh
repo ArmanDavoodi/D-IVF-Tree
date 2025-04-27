@@ -10,7 +10,21 @@ mkdir -p ut/out/logs
 
 # echo $CORE_DUMP_DIR | sudo tee /proc/sys/kernel/core_pattern
 
-./ut/build/bin/$1 > ut/out/logs/$1.log
+# ./ut/build/bin/$1 > ut/out/logs/$1.log
+
+directory="ut/build/bin"
+
+for file in "$directory"/*; do
+  if [ -f "$file" ]; then
+    # Check if the file is executable
+    if [ -x "$file" ]; then
+      file_name=$(basename "$file")
+      ./"$file" $* > ut/out/logs/"$file_name".log
+    else
+      echo "File '$file' is not executable."
+    fi
+  fi
+done
 
 # echo "|/usr/share/apport/apport -p%p -s%s -c%c -d%d -P%P -u%u -g%g -- %E\n" | sudo tee /proc/sys/kernel/core_pattern
 

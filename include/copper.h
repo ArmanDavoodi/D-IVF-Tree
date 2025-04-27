@@ -9,6 +9,30 @@
 
 // Todo: better logs and asserts -> style: <Function name>(self data(a=?), input data): msg, additonal variables if needed
 
+/*
+ * Todo: There are two approaches we can take:
+ * 1) Bottom-up nearest approach:
+ *      This is our current approach in which we try to gurantee(lazily) that each vector is always in its closest node.
+ *      However, this approach requires us to either have migration per insert or 
+ *      to check every possible leaf to see which one is closest. 
+ *      Imagin this example with 1 dim vectors:
+ *      Layer 2:        1          2
+ *      Layer 1:    0.9   1.1  1.6   2.6
+ *      Layer 0:   ........................
+ *      Now if we want to insert 1.4, it is closer to 1 so it will be inserted in leaf with centroid 1.1 while the closest
+ *      leaf centroid to it is 1.6.
+ *      probably better to have larger buckets.
+ * 2) top-down nearest approach:
+ *      In this approach, I gurantee that we can always take the greedy path from the root of the tree to 
+ *      find a vector.
+ *      To do so, at the time of split of node k, we have to check migrataion for every vector in any layer in that subtree
+ *      to other sibling nodes of node k.(sibling nodes are nodes with the same parent)
+ *      As a result, a split in higher levels is more costly. and the cost only grows. lazy approach will cause us to have
+ *      bad accuracy for a long time.
+ *      probably having small buckets is better here.
+ *
+ */
+
 namespace copper {
 
 template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE, 

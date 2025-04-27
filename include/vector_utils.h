@@ -22,19 +22,22 @@ static_assert(_DIM > 0);
 public:
     Vector() : _data(new T[_DIM]), _delete_on_destroy(true) {}
 
-    Vector(const T* data) : _data(data != nullptr ? new T[_DIM] : nullptr), _delete_on_destroy(data != nullptr) {
+    explicit Vector(const T* data) : _data(data != nullptr ? new T[_DIM] : nullptr), 
+                                     _delete_on_destroy(data != nullptr) {
         if (data != nullptr) {
             memcpy(_data, data, _DIM * sizeof(T));
         }
     }
 
-    Vector(const std::vector<T>& vec) : _data(vec.size() >= _DIM ? new T[_DIM] : nullptr), _delete_on_destroy(vec.size() >= _DIM) {
+    explicit Vector(const std::vector<T>& vec) : _data(vec.size() >= _DIM ? new T[_DIM] : nullptr), 
+                                                 _delete_on_destroy(vec.size() >= _DIM) {
         if (vec.size() >= _DIM) {
             memcpy(_data, &vec[0], _DIM * sizeof(T));
         }
     }
     
-    Vector(const Vector<T, _DIM>& _vec) : _data(_vec.Is_Valid() ? new T[_DIM] : nullptr), _delete_on_destroy(_vec.Is_Valid()) {
+    Vector(const Vector<T, _DIM>& _vec) : _data(_vec.Is_Valid() ? new T[_DIM] : nullptr), 
+                                          _delete_on_destroy(_vec.Is_Valid()) {
         if (_vec.Is_Valid()) {
             memcpy(_data, _vec._data, _DIM * sizeof(T));
         }
@@ -68,7 +71,6 @@ public:
     ~Vector() {
         Invalidate();
     }
-
 
     Vector<T, _DIM>& operator=(const Vector<T, _DIM>& other)  {
         if (other.Is_Valid()) {
@@ -149,17 +151,20 @@ public:
         return !(*this == other);
     }
 
-    inline Vector<T, _DIM> Shallow_Copy() {
-        return Vector<T, _DIM>(_data, false);
-    }
+    /* Not tested. */
+    // inline Vector<T, _DIM> Shallow_Copy() {
+    //     return Vector<T, _DIM>(_data, false);
+    // }
 
-    inline const Vector<T, _DIM> Shallow_Copy() const {
-        return Vector<T, _DIM>(_data, false);
-    }
+    /* Not tested. */
+    // inline const Vector<T, _DIM> Shallow_Copy() const {
+    //     return Vector<T, _DIM>(_data, false);
+    // }
 
-    inline Vector<T, _DIM> Deep_Copy() const {
-        return Vector<T, _DIM>(*this, nullptr, true);
-    }
+    /* Not tested. */
+    // inline Vector<T, _DIM> Deep_Copy() const {
+    //     return Vector<T, _DIM>(*this, nullptr, true);
+    // }
 
     inline Address Get_Address() {
         return _data;
@@ -186,32 +191,34 @@ protected:
 
     Vector(T* data, bool delete_on_destroy) : _data(data), _delete_on_destroy(delete_on_destroy) {}
 
-    Vector(const Vector<T, _DIM>& _vec, T* loc, bool delete_on_destroy) 
-            : _delete_on_destroy(delete_on_destroy) {
-        ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_BASIC, "Input vector is invalid. this=%lu, _vec=%lu.", this, &_vec);
-        if (!_vec.Is_Valid()) {
-            _data = nullptr;
-        }
-        else {
-            CLOG_IF_TRUE(loc == _vec._data ,LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Deep copy on the same location. this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
-            CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Delete on destroy is true with valid location! this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
-            _data = (loc ? loc : new T[_DIM]);
-            memcpy(_data, _vec._data, _DIM * sizeof(T));
-        }
-    }
+    /* Not tested. */
+    // Vector(const Vector<T, _DIM>& _vec, T* loc, bool delete_on_destroy) 
+    //         : _delete_on_destroy(delete_on_destroy) {
+    //     ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_BASIC, "Input vector is invalid. this=%lu, _vec=%lu.", this, &_vec);
+    //     if (!_vec.Is_Valid()) {
+    //         _data = nullptr;
+    //     }
+    //     else {
+    //         CLOG_IF_TRUE(loc == _vec._data ,LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Deep copy on the same location. this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
+    //         CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Delete on destroy is true with valid location! this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
+    //         _data = (loc ? loc : new T[_DIM]);
+    //         memcpy(_data, _vec._data, _DIM * sizeof(T));
+    //     }
+    // }
 
-    Vector(const std::vector<T>& vec, T* loc, bool delete_on_destroy) 
-            : _delete_on_destroy(delete_on_destroy) {
-        FatalAssert((vec.size() >= _DIM), LOG_TAG_BASIC, "Input vector is too small.");
+    // Vector(const std::vector<T>& vec, T* loc, bool delete_on_destroy) 
+    //         : _delete_on_destroy(delete_on_destroy) {
+    //     FatalAssert((vec.size() >= _DIM), LOG_TAG_BASIC, "Input vector is too small.");
 
-        CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Delete on destroy is true with valid location! this=%lu, loc=%lu.", this, loc);
-        _data = (loc ? loc : new T[_DIM]);
-        memcpy(_data, &vec[0], _DIM * sizeof(T));
-    }
+    //     CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Delete on destroy is true with valid location! this=%lu, loc=%lu.", this, loc);
+    //     _data = (loc ? loc : new T[_DIM]);
+    //     memcpy(_data, &vec[0], _DIM * sizeof(T));
+    // }
 
-    inline Vector<T, _DIM> Deep_Copy(T* loc, bool delete_on_destroy = true) const {
-        return Vector<T, _DIM>(*this, loc, delete_on_destroy);
-    }
+    /* Not tested. */
+    // inline Vector<T, _DIM> Deep_Copy(T* loc, bool delete_on_destroy = true) const {
+    //     return Vector<T, _DIM>(*this, loc, delete_on_destroy);
+    // }
 
 friend class VectorSet;
 friend class VectorPair;

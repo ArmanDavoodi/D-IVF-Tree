@@ -7,6 +7,7 @@
 #include <regex>
 #include <stdio.h>
 #include <vector>
+#include <map>
 
 struct UT_Input {
     std::set<std::string> black_list;
@@ -15,12 +16,14 @@ struct UT_Input {
     std::regex* bfmt = nullptr;
 
     std::set<std::string> _tests;
+    std::map<std::string, int> _priorities;
 
     size_t num_tries = 1;
 
     static constexpr size_t MAX_NUM_TRIES = 1000;
 
-    UT_Input(const std::set<std::string>& tests) : _tests(tests) {}
+    UT_Input(const std::set<std::string>& tests, const std::map<std::string, int>& test_priorities) : 
+                _tests(tests), _priorities(test_priorities) {}
 
     ~UT_Input() {
         if (fmt != nullptr) {
@@ -45,13 +48,20 @@ struct UT_Input {
             }
         }
 
-        fprintf(stderr, "\n____________________________\n");
-        fprintf(stderr, "# tries: %lu\nTests to run:\n", num_tries);
         for (std::string t : white_list) {
             if (!_tests.contains(t) || black_list.contains(t)) {
                 continue;
             }
             tests_to_run.push_back(t);
+        }
+
+        std::sort(tests_to_run.begin(), tests_to_run.end(), [this](const std::string& a, const std::string& b) {
+            return _priorities[a] < _priorities[b];
+        });
+
+        fprintf(stderr, "\n____________________________\n");
+        fprintf(stderr, "# tries: %lu\nTests to run:\n", num_tries);
+        for (std::string t : tests_to_run) {
             fprintf(stderr, "\t* %s\n", t.c_str());
         }
         fprintf(stderr, "\n");
@@ -115,11 +125,12 @@ inline UT_Parse_State Parse_Flag(const char& f) {
     }
 }
 
-size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests, 
+size_t Parse_Args(int argc, char *argv[], 
+                const std::set<std::string>& all_tests, const std::map<std::string, int>& test_priorities,
                 std::vector<std::string>& tests_to_run, const std::set<std::string>& default_black_list) {
     fprintf(stderr, "Start parse input...\n");
 
-    UT_Input input(all_tests);
+    UT_Input input(all_tests, test_priorities);
     UT_Parse_State state = INV;
     bool seen_option[NUM_STATES] = {false};
     bool non_list_option = false;
@@ -291,7 +302,7 @@ size_t Parse_Args(int argc, char *argv[], const std::set<std::string>& all_tests
             break;
         
         case INV:
-            fprintf(stderr, "Fatal: Invalid flag %s.\n", arg);
+            fprintf(stderr, "Fatal: Invalid flag %s.\n", arg.c_str());
             Print_Usage();
             return 0;
         
