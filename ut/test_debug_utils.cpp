@@ -1,13 +1,8 @@
-#include "debug.h"
-
-#include "input.h"
-
-#include <string>
-#include <map>
-#include <set>
-#include <algorithm>
+#include "test.h"
 
 // build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
+
+namespace UT {
 
 class Test {
 public:
@@ -602,59 +597,23 @@ public:
         try_count = 0;
     }
 
-    void Run(std::vector<std::string>& tests_to_run) {
-        std::sort(tests_to_run.begin(), tests_to_run.end(), [this](const std::string& a, const std::string& b) {
-            return test_priority[a] < test_priority[b];
-        });
-        for (std::string test_name : tests_to_run) {
-            fprintf(stderr, "Searching for Test " _COLORF_CYAN "%s" _COLORF_RESET "...\n", test_name.c_str());
-            auto it = tests.find(test_name);
-            if (it != tests.end()) {
-                fprintf(stderr, "Test found.\n");
-                if ((this->*(it->second))()) {
-                    fprintf(stderr, _COLORF_GREEN "Test " _COLORF_RESET _COLORF_CYAN "%s" _COLORF_RESET _COLORF_GREEN
-                            " ran successfully!" _COLORF_RESET "\n\n", test_name.c_str());
-                }
-                else {
-                    fprintf(stderr, _COLORF_RED "Test " _COLORF_RESET _COLORF_CYAN " %s " _COLORF_RESET _COLORF_RED 
-                            " failed!" _COLORF_RESET "\n\n", test_name.c_str());
-                }
-            }  
-            else {
-                fprintf(stderr, _COLORF_RED "Error: Test " _COLORF_RESET _COLORF_CYAN "%s" _COLORF_RESET _COLORF_RED 
-                        " not found!\n\n" _COLORF_RESET, test_name.c_str());
-            }
-        }
-    }
-
     std::set<std::string> all_tests;
     std::map<std::string, int> test_priority;
 protected:
     std::map<std::string, bool (Test::*)()> tests;
     size_t try_count = 0;
+
+friend class TestBase<Test>;
 };
+}
 
 int main(int argc, char *argv[]) {
-    Test test;
-    std::vector<std::string> tests_to_run;
     std::set<std::string> default_black_list = {"test_debug_util::fatal_assert_tag_test", "test_debug_util::fatal_assert_test", 
                                                 "test_debug_util::panic_tag_comb_test", "test_debug_util::panic_test", 
                                                 "test_debug_util::conditional_true_true_panic_tag_comb_test", "test_debug_util::conditional_false_false_panic_tag_comb_test",
                                                 "test_debug_util::conditional_true_true_panic_test", "test_debug_util::conditional_false_false_panic_test"};
-
-    size_t num_runs = Parse_Args(argc, argv, test.all_tests, test.test_priority, tests_to_run, default_black_list);
-    if (num_runs == 0) {
-        return 1;
-    }
-
-    for (size_t i = 0; i < num_runs; ++i) {
-        fprintf(stderr, "Starting round %lu/%lu...\n\n", i+1, num_runs);
-        test.Init(i + 1);
-        fprintf(stderr, "Inited the tests.\n\n");
-        test.Run(tests_to_run);
-        test.Destroy();
-        fprintf(stderr, "End of round %lu/%lu\n\n", i+1, num_runs);
-    }
+    UT::TestBase<UT::Test> test(argc, argv, default_black_list);
+    return test.Run();
 }
 
 // Todo update run_ut so that we can use the same regexs and white/black lists across all ut files

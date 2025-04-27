@@ -297,7 +297,6 @@ inline bool Pass_Level(uint8_t level) {
 #define ErrorAssert(cond, tag, msg, ...)
 #endif
 #endif
-#endif
 
 #ifdef FAULT_INJECTION
 static inline std::map<std::string, std::binary_semaphore> FI_MAP;
@@ -325,4 +324,6 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 #define FAULT_INJECTION_DELETE(name)
 #define FAULT_INJECTION_WAIT(name)
 #define FAULT_INJECTION_SIGNAL(name)
+#endif
+
 #endif

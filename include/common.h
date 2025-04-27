@@ -1,5 +1,5 @@
-#ifndef COPPER_COMMON_H
-#define COPPER_COMMON_H
+#ifndef COPPER_COMMON_H_
+#define COPPER_COMMON_H_
 
 #include <vector>
 #include <cstdint>

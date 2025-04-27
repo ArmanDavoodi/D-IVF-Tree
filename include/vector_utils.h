@@ -1,8 +1,14 @@
-#ifndef COPPER_VECTOR_UTILS_H
-#define COPPER_VECTOR_UTILS_H
+#ifndef COPPER_VECTOR_UTILS_H_
+#define COPPER_VECTOR_UTILS_H_
 
 #include "common.h"
 #include "queue"
+
+#ifdef TESTING
+namespace UT {
+class Test;
+};
+#endif
 
 namespace copper {
 
@@ -14,6 +20,16 @@ struct VectorUpdate {
     // VectorUpdate(VectorID _id, Address _data, Address _cluster) : 
     //     vector_id(_id), vector_data(_data), cluster_address(_cluster) {}
 };
+
+template<typename T, uint16_t _DIM>
+struct VectorPair;
+
+template<typename T, uint16_t _DIM, uint16_t _CAP>
+class VectorSet;
+
+template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
+        typename DIST_TYPE, typename _DIST>
+class Buffer_Manager;
 
 template<typename T, uint16_t _DIM>
 class Vector {
@@ -220,10 +236,12 @@ protected:
     //     return Vector<T, _DIM>(*this, loc, delete_on_destroy);
     // }
 
+template<typename, uint16_t, uint16_t>
 friend class VectorSet;
-friend class VectorPair;
+friend class VectorPair<T, _DIM>;
+template <typename, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t, typename, typename>
 friend class Buffer_Manager;
-friend class Test;
+friend class UT::Test;
 };
 
 template<typename T, uint16_t _DIM>
@@ -349,11 +367,11 @@ public:
     }
 
     inline VectorPair<T, _DIM> operator[](uint16_t idx) {
-        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + (idx * _DIM), false)
+        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + (idx * _DIM), false);
     }
 
     inline const VectorPair<T, _DIM> operator[](uint16_t idx) const {
-        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + (idx * _DIM), false)
+        return VectorPair<T, _DIM>(Get_VectorID(idx), _beg + (idx * _DIM), false);
     }
 
     inline Vector<T, _DIM> Get_Vector_Copy(uint16_t idx) const {
@@ -367,7 +385,7 @@ public:
     }
 
     inline VectorUpdate Delete(VectorID id) {
-        FatalAssert(!swapped_vec.Is_Valid(), LOG_TAG_BASIC, "inputed swapped_vec is valid.");
+        FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "cannot delete invalide vector id.");
 
         uint16_t idx = Get_Index(id);
         VectorUpdate swapped{INVALID_VECTOR_ID, INVALID_ADDRESS};
@@ -419,7 +437,7 @@ protected:
     VectorID _ids[_DIM * _CAP];
     uint16_t _size;
 
-friend class Test;
+friend class UT::Test;
 };
 
 template<typename V_TYPE, uint16_t _DIM, typename D_TYPE = double>
@@ -445,12 +463,12 @@ public:
         FatalAssert(vectors != nullptr, LOG_TAG_BASIC, "size cannot be 0");
         Vector<V_TYPE, _DIM> centroid(vectors);
         for (size_t v = 1; v < size; ++v) {
-            for (uint16_t e = 0; e < _DIM, ++e) {
+            for (uint16_t e = 0; e < _DIM; ++e) {
                 centroid[e] += vectors[v * _DIM + e];
             }
         }
 
-        for (uint16_t e = 0; e < _DIM, ++e) {
+        for (uint16_t e = 0; e < _DIM; ++e) {
             centroid[e] /= size;
         }
     }
@@ -459,5 +477,4 @@ public:
 
 
 };
-
 #endif
