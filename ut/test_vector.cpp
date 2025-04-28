@@ -113,36 +113,119 @@ namespace UT {
 class Test {
 public:
     Test() {
-        tests["test_vector::default_constructor_test"] = &Test::default_constructor_test;
+        tests["test_vector::vector_constructor_and_assignment_test"] = &Test::vector_constructor_and_assignment_test;
 
-        test_priority["test_vector::default_constructor_test"] = 0;
+        test_priority["test_vector::vector_constructor_and_assignment_test"] = 0;
 
-        all_tests.insert("test_vector::default_constructor_test");
+        all_tests.insert("test_vector::vector_constructor_and_assignment_test");
     }
 
     ~Test() {
 
     }
 
-    bool default_constructor_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::default_constructor_test for %luth time...", try_count);
+    bool vector_constructor_and_assignment_test() {
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_constructor_and_assignment_test for %luth time...", try_count);
         bool status = true;
-        copper::Vector<uint16_t, dim> vec;
-        status = vec._delete_on_destroy;
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::default_constructor_test.");
+        {
+            copper::Vector<uint16_t, dim> vec1;
+            status = status && vec1._delete_on_destroy;
+            ErrorAssert(vec1._delete_on_destroy, LOG_TAG_TEST, "case 1) Defult constructor did not set _delete_on_destroy to true.");
+
+            for (uint16_t i = 0; i < dim; ++i) {
+                vec1[i] = _data16[1][i];
+            }
+
+            copper::Vector<uint16_t, dim> vec2(_data16[0]);
+            status = status && vec2._delete_on_destroy;
+            ErrorAssert(vec2._delete_on_destroy, LOG_TAG_TEST, "case 2) public constructor did not set _delete_on_destroy to true.");
+
+            for (uint16_t i = 0; i < dim; ++i) {
+                status = status && (vec2[i] == _data16[0][i]);
+                ErrorAssert(vec2[i] == _data16[0][i], LOG_TAG_TEST, "");
+            }
+
+            copper::Vector<uint16_t, dim> vec3(vec1);
+            status = status && vec3._delete_on_destroy;
+            ErrorAssert(vec3._delete_on_destroy, LOG_TAG_TEST, "case 3) public constructor did not set _delete_on_destroy to true.");
+
+            copper::Vector<uint16_t, dim> vec4(std::move(vec3));
+            status = status && vec4._delete_on_destroy;
+            ErrorAssert(vec4._delete_on_destroy, LOG_TAG_TEST, "case 4) public constructor did not set _delete_on_destroy to true.");
+            status = status && (!vec3.Is_Valid());
+            ErrorAssert(!vec3.Is_Valid(), LOG_TAG_TEST, "case 4) moved vector should no longer be valid.");
+            status = status && (!vec3._delete_on_destroy);
+            ErrorAssert(!vec3._delete_on_destroy, LOG_TAG_TEST, "case 4) moved vector should no longer be deleted.");
+
+            /* we should see 2 constructor logs for case 5 */
+            copper::Vector<uint16_t, dim> vec5 = copper::Vector<uint16_t, dim>::NEW_INVALID();
+            status = status && !(vec5._delete_on_destroy);
+            ErrorAssert(!(vec5._delete_on_destroy), LOG_TAG_TEST, "case 5) Invalid vector should not be destoyed");
+            status = status && !(vec5.Is_Valid());
+            ErrorAssert(!(vec5.Is_Valid()), LOG_TAG_TEST, "case 5) Invalid vector should not be valid");
+
+            copper::Vector<uint16_t, dim> vec6 = vec2;
+            status = status && vec2._delete_on_destroy;
+            ErrorAssert(vec2._delete_on_destroy, LOG_TAG_TEST, "case 6) public constructor did not set _delete_on_destroy to true.");
+            
+            /* Since vec6 is not invalid, we should copy the data of vec1 and not use its pointer. */
+            vec6 = std::move(vec1);
+            status = status && (vec1.Is_Valid());
+            ErrorAssert(vec1.Is_Valid(), LOG_TAG_TEST, "right vector should remain valid.");
+            status = status && (vec6.Is_Valid());
+            ErrorAssert(vec6.Is_Valid(), LOG_TAG_TEST, "left vector should remain valid.");
+            status = status && (vec1._delete_on_destroy);
+            ErrorAssert(vec1._delete_on_destroy, LOG_TAG_TEST, "right vector should be destroyed.");
+            status = status && (vec6._delete_on_destroy);
+            ErrorAssert(vec6._delete_on_destroy, LOG_TAG_TEST, "left vector should be destroyed.");
+            for (uint16_t i = 0; i < dim; ++i) {
+                status = status && (vec6[i] == vec1[i]);
+                ErrorAssert(vec6[i] == vec1[i], LOG_TAG_TEST, "vectors should have the same data.");
+            }
+            status = status && (!vec6.Are_The_Same(vec1));
+            ErrorAssert((!vec6.Are_The_Same(vec1)), LOG_TAG_TEST, "vectors should not be the same.");
+
+            vec5 = std::move(vec1);
+            status = status && (!vec1.Is_Valid());
+            ErrorAssert(!vec1.Is_Valid(), LOG_TAG_TEST, "right vector should not remain valid.");
+            status = status && (vec5.Is_Valid());
+            ErrorAssert(vec5.Is_Valid(), LOG_TAG_TEST, "left vector should remain valid.");
+            status = status && (!vec1._delete_on_destroy);
+            ErrorAssert(!vec1._delete_on_destroy, LOG_TAG_TEST, "right vector should not be destroyed.");
+            status = status && (vec5._delete_on_destroy);
+            ErrorAssert(vec5._delete_on_destroy, LOG_TAG_TEST, "left vector should be destroyed.");
+            status = status && (!vec5.Are_The_Same(vec1));
+            ErrorAssert((!vec5.Are_The_Same(vec1)), LOG_TAG_TEST, "vectors should not be the same.");
+
+            vec4 = vec2;
+            status = status && (vec2.Is_Valid());
+            ErrorAssert(vec2.Is_Valid(), LOG_TAG_TEST, "right vector should remain valid.");
+            status = status && (vec4.Is_Valid());
+            ErrorAssert(vec4.Is_Valid(), LOG_TAG_TEST, "left vector should remain valid.");
+            status = status && (vec2._delete_on_destroy);
+            ErrorAssert(vec2._delete_on_destroy, LOG_TAG_TEST, "right vector should be destroyed.");
+            status = status && (vec4._delete_on_destroy);
+            ErrorAssert(vec4._delete_on_destroy, LOG_TAG_TEST, "left vector should be destroyed.");
+            for (uint16_t i = 0; i < dim; ++i) {
+                status = status && (vec2[i] == vec4[i]);
+                ErrorAssert(vec2[i] == vec4[i], LOG_TAG_TEST, "vectors should have the same data.");
+            }
+            status = status && (!vec4.Are_The_Same(vec2));
+            ErrorAssert((!vec4.Are_The_Same(vec2)), LOG_TAG_TEST, "vectors should not be the same.");
+
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector1=%s", vec1.to_string().c_str());
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector2=%s", vec2.to_string().c_str());
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector3=%s", vec3.to_string().c_str());
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector4=%s", vec4.to_string().c_str());
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector5=%s", vec5.to_string().c_str());
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector6=%s", vec6.to_string().c_str());
+        }
+
+        /* todo test for the private constructors to check for memory leaks and stuff */
+
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_constructor_and_assignment_test.");
         return status;
     }
-
-    // bool level_test() {
-
-    //     // copper::Vector<uint16_t, dim> vec(_data16, );
-    //     // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Uint Vector: %s", copper::to_string<uint16_t>(vec, dim).c_str());
-
-    //     // vec = _dataf;
-    //     // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Float Vector: %s", copper::to_string<float>(vec, dim).c_str());
-
-    //     // return true;
-    // }
 
     void Init(size_t t_count) {
         try_count = t_count;
@@ -161,15 +244,15 @@ protected:
     static constexpr uint16_t dim = 8;
     static constexpr uint16_t size = 3;
 
-    uint16_t _data16[dim * size] = {1, 2, 3, 4, 5, 6, 7, 8, 
-                                    9, 10, 11, 12, 13, 14, 15, 16, 
-                                    17, 18, 19, 20, 21, 22, 23, 24};
-    uint64_t _ids16[dim * size] = {1ul, 2ul, 3ul};
+    uint16_t _data16[size][dim] = {{1, 2, 3, 4, 5, 6, 7, 8}, 
+                                    {9, 10, 11, 12, 13, 14, 15, 16}, 
+                                    {17, 18, 19, 20, 21, 22, 23, 24}};
+    uint64_t _ids16[size] = {1ul, 2ul, 3ul};
 
-    float _dataf[dim * size] = {0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f, 
-                                9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f, 
-                                8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f};
-    uint64_t _idsf[dim * size] = {4ul, 5ul, 6ul};
+    float _dataf[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f}, 
+                                {9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f}, 
+                                {8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f}};
+    uint64_t _idsf[size] = {4ul, 5ul, 6ul};
 
 friend class TestBase<Test>;
 };

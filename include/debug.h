@@ -1,6 +1,8 @@
 #ifndef COPPER_DEBUG_H_
 #define COPPER_DEBUG_H_
 
+#include <cstdint>
+
 #ifndef BUILD
 #define BUILD RELEASE
 #endif
@@ -19,37 +21,53 @@
 #define ENABLE_ASSERTS
 #endif
 
+enum LOG_LEVELS : uint8_t {
+    LOG_LEVEL_ZERO,
+    LOG_LEVEL_PANIC,
+    LOG_LEVEL_ERROR,
+    LOG_LEVEL_WARNING,
+    LOG_LEVEL_LOG,
+    LOG_LEVEL_DEBUG,
+    LOG_LEVEL_NUM
+};
 
-#define LOG_LEVEL_ZERO 0
-#define LOG_LEVEL_PANIC 1
-#define LOG_LEVEL_ERROR 2
-#define LOG_LEVEL_WARNING 3
-#define LOG_LEVEL_LOG 4
-#define LOG_LEVEL_DEBUG 5
+enum LOG_TAG_BITS : uint64_t {
+    LOG_TAG_BASIC_BIT,
+    LOG_TAG_VECTOR_BIT,
+    LOG_TAG_VECTOR_SET_BIT, 
+    LOG_TAG_BUFFER_BIT,
+    LOG_TAG_COPPER_NODE_BIT,
+    LOG_TAG_VECTOR_INDEX_BIT,
+    LOG_TAG_NOT_IMPLEMENTED_BIT,
+    LOG_TAG_TEST_BIT,
+    NUM_TAGS
+};
 
-#define LOG_TAG_BASIC 0b1
-#define LOG_TAG_NOT_IMPLEMENTED 0b10
-#define LOG_TAG_TEST 0b100
-#define LOG_TAG_COPPER_NODE 0b1000
-#define NUM_TAGS 4
+#define LOG_TAG_BASIC (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_BASIC_BIT))
+#define LOG_TAG_VECTOR (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_BIT))
+#define LOG_TAG_VECTOR_SET (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_SET_BIT))
+#define LOG_TAG_BUFFER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_BUFFER_BIT))
+#define LOG_TAG_COPPER_NODE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_COPPER_NODE_BIT))
+#define LOG_TAG_VECTOR_INDEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_INDEX_BIT))
+#define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
+#define LOG_TAG_TEST (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_TEST_BIT))
 
-#define LOG_TAG_ANY 0b1111
-
+#define LOG_TAG_ANY (-1ul)
 
 #ifndef LOG_MIN_LEVEL
-#define LOG_MIN_LEVEL LOG_LEVEL_ZERO
+#define LOG_MIN_LEVEL (LOG_LEVEL_PANIC)
 #endif
 
 #ifndef LOG_LEVEL
-#define LOG_LEVEL LOG_LEVEL_LOG
+#define LOG_LEVEL (LOG_LEVEL_LOG)
 #endif
 
 #ifndef LOG_TAG
-#define LOG_TAG LOG_TAG_ANY
+#define LOG_TAG (LOG_TAG_ANY)
 #endif
 
 #ifndef OUT
-#define OUT stdout
+#define OUT (stdout)
 #endif
 
 #define _COLORF_BLACK "\033[0;30m"
@@ -144,49 +162,57 @@ inline void timetostr(const std::chrono::_V2::system_clock::time_point _time, ch
     sprintf(mbstr + num_chars, ".%lu", std::chrono::duration_cast<std::chrono::microseconds>(_m).count());
 }
 
-inline const char* leveltostr(uint8_t level)
+inline const char* leveltostr(LOG_LEVELS level)
 {
     switch (level)
     {
     case LOG_LEVEL_PANIC:
-        return COLORF_PURPLE "Panic";
+        return COLORF_PURPLE "Panic" COLORF_RESET;
     case LOG_LEVEL_ERROR:
-        return COLORF_RED "Error";
+        return COLORF_RED "Error" COLORF_RESET;
     case LOG_LEVEL_WARNING:
-        return COLORF_YELLOW "Warning";
+        return COLORF_YELLOW "Warning" COLORF_RESET;
     case LOG_LEVEL_LOG:
-        return COLORF_CYAN "Log";
+        return COLORF_CYAN "Log" COLORF_RESET;
     case LOG_LEVEL_DEBUG:
-        return COLORF_GREEN "Debug";
+        return COLORF_GREEN "Debug" COLORF_RESET;
     default:
         return "Undefined";
     }
 }
 
-inline const char* tagtostr(uint8_t tag)
+inline const char* tagtostr(uint64_t tag)
 {
     switch (tag)
     {
     case LOG_TAG_BASIC:
-        return "(Basic)" COLORF_RESET;
-    case LOG_TAG_NOT_IMPLEMENTED:
-        return "(Not Implemented)" COLORF_RESET;
-    case LOG_TAG_TEST:
-        return "(Test)" COLORF_RESET;
+        return "Basic" ;
+    case LOG_TAG_VECTOR:
+        return "Vector" ;
+    case LOG_TAG_VECTOR_SET:
+        return "Vector Set" ;
+    case LOG_TAG_BUFFER:
+        return "Buffer" ;
     case LOG_TAG_COPPER_NODE:
-        return "(Copper Node)" COLORF_RESET;
+        return "Copper Node" ;
+    case LOG_TAG_VECTOR_INDEX:
+        return "Vector Index" ;
+    case LOG_TAG_NOT_IMPLEMENTED:
+        return "Not Implemented" ;
+    case LOG_TAG_TEST:
+        return "Test" ;
     default:
-        return "(Undefined)" COLORF_RESET;
+        return "Undefined" ;
     }
 }
 
-inline void Log(uint8_t level, uint8_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
+inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
                 const char* file_name, const char* func_name, size_t line, 
                 size_t thread_id) {
 
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed 
-    fprintf(OUT, "%s%s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n", 
+    fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n", 
         leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
     fflush(OUT);
     if (level == LOG_LEVEL_PANIC) {
@@ -195,16 +221,16 @@ inline void Log(uint8_t level, uint8_t tag, const Log_Msg& msg, const std::chron
     }
 }
 
-inline bool Pass_Min_Level(uint8_t level) {
-    return (level <= LOG_MIN_LEVEL);
+inline bool Pass_Min_Level(LOG_LEVELS level) {
+    return ((uint8_t)(level) <= LOG_MIN_LEVEL);
 }
 
-inline bool Pass_Tag(uint8_t tag) {
+inline bool Pass_Tag(uint64_t tag) {
     return ((LOG_TAG & tag) != 0);
 }
 
-inline bool Pass_Level(uint8_t level) {
-    return (level <= LOG_LEVEL);
+inline bool Pass_Level(LOG_LEVELS level) {
+    return ((uint8_t)(level) <= (uint8_t)(LOG_LEVEL));
 }
 
 };
@@ -226,7 +252,7 @@ inline bool Pass_Level(uint8_t level) {
 #define CLOG_IF_TRUE(cond, level, tag, msg, ...) \
     do {\
         if ((cond)){\
-            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition True(" #cond ") | ";\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+19] = "Condition True(" #cond "): ";\
             strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
             CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
@@ -235,7 +261,7 @@ inline bool Pass_Level(uint8_t level) {
 #define CLOG_IF_FALSE(cond, level, tag, msg, ...) \
     do {\
         if (!(cond)){\
-            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+21] = "Condition False(" #cond ") | ";\
+            char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition False(" #cond "): ";\
             strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
             CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\

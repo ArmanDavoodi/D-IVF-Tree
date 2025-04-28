@@ -36,33 +36,48 @@ class Vector {
 static_assert(_DIM > 0);
 
 public:
-    Vector() : _data(new T[_DIM]), _delete_on_destroy(true) {}
+    Vector() : _data(new T[_DIM]), _delete_on_destroy(true) {
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Default Constructor: Created vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+            _data, this, _delete_on_destroy ? "T" : "F");
+    }
 
     explicit Vector(const T* data) : _data(data != nullptr ? new T[_DIM] : nullptr), 
                                      _delete_on_destroy(data != nullptr) {
         if (data != nullptr) {
             memcpy(_data, data, _DIM * sizeof(T));
         }
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
+            "Created vector based on pointer data. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+            _data, this, _delete_on_destroy ? "T" : "F");
     }
 
-    explicit Vector(const std::vector<T>& vec) : _data(vec.size() >= _DIM ? new T[_DIM] : nullptr), 
-                                                 _delete_on_destroy(vec.size() >= _DIM) {
-        if (vec.size() >= _DIM) {
-            memcpy(_data, &vec[0], _DIM * sizeof(T));
-        }
-    }
+    /* Not tested */
+    // explicit Vector(const std::vector<T>& vec) : _data(vec.size() >= _DIM ? new T[_DIM] : nullptr), 
+    //                                              _delete_on_destroy(vec.size() >= _DIM) {
+    //     if (vec.size() >= _DIM) {
+    //         memcpy(_data, &vec[0], _DIM * sizeof(T));
+    //     }
+    // }
     
     Vector(const Vector<T, _DIM>& _vec) : _data(_vec.Is_Valid() ? new T[_DIM] : nullptr), 
                                           _delete_on_destroy(_vec.Is_Valid()) {
         if (_vec.Is_Valid()) {
             memcpy(_data, _vec._data, _DIM * sizeof(T));
         }
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
+            "Created vector based on another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+            _data, this, _delete_on_destroy ? "T" : "F");
     }
 
     Vector(Vector<T, _DIM>&& _vec) 
-        : _data(_vec._data), _delete_on_destroy(_vec.delete_on_destroy) {
+        : _data(_vec._data), _delete_on_destroy(_vec._delete_on_destroy) {
         _vec._data = nullptr;
         _vec._delete_on_destroy = false;
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
+            "Created vector based on rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+            _data, this, _delete_on_destroy ? "T" : "F");
     }
 
     inline static Vector<T, _DIM> NEW_INVALID() {
@@ -72,11 +87,11 @@ public:
     inline void Invalidate() {
         if (_data != nullptr) {
             if (_delete_on_destroy) {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Deleted vector _data=%lu. this=%lu", _data, this);
+                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Deleted vector _data=%lu. this=%lu", _data, this);
                 delete[] _data;
             }
             else {
-                CLOG(LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Existing data not deleted. this=%lu, _data=%lu", this, _data);
+                CLOG(LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Existing data not deleted. this=%lu, _data=%lu", this, _data);
             }
         }
 
@@ -101,6 +116,10 @@ public:
             Invalidate();
         }
 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
+            "assigned vector to another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+            _data, this, _delete_on_destroy ? "T" : "F");
+
         return *this;
     }
 
@@ -120,6 +139,10 @@ public:
             Invalidate();
         }
 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
+            "assigned vector to another rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+            _data, this, _delete_on_destroy ? "T" : "F");
+
         return *this;
     }
 
@@ -136,12 +159,12 @@ public:
     }
 
     inline T& operator[](uint16_t i) {
-        FatalAssert(i < _DIM, LOG_TAG_BASIC, "index %hu out of bounds! dimention = %hu", i, _DIM);
+        FatalAssert(i < _DIM, LOG_TAG_VECTOR, "index %hu out of bounds! dimention = %hu", i, _DIM);
         return _data[i];
     }
 
     inline const T& operator[](uint16_t i) const {
-        FatalAssert(i < _DIM, LOG_TAG_BASIC, "index %hu out of bounds! dimention = %hu", i, _DIM);
+        FatalAssert(i < _DIM, LOG_TAG_VECTOR, "index %hu out of bounds! dimention = %hu", i, _DIM);
         return _data[i];
     }
 
@@ -205,18 +228,22 @@ protected:
     T* _data = nullptr;
     bool _delete_on_destroy;
 
-    Vector(T* data, bool delete_on_destroy) : _data(data), _delete_on_destroy(delete_on_destroy) {}
+    Vector(T* data, bool delete_on_destroy) : _data(data), _delete_on_destroy(delete_on_destroy) {
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
+            "Created vector using private constructor. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+            _data, this, _delete_on_destroy ? "T" : "F");
+    }
 
     /* Not tested. */
     // Vector(const Vector<T, _DIM>& _vec, T* loc, bool delete_on_destroy) 
     //         : _delete_on_destroy(delete_on_destroy) {
-    //     ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_BASIC, "Input vector is invalid. this=%lu, _vec=%lu.", this, &_vec);
+    //     ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_VECTOR, "Input vector is invalid. this=%lu, _vec=%lu.", this, &_vec);
     //     if (!_vec.Is_Valid()) {
     //         _data = nullptr;
     //     }
     //     else {
-    //         CLOG_IF_TRUE(loc == _vec._data ,LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Deep copy on the same location. this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
-    //         CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Delete on destroy is true with valid location! this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
+    //         CLOG_IF_TRUE(loc == _vec._data ,LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Deep copy on the same location. this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
+    //         CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Delete on destroy is true with valid location! this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
     //         _data = (loc ? loc : new T[_DIM]);
     //         memcpy(_data, _vec._data, _DIM * sizeof(T));
     //     }
@@ -224,9 +251,9 @@ protected:
 
     // Vector(const std::vector<T>& vec, T* loc, bool delete_on_destroy) 
     //         : _delete_on_destroy(delete_on_destroy) {
-    //     FatalAssert((vec.size() >= _DIM), LOG_TAG_BASIC, "Input vector is too small.");
+    //     FatalAssert((vec.size() >= _DIM), LOG_TAG_VECTOR, "Input vector is too small.");
 
-    //     CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Delete on destroy is true with valid location! this=%lu, loc=%lu.", this, loc);
+    //     CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Delete on destroy is true with valid location! this=%lu, loc=%lu.", this, loc);
     //     _data = (loc ? loc : new T[_DIM]);
     //     memcpy(_data, &vec[0], _DIM * sizeof(T));
     // }
@@ -276,8 +303,8 @@ public:
     ~VectorSet() {}
 
     inline Address Insert(const Vector<T, _DIM>& _data, VectorID id) {
-        FatalAssert(_data.Is_Valid(), LOG_TAG_BASIC, "Cannot insert invalid vector.");
-        FatalAssert(_size < _CAP, LOG_TAG_BASIC, "VectorSet is full.");
+        FatalAssert(_data.Is_Valid(), LOG_TAG_VECTOR_SET, "Cannot insert invalid vector.");
+        FatalAssert(_size < _CAP, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
         memcpy(_beg + (_size * _DIM), _data._data, _DIM * sizeof(T));
         _ids[_size] = id;
@@ -286,8 +313,8 @@ public:
     }
 
     inline Address Insert(const T* _data, VectorID id) {
-        FatalAssert(_data != nullptr, LOG_TAG_BASIC, "Cannot insert null vector.");
-        FatalAssert(_size < _CAP, LOG_TAG_BASIC, "VectorSet is full.");
+        FatalAssert(_data != nullptr, LOG_TAG_VECTOR_SET, "Cannot insert null vector.");
+        FatalAssert(_size < _CAP, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
         memcpy(_beg + (_size * _DIM), _data, _DIM * sizeof(T));
         _ids[_size] = id;
@@ -296,8 +323,8 @@ public:
     }
 
     inline Address Insert(const std::vector<T>& _data, VectorID id) {
-        FatalAssert(_data.size() == _DIM, LOG_TAG_BASIC, "Input vector dimention dose not match, input.dim=%hu, _DIM=%hu.", _data.size(), _DIM);
-        FatalAssert(_size < _CAP, LOG_TAG_BASIC, "VectorSet is full.");
+        FatalAssert(_data.size() == _DIM, LOG_TAG_VECTOR_SET, "Input vector dimention dose not match, input.dim=%hu, _DIM=%hu.", _data.size(), _DIM);
+        FatalAssert(_size < _CAP, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
         memcpy(_beg + (_size * _DIM), &_data[0], _DIM * sizeof(T));
         _ids[_size] = id;
@@ -306,12 +333,12 @@ public:
     }
 
     inline VectorID Get_VectorID(uint16_t idx) const {
-        FatalAssert(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
         return _ids[idx]; 
     }
 
     inline VectorID Get_Last_VectorID() const {
-        FatalAssert(_size > 0, LOG_TAG_ANY, "Vector set is empty");
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
         return _ids[_size - 1]; 
     }
 
@@ -326,7 +353,7 @@ public:
     }
 
     inline uint16_t Get_Index(VectorID id) const {
-        FatalAssert(_size > 0, LOG_TAG_ANY, "Bucket is Empty");
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Bucket is Empty");
 
         uint16_t index = 0;
         for (; index < _size; ++index) {
@@ -335,19 +362,19 @@ public:
             }
         }
 
-        FatalAssert(index < _size, LOG_TAG_ANY, "vector id:%lu not found", id._id);
-        FatalAssert(_ids[index] == id, LOG_TAG_ANY, "_ids[%hu](%lu) != id(%lu)", index, _ids[index]._id, id._id);
+        FatalAssert(index < _size, LOG_TAG_VECTOR_SET, "vector id:%lu not found", id._id);
+        FatalAssert(_ids[index] == id, LOG_TAG_VECTOR_SET, "_ids[%hu](%lu) != id(%lu)", index, _ids[index]._id, id._id);
         return index;
     }
 
     inline Vector<T, _DIM> Get_Last_Vector() {
-        FatalAssert(_size > 0, LOG_TAG_ANY, "Vector set is empty");
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
         
         return Vector<T, _DIM>(_beg + ((_size - 1) * _DIM), false);
     }
 
     inline Vector<T, _DIM> Get_Vector(uint16_t idx) {
-        FatalAssert(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
         
         return Vector<T, _DIM>(_beg + (idx * _DIM), false);
     }
@@ -357,7 +384,7 @@ public:
     }
 
     inline const Vector<T, _DIM> Get_Vector(uint16_t idx) const {
-        FatalAssert(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
         
         return Vector<T, _DIM>(_beg + (idx * _DIM), false);
     }
@@ -375,7 +402,7 @@ public:
     }
 
     inline Vector<T, _DIM> Get_Vector_Copy(uint16_t idx) const {
-        FatalAssert(idx < _size, LOG_TAG_ANY, "idx(%hu) >= _size(%hu)", idx, _size);
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
         
         return Vector<T, _DIM>(_beg + (idx * _DIM));
     }
@@ -385,7 +412,7 @@ public:
     }
 
     inline VectorUpdate Delete(VectorID id) {
-        FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_BASIC, "cannot delete invalide vector id.");
+        FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_VECTOR_SET, "cannot delete invalide vector id.");
 
         uint16_t idx = Get_Index(id);
         VectorUpdate swapped{INVALID_VECTOR_ID, INVALID_ADDRESS};
@@ -403,7 +430,7 @@ public:
     }
 
     inline void Delete_Last() {
-        FatalAssert(_size > 0, LOG_TAG_ANY, "Vector set is empty");
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
         --_size;
     }
 
@@ -444,8 +471,8 @@ template<typename V_TYPE, uint16_t _DIM, typename D_TYPE = double>
 class L2_Distance {
 public:
     D_TYPE operator()(const Vector<V_TYPE, _DIM>& a, const Vector<V_TYPE, _DIM>& b) const {
-        FatalAssert(a.Is_Valid(), LOG_TAG_ANY, "a is invalid");
-        FatalAssert(b.Is_Valid(), LOG_TAG_ANY, "b is invalid");
+        FatalAssert(a.Is_Valid(), LOG_TAG_BASIC, "a is invalid");
+        FatalAssert(b.Is_Valid(), LOG_TAG_BASIC, "b is invalid");
 
         D_TYPE dist = 0;
         for (size_t i = 0; i < _DIM; ++i) {
