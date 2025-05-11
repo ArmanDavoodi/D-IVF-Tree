@@ -17,7 +17,7 @@ struct VectorUpdate {
     Address vector_data;
     // Address cluster_address;
 
-    // VectorUpdate(VectorID _id, Address _data, Address _cluster) : 
+    // VectorUpdate(VectorID _id, Address _data, Address _cluster) :
     //     vector_id(_id), vector_data(_data), cluster_address(_cluster) {}
 };
 
@@ -41,49 +41,49 @@ public:
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
-    explicit Vector(const T* data) : _data(data != nullptr ? new T[_DIM] : nullptr), 
+    explicit Vector(const T* data) : _data(data != nullptr ? new T[_DIM] : nullptr),
                                      _delete_on_destroy(data != nullptr) {
         if (data != nullptr) {
             memcpy(_data, data, _DIM * sizeof(T));
         }
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
-            "Created vector based on pointer data. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
+            "Created vector based on pointer data. _data=%lu. this=%lu, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
     /* Not tested */
-    // explicit Vector(const std::vector<T>& vec) : _data(vec.size() >= _DIM ? new T[_DIM] : nullptr), 
+    // explicit Vector(const std::vector<T>& vec) : _data(vec.size() >= _DIM ? new T[_DIM] : nullptr),
     //                                              _delete_on_destroy(vec.size() >= _DIM) {
     //     if (vec.size() >= _DIM) {
     //         memcpy(_data, &vec[0], _DIM * sizeof(T));
     //     }
     // }
-    
-    Vector(const Vector<T, _DIM>& _vec) : _data(_vec.Is_Valid() ? new T[_DIM] : nullptr), 
+
+    Vector(const Vector<T, _DIM>& _vec) : _data(_vec.Is_Valid() ? new T[_DIM] : nullptr),
                                           _delete_on_destroy(_vec.Is_Valid()) {
         if (_vec.Is_Valid()) {
             memcpy(_data, _vec._data, _DIM * sizeof(T));
         }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
-            "Created vector based on another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
+            "Created vector based on another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
-    Vector(Vector<T, _DIM>&& _vec) 
+    Vector(Vector<T, _DIM>&& _vec)
         : _data(_vec._data), _delete_on_destroy(_vec._delete_on_destroy) {
         _vec._data = nullptr;
         _vec._delete_on_destroy = false;
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
-            "Created vector based on rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
+            "Created vector based on rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
     inline static Vector<T, _DIM> NEW_INVALID() {
         return Vector<T, _DIM>(nullptr, false);
     }
-    
+
     inline void Invalidate() {
         if (_data != nullptr) {
             if (_delete_on_destroy) {
@@ -98,7 +98,7 @@ public:
         _data = nullptr;
         _delete_on_destroy = false;
     }
-    
+
     ~Vector() {
         Invalidate();
     }
@@ -116,8 +116,8 @@ public:
             Invalidate();
         }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
-            "assigned vector to another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
+            "assigned vector to another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
 
         return *this;
@@ -139,8 +139,8 @@ public:
             Invalidate();
         }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
-            "assigned vector to another rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
+            "assigned vector to another rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
 
         return *this;
@@ -172,11 +172,11 @@ public:
         if (Are_The_Same(other)) {
             return true;
         }
-        
+
         if (!Is_Valid() || !other.Is_Valid()) {
             return false;
         }
-        
+
         for (uint16_t i = 0; i < _DIM; ++i) {
             if (_data[i] != other._data[i]) {
                 return false;
@@ -229,13 +229,13 @@ protected:
     bool _delete_on_destroy;
 
     Vector(T* data, bool delete_on_destroy) : _data(data), _delete_on_destroy(delete_on_destroy) {
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, 
-            "Created vector using private constructor. _data=%lu. this=%lu, _delete_on_destroy=%s.", 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
+            "Created vector using private constructor. _data=%lu. this=%lu, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
     /* Not tested. */
-    // Vector(const Vector<T, _DIM>& _vec, T* loc, bool delete_on_destroy) 
+    // Vector(const Vector<T, _DIM>& _vec, T* loc, bool delete_on_destroy)
     //         : _delete_on_destroy(delete_on_destroy) {
     //     ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_VECTOR, "Input vector is invalid. this=%lu, _vec=%lu.", this, &_vec);
     //     if (!_vec.Is_Valid()) {
@@ -249,7 +249,7 @@ protected:
     //     }
     // }
 
-    // Vector(const std::vector<T>& vec, T* loc, bool delete_on_destroy) 
+    // Vector(const std::vector<T>& vec, T* loc, bool delete_on_destroy)
     //         : _delete_on_destroy(delete_on_destroy) {
     //     FatalAssert((vec.size() >= _DIM), LOG_TAG_VECTOR, "Input vector is too small.");
 
@@ -273,24 +273,30 @@ friend class UT::Test;
 
 template<typename T, uint16_t _DIM>
 struct VectorPair {
+public:
+VectorPair(const VectorPair<T, _DIM>& other) : id(other.id), vector(other.vector) {}
+VectorPair(VectorPair<T, _DIM>&& other) noexcept : id(other.id), vector(std::move(other.vector)) {}
+
+inline VectorPair<T, _DIM>& operator=(const VectorPair<T, _DIM>& other) {
+    id = other.id;
+    vector = other.vector;
+    return *this;
+}
+
+inline VectorPair<T, _DIM>& operator=(VectorPair<T, _DIM>&& other) {
+    id = other.id;
+    vector = std::move(other.vector);
+    return *this;
+}
+
+VectorID id;
+Vector<T, _DIM> vector;
+protected:
     VectorPair(VectorID _id, T* data, bool delete_on_destroy=true) : id(_id), vector(data, delete_on_destroy) {}
-    VectorPair(const VectorPair<T, _DIM>& other) : id(other.id), vector(other.vector) {}
-    VectorPair(VectorPair<T, _DIM>&& other) noexcept : id(other.id), vector(std::move(other.vector)) {}
 
-    inline VectorPair<T, _DIM>& operator=(const VectorPair<T, _DIM>& other) {
-        id = other.id;
-        vector = other.vector;
-        return *this;
-    }
 
-    inline VectorPair<T, _DIM>& operator=(VectorPair<T, _DIM>&& other) {
-        id = other.id;
-        vector = std::move(other.vector);
-        return *this;
-    }
-
-    VectorID id;
-    Vector<T, _DIM> vector;
+template<typename, uint16_t, uint16_t>
+friend class VectorSet;
 };
 
 template<typename T, uint16_t _DIM, uint16_t _CAP>
@@ -322,24 +328,24 @@ public:
         return _beg + ((_size - 1) * _DIM);
     }
 
-    inline Address Insert(const std::vector<T>& _data, VectorID id) {
-        FatalAssert(_data.size() == _DIM, LOG_TAG_VECTOR_SET, "Input vector dimention dose not match, input.dim=%hu, _DIM=%hu.", _data.size(), _DIM);
-        FatalAssert(_size < _CAP, LOG_TAG_VECTOR_SET, "VectorSet is full.");
+    // inline Address Insert(const std::vector<T>& _data, VectorID id) {
+    //     FatalAssert(_data.size() == _DIM, LOG_TAG_VECTOR_SET, "Input vector dimention dose not match, input.dim=%hu, _DIM=%hu.", _data.size(), _DIM);
+    //     FatalAssert(_size < _CAP, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
-        memcpy(_beg + (_size * _DIM), &_data[0], _DIM * sizeof(T));
-        _ids[_size] = id;
-        ++_size;
-        return _beg + ((_size - 1) * _DIM);
-    }
+    //     memcpy(_beg + (_size * _DIM), &_data[0], _DIM * sizeof(T));
+    //     _ids[_size] = id;
+    //     ++_size;
+    //     return _beg + ((_size - 1) * _DIM);
+    // }
 
     inline VectorID Get_VectorID(uint16_t idx) const {
         FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        return _ids[idx]; 
+        return _ids[idx];
     }
 
     inline VectorID Get_Last_VectorID() const {
         FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        return _ids[_size - 1]; 
+        return _ids[_size - 1];
     }
 
     inline bool Contains(VectorID id) const {
@@ -369,28 +375,28 @@ public:
 
     inline Vector<T, _DIM> Get_Last_Vector() {
         FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        
+
         return Vector<T, _DIM>(_beg + ((_size - 1) * _DIM), false);
     }
 
     inline Vector<T, _DIM> Get_Vector(uint16_t idx) {
         FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        
+
         return Vector<T, _DIM>(_beg + (idx * _DIM), false);
     }
 
     inline Vector<T, _DIM> Get_Vector_By_ID(VectorID id) {
-        return Get_Vector(Get_Index(id)); 
+        return Get_Vector(Get_Index(id));
     }
 
     inline const Vector<T, _DIM> Get_Vector(uint16_t idx) const {
         FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        
+
         return Vector<T, _DIM>(_beg + (idx * _DIM), false);
     }
 
     inline const Vector<T, _DIM> Get_Vector_By_ID(VectorID id) const {
-        return Get_Vector(Get_Index(id)); 
+        return Get_Vector(Get_Index(id));
     }
 
     inline VectorPair<T, _DIM> operator[](uint16_t idx) {
@@ -403,12 +409,12 @@ public:
 
     inline Vector<T, _DIM> Get_Vector_Copy(uint16_t idx) const {
         FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        
+
         return Vector<T, _DIM>(_beg + (idx * _DIM));
     }
 
     inline Vector<T, _DIM> Get_Vector_Copy_By_ID(VectorID id) const {
-        return Get_Vector_Copy(Get_Index(id)); 
+        return Get_Vector_Copy(Get_Index(id));
     }
 
     inline VectorUpdate Delete(VectorID id) {
@@ -476,7 +482,7 @@ public:
 
         D_TYPE dist = 0;
         for (size_t i = 0; i < _DIM; ++i) {
-            dist += (D_TYPE)(a[i] - b[i]) * (D_TYPE)(a[i] - b[i]);
+            dist += ((D_TYPE)a[i] - (D_TYPE)b[i]) * ((D_TYPE)a[i] - (D_TYPE)b[i]);
         }
         return dist;
     }
@@ -498,6 +504,8 @@ public:
         for (uint16_t e = 0; e < _DIM; ++e) {
             centroid[e] /= size;
         }
+
+        return centroid;
     }
 };
 

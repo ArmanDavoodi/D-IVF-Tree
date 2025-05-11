@@ -18,14 +18,14 @@ class TestBase {
 public:
     TestBase(int argc, char *argv[], const std::set<std::string>& default_black_list) : _argc(argc), _argv(argv) {
         num_runs = Parse_Args(_argc, _argv, test.all_tests, test.test_priority, tests_to_run, default_black_list);
-        
+
         std::sort(tests_to_run.begin(), tests_to_run.end(), [this](const std::string& a, const std::string& b) {
             return test.test_priority[a] < test.test_priority[b];
         });
     }
 
     int Run() {
-        
+
         if (num_runs == 0) {
             return 1;
         }
@@ -34,7 +34,7 @@ public:
             fprintf(stderr, "Starting round %lu/%lu...\n\n", i+1, num_runs);
             test.Init(i + 1);
             fprintf(stderr, "Inited the tests.\n\n");
-            
+
             for (std::string test_name : tests_to_run) {
                 fprintf(stderr, "Searching for Test " _COLORF_CYAN "%s" _COLORF_RESET "...\n", test_name.c_str());
                 auto it = test.tests.find(test_name);
@@ -45,12 +45,12 @@ public:
                                 " ran successfully!" _COLORF_RESET "\n\n", test_name.c_str());
                     }
                     else {
-                        fprintf(stderr, _COLORF_RED "Test " _COLORF_RESET _COLORF_CYAN " %s " _COLORF_RESET _COLORF_RED 
+                        fprintf(stderr, _COLORF_RED "Test " _COLORF_RESET _COLORF_CYAN " %s " _COLORF_RESET _COLORF_RED
                                 " failed!" _COLORF_RESET "\n\n", test_name.c_str());
                     }
-                }  
+                }
                 else {
-                    fprintf(stderr, _COLORF_RED "Error: Test " _COLORF_RESET _COLORF_CYAN "%s" _COLORF_RESET _COLORF_RED 
+                    fprintf(stderr, _COLORF_RED "Error: Test " _COLORF_RESET _COLORF_CYAN "%s" _COLORF_RESET _COLORF_RED
                             " not found!\n\n" _COLORF_RESET, test_name.c_str());
                 }
             }

@@ -38,10 +38,10 @@ public:
         FatalAssert(directory.size() > node_id._level, LOG_TAG_BUFFER, "Node ID:%lu level is out of bounds. max_level:%lu", node_id._id, directory.size());
         FatalAssert(directory[node_id._level].size() > node_id._val, LOG_TAG_BUFFER, "Node ID:%lu val is out of bounds. max_val:%lu", node_id._id, directory[node_id._level].size());
         FatalAssert(directory[node_id._level][node_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Node not found in the buffer. Node ID:%lu", node_id._id);
-        
+
         Internal_Node* node = (Internal_Node*)(directory[node_id._level][node_id._val].cluster_address);
         FatalAssert(node->_centroid_id == node_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu", node_id._id, directory[node_id._level][node_id._val]->_centroid_id._id);
-        
+
         return node;
     }
 
@@ -51,10 +51,10 @@ public:
         FatalAssert(directory.size() > leaf_id._level, LOG_TAG_BUFFER, "Leaf ID:%lu level is out of bounds. max_level:%lu", leaf_id._id, directory.size());
         FatalAssert(directory[leaf_id._level].size() > leaf_id._val, LOG_TAG_BUFFER, "Leaf ID:%lu val is out of bounds. max_val:%lu", leaf_id._id, directory[leaf_id._level].size());
         FatalAssert(directory[leaf_id._level][leaf_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Leaf not found in the buffer. Leaf ID:%lu", leaf_id._id);
-        
+
         Leaf_Node* leaf = (Leaf_Node*)(directory[leaf_id._level][leaf_id._val].cluster_address);
         FatalAssert(leaf->_centroid_id == leaf_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu", leaf_id._id, directory[leaf_id._level][leaf_id._val]->_centroid_id._id);
-        
+
         return leaf;
     }
 
@@ -69,7 +69,7 @@ public:
         FatalAssert(leaf->_centroid_id != INVALID_VECTOR_ID, LOG_TAG_BUFFER,  "Invalid Leaf ID. Vector ID:%lu", vec_id._id);
         FatalAssert(leaf->_centroid_id.Is_Leaf(), LOG_TAG_BUFFER,  "Cluster %lu is not a leaf. Vector ID:%lu", leaf->_centroid_id, vec_id._id);
         FatalAssert(leaf->Contains(vec_id), LOG_TAG_BUFFER, "Parent leaf:%lu dose not contain the vector:%lu", leaf->_centroid_id, vec_id._id);
-        
+
         return leaf;
     }
 
@@ -92,7 +92,7 @@ public:
     }
 
     inline VectorID Record_Root() {
-        VectorID _id = Next_ID(directory.size());       
+        VectorID _id = Next_ID(directory.size());
         directory.emplace_back();
         directory[id._level].emplace_back(INVALID_ADDRESS, INVALID_ADDRESS);
         return _id;
@@ -170,7 +170,7 @@ protected:
     }
 
     std::vector<std::vector<VectorInfo>> directory;
-    
+
 friend class UT::Test;
 };
 

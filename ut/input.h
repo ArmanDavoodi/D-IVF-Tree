@@ -22,7 +22,7 @@ struct UT_Input {
 
     static constexpr size_t MAX_NUM_TRIES = 1000;
 
-    UT_Input(const std::set<std::string>& tests, const std::map<std::string, int>& test_priorities) : 
+    UT_Input(const std::set<std::string>& tests, const std::map<std::string, int>& test_priorities) :
                 _tests(tests), _priorities(test_priorities) {}
 
     ~UT_Input() {
@@ -98,7 +98,7 @@ void Print_Help() {
     fprintf(stderr, "\t-u\t\tWill not run the tests with names matching the input regex string.\n");
     fprintf(stderr, "\t-w\t\tWill run all of the tests in front of the option.\n");
     fprintf(stderr, "\t-b\t\tWill not run any of the tests in front of the option.\n");
-    fprintf(stderr, "\t-n\t\tNumber of times the test will be run. Default value is 1. Should be in range [1, %lu].\n", 
+    fprintf(stderr, "\t-n\t\tNumber of times the test will be run. Default value is 1. Should be in range [1, %lu].\n",
             UT_Input::MAX_NUM_TRIES);
     fprintf(stderr, "\t-l\t\tWill list all of the tests.\n");
     fprintf(stderr, "\t-h\t\tPrints this message.\n");
@@ -125,7 +125,7 @@ inline UT_Parse_State Parse_Flag(const char& f) {
     }
 }
 
-size_t Parse_Args(int argc, char *argv[], 
+size_t Parse_Args(int argc, char *argv[],
                 const std::set<std::string>& all_tests, const std::map<std::string, int>& test_priorities,
                 std::vector<std::string>& tests_to_run, const std::set<std::string>& default_black_list) {
     fprintf(stderr, "Start parse input...\n");
@@ -136,7 +136,10 @@ size_t Parse_Args(int argc, char *argv[],
     bool non_list_option = false;
     bool use_default = true;
 
+    fprintf(stderr, "argc=%d\n", argc);
+
     for (int i = 1; i < argc; ++i) {
+        fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
         std::string arg(argv[i]);
         if (arg.size() == 2 || arg[0] == '-') {
             state = Parse_Flag(arg[1]);
@@ -152,7 +155,7 @@ size_t Parse_Args(int argc, char *argv[],
 
         switch (state) {
         case FMT:
-            if (seen_option[FMT] || seen_option[LIST] || i+1 >= argc || 
+            if (seen_option[FMT] || seen_option[LIST] || i+1 >= argc ||
                 strlen(argv[i+1]) < 3 || (argv[i+1][0] != '\"' && argv[i+1][strlen(argv[i+1])-1] != '\"')) {
 
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -161,6 +164,7 @@ size_t Parse_Args(int argc, char *argv[],
             }
 
             ++i;
+            fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
             non_list_option = true;
             use_default = false;
             arg = std::string(argv[i] + 1, argv[i] + strlen(argv[i]) - 1);
@@ -168,7 +172,7 @@ size_t Parse_Args(int argc, char *argv[],
             break;
 
         case BFMT:
-            if (seen_option[BFMT] || seen_option[LIST] || i+1 >= argc || 
+            if (seen_option[BFMT] || seen_option[LIST] || i+1 >= argc ||
                 strlen(argv[i+1]) < 3 || (argv[i+1][0] != '\"' && argv[i+1][strlen(argv[i+1])-1] != '\"')) {
 
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -177,12 +181,13 @@ size_t Parse_Args(int argc, char *argv[],
             }
 
             ++i;
+            fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
             non_list_option = true;
             use_default = false;
             arg = std::string(argv[i] + 1, argv[i] + strlen(argv[i]) - 1);
             input.bfmt = new std::regex(arg.c_str(), std::regex_constants::egrep);
             break;
-        
+
         case WHITE_LIST:
             if (seen_option[WHITE_LIST] || seen_option[LIST] || i+1 >= argc) {
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -199,10 +204,11 @@ size_t Parse_Args(int argc, char *argv[],
                     --i;
                     break;
                 }
+                fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
 
                 input.white_list.insert(arg);
             }
-            
+
             break;
 
         case BLACK_LIST:
@@ -221,12 +227,12 @@ size_t Parse_Args(int argc, char *argv[],
                     --i;
                     break;
                 }
-
+                fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
                 input.black_list.insert(arg);
             }
-            
+
             break;
-        
+
         case NUM_TRIES:
             if (seen_option[NUM_TRIES] || i+1 >= argc) {
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -235,13 +241,14 @@ size_t Parse_Args(int argc, char *argv[],
             }
 
             ++i;
+            fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
             arg = std::string(argv[i]);
-            if (arg.empty() || std::all_of(arg.begin(), arg.end(), ::isdigit)) {
+            if (arg.empty() || !(std::all_of(arg.begin(), arg.end(), ::isdigit))) {
                 fprintf(stderr, "Fatal: Invalid input format.\n");
                 Print_Usage();
                 return 0;
             }
-            
+
             input.num_tries = std::stoul(arg);
             if (input.num_tries == 0 || input.num_tries > UT_Input::MAX_NUM_TRIES) {
                 fprintf(stderr, "Fatal: Number of tries hould be in range [1, %lu].\n", UT_Input::MAX_NUM_TRIES);
@@ -266,7 +273,7 @@ size_t Parse_Args(int argc, char *argv[],
             fprintf(stderr, "##########################\n\n");
 
             break;
-        
+
         case HELP:
             if (seen_option[HELP]) {
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -279,7 +286,7 @@ size_t Parse_Args(int argc, char *argv[],
             fprintf(stderr, "\n");
 
             break;
-        
+
         case LIST:
             if (seen_option[LIST] || non_list_option || i+1 >= argc) {
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -295,17 +302,17 @@ size_t Parse_Args(int argc, char *argv[],
                     --i;
                     break;
                 }
-
+                fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
                 input.white_list.insert(arg);
             }
-            
+
             break;
-        
+
         case INV:
             fprintf(stderr, "Fatal: Invalid flag %s.\n", arg.c_str());
             Print_Usage();
             return 0;
-        
+
         default:
             fprintf(stderr, "Fatal: Invalid input format.\n");
             Print_Usage();
@@ -322,6 +329,6 @@ size_t Parse_Args(int argc, char *argv[],
 
     input.Get_Tests_To_Run(tests_to_run);
     return input.num_tries;
-} 
+}
 
 #endif

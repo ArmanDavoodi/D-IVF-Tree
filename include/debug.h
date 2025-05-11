@@ -34,7 +34,7 @@ enum LOG_LEVELS : uint8_t {
 enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_BASIC_BIT,
     LOG_TAG_VECTOR_BIT,
-    LOG_TAG_VECTOR_SET_BIT, 
+    LOG_TAG_VECTOR_SET_BIT,
     LOG_TAG_BUFFER_BIT,
     LOG_TAG_COPPER_NODE_BIT,
     LOG_TAG_VECTOR_INDEX_BIT,
@@ -167,17 +167,17 @@ inline const char* leveltostr(LOG_LEVELS level)
     switch (level)
     {
     case LOG_LEVEL_PANIC:
-        return COLORF_PURPLE "Panic" COLORF_RESET;
+        return COLORF_PURPLE "PANIC" COLORF_RESET;
     case LOG_LEVEL_ERROR:
-        return COLORF_RED "Error" COLORF_RESET;
+        return COLORF_RED "ERROR" COLORF_RESET;
     case LOG_LEVEL_WARNING:
-        return COLORF_YELLOW "Warning" COLORF_RESET;
+        return COLORF_YELLOW "WARNING" COLORF_RESET;
     case LOG_LEVEL_LOG:
-        return COLORF_CYAN "Log" COLORF_RESET;
+        return COLORF_CYAN "LOG" COLORF_RESET;
     case LOG_LEVEL_DEBUG:
-        return COLORF_GREEN "Debug" COLORF_RESET;
+        return COLORF_GREEN "DEBUG" COLORF_RESET;
     default:
-        return "Undefined";
+        return "UNDEFINED";
     }
 }
 
@@ -207,12 +207,12 @@ inline const char* tagtostr(uint64_t tag)
 }
 
 inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
-                const char* file_name, const char* func_name, size_t line, 
+                const char* file_name, const char* func_name, size_t line,
                 size_t thread_id) {
 
     char time_str[100];
-    timetostr(_time, time_str); // todo add coloring if needed 
-    fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n", 
+    timetostr(_time, time_str); // todo add coloring if needed
+    fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
         leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
     fflush(OUT);
     if (level == LOG_LEVEL_PANIC) {
@@ -333,7 +333,7 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 // todo:
 // todo: add backslash at the end of lines
 // #define FAULT_INJECTION_WAIT_UNTIL(name, duration) FI_MAP[(name)].try_acquire_for((duration))
-// #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...) 
+// #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...)
 //     do {
 //         if (sizeof((msg)) == 0){
 //             CLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );

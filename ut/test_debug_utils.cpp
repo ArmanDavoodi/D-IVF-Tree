@@ -80,7 +80,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG(LOG_LEVEL_ERROR, LOG_TAG_ANY, "Hello World! This is a ERROR."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_test.");
 
         return true;
@@ -97,7 +97,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Hello World! This is a test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::tag_test.");
 
         return true;
@@ -141,7 +141,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG(LOG_LEVEL_ERROR, LOG_TAG_TEST, "Hello World! This is a ERROR with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_tag_comb_test.");
 
         return true;
@@ -185,7 +185,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if false(false)! This is a ERROR."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_level_test.");
 
         return true;
@@ -229,7 +229,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(false)! This is a test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_tag_test.");
 
         return true;
@@ -382,7 +382,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if false(false)! This is a ERROR with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_level_tag_comb_test.");
 
         return true;
@@ -395,7 +395,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(false, LOG_TAG_ANY, "This is a false assert error."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_test.");
 
         return true;
@@ -412,7 +412,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(true, LOG_TAG_TEST, "This is a true assert error with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        
+
         ErrorAssert(false, LOG_TAG_BASIC, "This is a false assert error with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(false, LOG_TAG_COPPER_NODE, "This is a false assert error with copper tag."
@@ -421,7 +421,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(false, LOG_TAG_TEST, "This is a false assert error with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_tag_test.");
 
         return true;
@@ -438,7 +438,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(true, LOG_TAG_TEST, "This is a true fatal assert with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        
+
         FatalAssert(false, LOG_TAG_BASIC, "This is a false fatal assert with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(false, LOG_TAG_COPPER_NODE, "This is a false fatal assert with copper tag."
@@ -447,7 +447,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(false, LOG_TAG_TEST, "This is a false fatal assert with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_tag_test.");
 
         return true;
@@ -460,7 +460,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(false, LOG_TAG_ANY, "This is a false fatal assert."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_test.");
 
         return true;
@@ -486,7 +486,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if false(true)! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_panic_tag_comb_test.");
 
         return true;
@@ -503,7 +503,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if true(true)! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_true_true_panic_tag_comb_test.");
 
         return true;
@@ -520,7 +520,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if false(false)! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_false_panic_tag_comb_test.");
 
         return true;
@@ -533,7 +533,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if false(true)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_panic_test.");
 
         return true;
@@ -544,7 +544,7 @@ public:
 
         CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if true(true)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_true_true_panic_test.");
 
         return true;
@@ -555,12 +555,12 @@ public:
 
         CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if false(false)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_false_panic_test.");
 
         return true;
     }
-    
+
     bool panic_tag_comb_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_tag_comb_test for %luth time...", try_count);
 
@@ -572,7 +572,7 @@ public:
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_TEST, "Hello World! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_tag_comb_test.");
 
         return true;
@@ -583,7 +583,7 @@ public:
 
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-            
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_test.");
 
         return true;
@@ -608,8 +608,8 @@ friend class TestBase<Test>;
 }
 
 int main(int argc, char *argv[]) {
-    std::set<std::string> default_black_list = {"test_debug_util::fatal_assert_tag_test", "test_debug_util::fatal_assert_test", 
-                                                "test_debug_util::panic_tag_comb_test", "test_debug_util::panic_test", 
+    std::set<std::string> default_black_list = {"test_debug_util::fatal_assert_tag_test", "test_debug_util::fatal_assert_test",
+                                                "test_debug_util::panic_tag_comb_test", "test_debug_util::panic_test",
                                                 "test_debug_util::conditional_true_true_panic_tag_comb_test", "test_debug_util::conditional_false_false_panic_tag_comb_test",
                                                 "test_debug_util::conditional_true_true_panic_test", "test_debug_util::conditional_false_false_panic_test"};
     UT::TestBase<UT::Test> test(argc, argv, default_black_list);

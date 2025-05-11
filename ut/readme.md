@@ -20,7 +20,7 @@ To rebuild the tests without cleaning the build and out directories, use fbuild_
     * LOG_TAG_ANY                 0b11111
 
 ## Test Arguments:
-    -DLOG_MIN_LEVEL=[LOG_LEVEL]             If the log level is equal or below MIN_LEVEL, LOG_TAG is ignored and log is printed. 
+    -DLOG_MIN_LEVEL=[LOG_LEVEL]             If the log level is equal or below MIN_LEVEL, LOG_TAG is ignored and log is printed.
                                             Default value is LOG_LEVEL_ZERO (i.e. LOG_LEVEL does not affect TAG filtering).
     -DLOG_LEVEL=[LOG_LEVEL]                 All logs with levels above LOG_LEVEL will be ignored.
                                             Should be greater than or equal to LOG_MIN_LEVEL.
@@ -28,7 +28,7 @@ To rebuild the tests without cleaning the build and out directories, use fbuild_
     -DLOG_TAG=[LOG_TAG[ | LOG_TAG]...]      Only the logs which have their respective bit set to 1, will be printed.
                                             Default value is LOG_TAG_ANY (i.e. No logs are ignored based on TAG).
     -DOUT=[stdout|stderr]                   Sets the output stream for the logs. Default value is stdout.
-    -DASSERT_ERROR_PANIC                    If used, all AssertErrors will act similar to AssertFatals 
+    -DASSERT_ERROR_PANIC                    If used, all AssertErrors will act similar to AssertFatals
                                             (i.e. They will crash the program if enabled). It is not defined by default.
 ## Locked Arguments:
     -DBUILD=[DEBUG|RELEASE]                 Is always set to DEBUG for Test builds.
@@ -41,7 +41,7 @@ For example running './run_ut.sh test_debug_utils' will run the tests associated
 
 ## Notes:
 * If ENABLE_TEST_LOGGING is not defined but ENABLE_ASSERTS is, then all asserts will be changed to simple asserts
-    and all tags will be ignored. Moreover, In this case, if ASSERT_ERROR_PANIC is defined, ErrorAssert will 
+    and all tags will be ignored. Moreover, In this case, if ASSERT_ERROR_PANIC is defined, ErrorAssert will
     behave similar to FatalAssert. Otherwise, they are also ignored.
 
 ## TODO
