@@ -362,8 +362,6 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_set for %luth time...", try_count);
         bool status = true;
 
-        copper::VectorSet<uint16_t, dim> uset;
-
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_set.");
         return status;
     }
