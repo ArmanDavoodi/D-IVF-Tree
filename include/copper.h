@@ -234,7 +234,7 @@ public:
     }
 
     inline Vector<T, _DIM> Compute_Current_Centroid() const {
-        return _dist.Compute_Centroid(_bucket.Get_Address(), _bucket.Size())
+        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size())
     }
 
 protected:

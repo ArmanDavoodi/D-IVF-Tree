@@ -2,112 +2,6 @@
 
 #include "vector_utils.h"
 
-#include <queue>
-
-// int main() {
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Test Vector_Utils START.");
-
-
-    // copper::VectorID* ids16 = static_cast<copper::VectorID*>((void*)_ids16);
-
-
-    // copper::VectorID* idsf = static_cast<copper::VectorID*>((void*)_idsf);
-
-    // copper::Vector vec = _data16;
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Uint Vector: %s", copper::to_string<uint16_t>(vec, dim).c_str());
-
-    // vec = _dataf;
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Float Vector: %s", copper::to_string<float>(vec, dim).c_str());
-
-
-    // copper::VectorSet uset{_data16, ids16, size};
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Uint VectorSet: %s", uset.to_string<uint16_t>(dim).c_str());
-
-    // copper::VectorSet fset{_dataf, idsf, size};
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Float VectorSet: %s", fset.to_string<float>(dim).c_str());
-
-    // copper::Distance<uint16_t> *_du = new copper::L2_Distance<uint16_t>;
-    // copper::Distance<float> *_df = new copper::L2_Distance<float>;
-
-    // double udist[size][size], fdist[size][size];
-
-    // double b_udist[size][size] = {{0.0, 512.0, 2048.0}, {512.0, 0.0, 512.0}, {2048.0, 512.0, 0.0}};
-    // // I used the python dist to calculate these then I powered each by 2 so they may not be the correct values
-    // double b_fdist[size][size] = {{0.0, 2548.193744, 1788.207744}, {2548.193744, 0.0, 891.81}, {1788.207744, 891.81, 0.0}};
-    // std::priority_queue<std::pair<double, copper::VectorID>
-    //         , std::vector<std::pair<double, copper::VectorID>>, copper::Similarity<uint16_t>>
-    //             udist_pq{_du};
-    // std::priority_queue<std::pair<double, copper::VectorID>
-    //         , std::vector<std::pair<double, copper::VectorID>>, copper::Similarity<float>>
-    //             fdist_pq{_df};
-
-    // for (uint16_t i = 0; i < size; ++i) {
-    //     for (uint16_t j = 0; j < size; ++j) {
-    //         if (j > i)
-    //             continue;
-
-    //         udist[i][j] = ((*_du)(uset.Get_Vector<uint16_t>(i, dim), uset.Get_Vector<uint16_t>(j, dim), dim));
-    //         ErrorAssert(udist[i][j] == b_udist[i][j], LOG_TAG_TEST,
-    //                     "uint16 distance calculation err: calc=%f, ground_truth=%f", udist[i][j], b_udist[i][j]);
-    //         udist_pq.push({udist[i][j], uset.Get_Index(i)});
-    //         fdist[i][j] = ((*_df)(fset.Get_Vector<float>(i, dim), fset.Get_Vector<float>(j, dim), dim));
-    //         ErrorAssert(fdist[i][j] == b_fdist[i][j], LOG_TAG_TEST,
-    //             "float distance calculation err: calc=%f, ground_truth=%f", fdist[i][j], b_fdist[i][j]);
-    //         fdist_pq.push({fdist[i][j], fset.Get_Index(i)});
-    //     }
-    // }
-
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "udist_pq: size=%lu", udist_pq.size());
-    // while(!udist_pq.empty()) {
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "udist_pq: <%f, %lu>", udist_pq.top().first, udist_pq.top().second);
-    //     double p = udist_pq.top().first;
-    //     udist_pq.pop();
-    //     if (!udist_pq.empty()) {
-    //         ErrorAssert(p >= udist_pq.top().first, LOG_TAG_TEST, "udist_pq: Distance should be more than the next element.(top should be the least similar)")
-    //         ErrorAssert((*_du)(udist_pq.top().first, p), LOG_TAG_TEST, "udist_pq: distance comparator should show that top is less similar");
-    //     }
-    // }
-
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fdist_pq: size=%lu", fdist_pq.size());
-    // while(!fdist_pq.empty()) {
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fdist_pq: <%f, %lu>", fdist_pq.top().first, fdist_pq.top().second);
-    //     double p = fdist_pq.top().first;
-    //     fdist_pq.pop();
-    //     if (!fdist_pq.empty()) {
-    //         ErrorAssert(p >= fdist_pq.top().first, LOG_TAG_TEST, "fdist_pq: Distance should be more than the next element.(top should be the least similar)")
-    //         ErrorAssert((*_df)(fdist_pq.top().first, p), LOG_TAG_TEST, "fdist_pq: distance comparator should show that top is less similar");
-    //     }
-    // }
-
-    // for (uint16_t i = 0; i < uset._size; ++i) {
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "uset[%hu] get_vec_by_id: ID=%lu, idx=%hu, data=%s",
-    //                     i, uset.Get_VectorID(i)._id, i, copper::to_string<uint16_t>(uset.Get_Vector_By_ID<uint16_t>(uset.Get_VectorID(i), dim), dim));
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "uset[%hu] get_vec: ID=%lu, idx=%hu, data=%s",
-    //         i, uset.Get_VectorID(i)._id, i, copper::to_string<uint16_t>(uset.Get_Vector<uint16_t>(i, dim), dim));
-    // }
-
-    // for (uint16_t i = 0; i < fset._size; ++i) {
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fset[%hu] get_vec_by_id: ID=%lu, idx=%hu, data=%s",
-    //                     i, fset.Get_VectorID(i)._id, i, copper::to_string<float>(fset.Get_Vector_By_ID<float>(fset.Get_VectorID(i), dim), dim));
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fset[%hu] get_vec: ID=%lu, idx=%hu, data=%s",
-    //         i, fset.Get_VectorID(i)._id, i, copper::to_string<float>(fset.Get_Vector<float>(i, dim), dim));
-    // }
-
-    // copper::Vector sv;
-    // copper::VectorID svid(copper::INVALID_VECTOR_ID);
-
-    // copper::VectorID last_vec =
-
-    // uset.Delete<uint16_t>(2, dim, svid, sv);// delete now returns an update instead
-
-    // ErrorAssert(svid == )
-    // //  todo check VectorSet functions
-
-    // //  todo check VectorIndex operations
-
-    // CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Test Vector_Utils END.");
-// }
-
 // build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
 namespace UT {
 class Test {
@@ -115,14 +9,17 @@ public:
     Test() {
         tests["test_vector::vector_test1"] = &Test::vector_test1;
         tests["test_vector::vector_test2"] = &Test::vector_test2;
+        tests["test_vector::vector_set"] = &Test::vector_set;
         tests["test_vector::distance_L2"] = &Test::distance_L2;
 
         test_priority["test_vector::vector_test1"] = 0;
         test_priority["test_vector::vector_test2"] = 1;
-        test_priority["test_vector::distance_L2"] = 2;
+        test_priority["test_vector::vector_set"] = 2;
+        test_priority["test_vector::distance_L2"] = 3;
 
         all_tests.insert("test_vector::vector_test1");
         all_tests.insert("test_vector::vector_test2");
+        all_tests.insert("test_vector::vector_set");
         all_tests.insert("test_vector::distance_L2");
     }
 
@@ -361,6 +258,73 @@ public:
     bool vector_set() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_set for %luth time...", try_count);
         bool status = true;
+
+        copper::VectorSet<uint16_t, dim, 3> uset;
+        copper::VectorSet<float, dim, 3> fset;
+
+        for (uint16_t i = 0; i < size; ++i) {
+            copper::Address uva = uset.Insert(_data16[i], _ids16[i]);
+            copper::Address fva = fset.Insert(copper::Vector<float, dim>(_dataf[i]), _idsf[i]);
+
+            status = status && (uva == uset.Get_Typed_Address() + (i * dim));
+            ErrorAssert(uva == uset.Get_Typed_Address() + (i * dim), LOG_TAG_TEST,
+                        "uint16 vector set returned wrong address. Expected=%p, Actual=%p",
+                        uva, uset.Get_Typed_Address() + (i * dim));
+            status = status && (fva == fset.Get_Typed_Address() + (i * dim));
+            ErrorAssert(fva == fset.Get_Typed_Address() + (i * dim), LOG_TAG_TEST,
+                        "float vector set returned wrong address. Expected=%p, Actual=%p",
+                        fva, fset.Get_Typed_Address() + (i * dim));
+        }
+
+        status = status && (uset.Size() == size);
+        ErrorAssert(uset.Size() == size, LOG_TAG_TEST,
+                    "uint16 vector set size mismatch. Expected=%hu, Actual=%hu",
+                    size, uset.Size());
+        status = status && (fset.Size() == size);
+        ErrorAssert(fset.Size() == size, LOG_TAG_TEST,
+                    "float vector set size mismatch. Expected=%hu, Actual=%hu",
+                    size, fset.Size());
+
+        for (uint16_t i = 0; i < size; ++i) {
+            copper::VectorPair<uint16_t, dim> vecp = uset[i];
+            copper::VectorID id = uset.Get_VectorID(i);
+            copper::Vector<uint16_t, dim> vec1 = uset.Get_Vector(i);
+
+            status = status && (vecp.id == id);
+            ErrorAssert(vecp.id == id, LOG_TAG_TEST,
+                        "uint16 vector set returned wrong vector id. Expected=%lu, Actual=%lu",
+                        id._id, vecp.id._id);
+            status = status && (vecp.vector.Are_The_Same(vec1));
+            ErrorAssert(vecp.vector.Are_The_Same(vec1), LOG_TAG_TEST,
+                        "uint16 vector set returned wrong vector. Expected=%s, Actual=%s",
+                        vec1.to_string().c_str(), vecp.vector.to_string().c_str());
+
+            status = status && (uset.Contains(id));
+            ErrorAssert(uset.Contains(id), LOG_TAG_TEST,
+                        "uint16 vector set does not contain vector id %lu", id._id);
+            status = status && (uset.Get_Index(id) == i);
+            ErrorAssert(uset.Get_Index(id) == i, LOG_TAG_TEST,
+                        "uint16 vector set returned wrong index for vector id %lu. Expected=%hu, Actual=%hu",
+                        id._id, i, uset.Get_Index(id));
+            status = status && (uset.Get_Vector_By_ID(id).Are_The_Same(vec1));
+            ErrorAssert(uset.Get_Vector_By_ID(id).Are_The_Same(vec1), LOG_TAG_TEST,
+                        "uint16 vector set returned wrong vector. Expected=%s, Actual=%s",
+                        vec1.to_string().c_str(), uset.Get_Vector_By_ID(id).to_string().c_str());
+        }
+
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Uint VectorSet: %s", uset.to_string().c_str());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Float VectorSet: %s", fset.to_string().c_str());
+
+        uset.Delete_Last();
+        status = status && (uset.Size() == size - 1);
+        ErrorAssert(uset.Size() == size - 1, LOG_TAG_TEST,
+                    "uint16 vector set size mismatch after delete. Expected=%hu, Actual=%hu",
+                    size - 1, uset.Size());
+        status = status && !(uset.Contains(_ids16[size - 1]));
+        ErrorAssert(!(uset.Contains(_ids16[size - 1])), LOG_TAG_TEST,
+                    "uint16 vector set should not contain vector id %lu", _ids16[size - 1]);
+
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Uint VectorSet after deletion: %s", uset.to_string().c_str());
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_set.");
         return status;

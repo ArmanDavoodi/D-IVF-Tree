@@ -136,10 +136,7 @@ size_t Parse_Args(int argc, char *argv[],
     bool non_list_option = false;
     bool use_default = true;
 
-    fprintf(stderr, "argc=%d\n", argc);
-
     for (int i = 1; i < argc; ++i) {
-        fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
         std::string arg(argv[i]);
         if (arg.size() == 2 || arg[0] == '-') {
             state = Parse_Flag(arg[1]);
@@ -164,7 +161,6 @@ size_t Parse_Args(int argc, char *argv[],
             }
 
             ++i;
-            fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
             non_list_option = true;
             use_default = false;
             arg = std::string(argv[i] + 1, argv[i] + strlen(argv[i]) - 1);
@@ -181,7 +177,6 @@ size_t Parse_Args(int argc, char *argv[],
             }
 
             ++i;
-            fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
             non_list_option = true;
             use_default = false;
             arg = std::string(argv[i] + 1, argv[i] + strlen(argv[i]) - 1);
@@ -204,7 +199,6 @@ size_t Parse_Args(int argc, char *argv[],
                     --i;
                     break;
                 }
-                fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
 
                 input.white_list.insert(arg);
             }
@@ -227,7 +221,6 @@ size_t Parse_Args(int argc, char *argv[],
                     --i;
                     break;
                 }
-                fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
                 input.black_list.insert(arg);
             }
 
@@ -241,7 +234,6 @@ size_t Parse_Args(int argc, char *argv[],
             }
 
             ++i;
-            fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
             arg = std::string(argv[i]);
             if (arg.empty() || !(std::all_of(arg.begin(), arg.end(), ::isdigit))) {
                 fprintf(stderr, "Fatal: Invalid input format.\n");
@@ -302,7 +294,6 @@ size_t Parse_Args(int argc, char *argv[],
                     --i;
                     break;
                 }
-                fprintf(stderr, "argv[%d]=%s\n", i, argv[i]);
                 input.white_list.insert(arg);
             }
 
