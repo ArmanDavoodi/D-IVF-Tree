@@ -51,6 +51,7 @@ public:
                     else {
                         delete (Leaf_Node*)(vec.cluster_address);
                     }
+                    vec.cluster_address = INVALID_ADDRESS;
                 }
             }
             directory[level].clear();

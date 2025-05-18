@@ -28,7 +28,17 @@ public:
         }
     };
 
-    Copper_Node(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {}
+    Copper_Node(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
+            "Copper_Node<%hu, %hu>(id = " VECTORID_LOG_FMT "): Created node. this=%p", _MIN_SIZE, _MAX_SIZE,
+            VECTORID_LOG(id), this);
+    }
+
+    ~Copper_Node() {
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
+            "Copper_Node<%hu, %hu>(id = " VECTORID_LOG_FMT "): Destroyed node. this=%p", _MIN_SIZE, _MAX_SIZE,
+            VECTORID_LOG(_centroid_id), this);
+    }
 
     inline RetStatus Assign_Parent(VectorID parent_id) {
         return RetStatus::Success();
