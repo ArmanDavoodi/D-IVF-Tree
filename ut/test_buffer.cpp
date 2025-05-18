@@ -14,6 +14,8 @@ public:
 
         all_tests.insert("test_buffer::insert_test");
 
+        /* Todo add other tests for buffer */
+
     }
 
     ~Test() {}
