@@ -420,7 +420,7 @@ public:
     // }
 
     // inline VectorUpdate Delete(VectorID id) {
-    //     FatalAssert(id != INVALID_VECTOR_ID, LOG_TAG_VECTOR_SET, "cannot delete invalide vector id.");
+    //     FatalAssert(id.Is_Valid(), LOG_TAG_VECTOR_SET, "cannot delete invalide vector id.");
 
     //     uint16_t idx = Get_Index(id);
     //     VectorUpdate swapped{INVALID_VECTOR_ID, INVALID_ADDRESS};

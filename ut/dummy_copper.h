@@ -5,11 +5,9 @@
 #include "vector_utils.h"
 #include "buffer.h"
 
-#ifdef TESTING
 namespace UT {
 class Test;
 };
-#endif
 
 namespace copper {
 
@@ -83,11 +81,11 @@ public:
     }
 
     inline bool Contains(VectorID id) const {
-        return _bucket.Contains(id)
+        return _bucket.Contains(id);
     }
 
     inline Vector<T, _DIM> Compute_Current_Centroid() const {
-        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size())
+        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
     }
 
 protected:
@@ -106,6 +104,16 @@ template <typename T, uint16_t _DIM,
             typename DIST_TYPE, typename _DIST>
 class VectorIndex {
 public:
+
+    inline RetStatus Init() {
+        RetStatus rs = RetStatus::Success();
+        return rs;
+    }
+
+    inline RetStatus Shutdown() {
+        RetStatus rs = RetStatus::Success();
+        return rs;
+    }
 
     inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id) {
         RetStatus rc = RetStatus::Success();

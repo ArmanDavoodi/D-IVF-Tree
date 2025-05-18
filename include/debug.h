@@ -128,13 +128,23 @@ enum LOG_TAG_BITS : uint64_t {
 namespace copper {
 
 struct Log_Msg {
-    char _msg[500] = "";
+    constexpr static int MAX_MSG_SIZE = 2500;
+    char _msg[MAX_MSG_SIZE] = "";
 
     Log_Msg(const char* msg, ...) {
         va_list argptr;
         va_start(argptr, msg);
-        vsprintf(_msg, msg, argptr);
+        int num_writen = vsnprintf(_msg, MAX_MSG_SIZE-3, msg, argptr);
         va_end(argptr);
+        if (num_writen > MAX_MSG_SIZE-3) {
+            _msg[MAX_MSG_SIZE-4] = '.';
+            _msg[MAX_MSG_SIZE-3] = '.';
+            _msg[MAX_MSG_SIZE-2] = '.';
+            _msg[MAX_MSG_SIZE-1] = '\0';
+        }
+        else if (num_writen < 0) {
+            sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
+        }
     }
 };
 

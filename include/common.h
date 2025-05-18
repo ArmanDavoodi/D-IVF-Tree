@@ -35,14 +35,14 @@ struct RetStatus {
     }
 };
 
-constexpr uint64_t INVALID_VECTOR_ID = 0;
+constexpr uint64_t INVALID_VECTOR_ID = UINT64_MAX;
 
 union VectorID {
     uint64_t _id;
     struct {
-        uint64_t _creator_node_id : 8;
-        uint64_t _level : 8; // == 0 for vectors, == 1 for leaves
         uint64_t _val : 48;
+        uint64_t _level : 8; // == 0 for vectors, == 1 for leaves
+        uint64_t _creator_node_id : 8;
     };
 
     static constexpr uint64_t MAX_ID_PER_LEVEL = 0x0000FFFFFFFFFFFF;
@@ -52,6 +52,10 @@ union VectorID {
     VectorID() : _id(INVALID_VECTOR_ID) {}
     VectorID(const uint64_t& ID) : _id(ID) {}
     VectorID(const VectorID& ID) : _id(ID._id) {}
+
+    inline bool Is_Valid() const {
+        return (_id != INVALID_VECTOR_ID) && (_val < MAX_ID_PER_LEVEL);
+    }
 
     inline bool Is_Centroid() const {
         return _level > VECTOR_LEVEL;
@@ -133,13 +137,13 @@ constexpr Address INVALID_ADDRESS = nullptr;
 
 // Todo: Log VectorIndex: VectorIndex(RootID:%s(%lu, %lu, %lu), # levels:lu, # nodes:lu, # vectors:lu, size:lu)
 
-#define VECTORID_LOG_FMT "%s(%lu, %lu, %lu)"
-#define VECTORID_LOG(vid) ((vid) == INVALID_VECTOR_ID ? "[INV]" : ""), vid._creator_node_id, vid._level, vid._val
+#define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
+#define VECTORID_LOG(vid) (!((vid).Is_Valid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
 
 #define NODE_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ")"
 #define NODE_PTR_LOG(node)\
     ((node) == nullptr ? "NULL" :\
-        ((node)->CentroidID() == INVALID_VECTOR_ID ? "INV" : ((node)->CentroidID().Is_Vector() ? "Non-Centroid" : \
+        (!((node)->CentroidID().Is_Valid()) ? "INV" : ((node)->CentroidID().Is_Vector() ? "Non-Centroid" : \
             ((node)->CentroidID().Is_Leaf() ? "Leaf" : ((node)->CentroidID().Is_Internal_Node() ? "Internal" \
                 : "UNDEF"))))),\
     ((node) == nullptr ? 0 : decltype(*(node))::_MIN_SIZE_), ((node) == nullptr ? 0 : decltype(*(node))::_MAX_SIZE_),\
@@ -147,7 +151,7 @@ constexpr Address INVALID_ADDRESS = nullptr;
     VECTORID_LOG(((node) == nullptr ? INVALID_VECTOR_ID : (node)->ParentID()))
 
 #define NODE_VAL_LOG(node)\
-    ((node).CentroidID() == INVALID_VECTOR_ID ? "INV" : ((node).CentroidID().Is_Vector() ? "Non-Centroid" : \
+    (!((node).CentroidID().Is_Valid()) ? "INV" : ((node).CentroidID().Is_Vector() ? "Non-Centroid" : \
             ((node).CentroidID().Is_Leaf() ? "Leaf" : ((node).CentroidID().Is_Internal_Node() ? "Internal" \
                 : "UNDEF")))),\
     decltype((node))::_MIN_SIZE_, decltype((node))::_MAX_SIZE_,\

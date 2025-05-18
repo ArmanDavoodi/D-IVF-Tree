@@ -8,21 +8,79 @@ namespace UT {
 class Test {
 public:
     Test() {
-        tests["test_buffer::vector_test1"] = &Test::vector_test1;
+        tests["test_buffer::insert_test"] = &Test::insert_test;
 
-        test_priority["test_buffer::vector_test1"] = 0;
+        test_priority["test_buffer::insert_test"] = 0;
 
-        all_tests.insert("test_buffer::vector_test1");
+        all_tests.insert("test_buffer::insert_test");
 
     }
 
     ~Test() {}
 
-    bool vector_test1() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_buffer::vector_test1 for %luth time...", try_count);
+    bool insert_test() {
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_buffer::insert_test for %luth time...", try_count);
         bool status = true;
+        constexpr uint16_t KMAX = 4, KMIN = 2;
+        copper::Buffer_Manager<uint16_t, dim, KMIN, KMAX, KMIN, KMAX,
+            uint16_t, copper::L2_Distance<uint16_t, dim, double>> buffer_manager;
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_buffer::vector_test1.");
+        copper::RetStatus rs = buffer_manager.Init();
+        status = status && (rs.Is_OK());
+        ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager init failed with status %s.", rs.Msg());
+
+        copper::VectorID first_root_id = copper::INVALID_VECTOR_ID;
+        first_root_id._id = 0;
+        first_root_id._level = 1;
+
+        copper::VectorID cur_root_id = buffer_manager.Record_Root();
+        status = status && (cur_root_id == first_root_id);
+        ErrorAssert(cur_root_id == first_root_id, LOG_TAG_TEST, "First Root ID should be same as first ID. First ID: " VECTORID_LOG_FMT
+            ", cur_root_id: " VECTORID_LOG_FMT, VECTORID_LOG(first_root_id), VECTORID_LOG(cur_root_id));
+
+        uint16_t num_vec = 32;
+        uint64_t root_level = 1;
+        std::vector<uint64_t> vecs;
+
+        copper::VectorID vec_id = buffer_manager.Record_Vector(0);
+        status = status && (vec_id == 0);
+        ErrorAssert(vec_id == 0, LOG_TAG_TEST, "first Vector ID should be 0.");
+        vecs.emplace_back(vec_id._id);
+        vecs.emplace_back(cur_root_id._id);
+
+        for(uint16_t i = 0; i < num_vec; ++i) {
+            uint64_t level = 0, j = i;
+            while (j > 0) {
+                ++level;
+                j = j / KMAX;
+            }
+            if (level >= root_level) {
+                cur_root_id = buffer_manager.Record_Root();
+                status = status && (cur_root_id._level == root_level + 1);
+                ErrorAssert(cur_root_id._level == root_level + 1, LOG_TAG_TEST, "Root level should be %u.", root_level + 1);
+                root_level = cur_root_id._level;
+                status = status && (cur_root_id._val == 0);
+                ErrorAssert(cur_root_id._val == 0, LOG_TAG_TEST, "Root val should be 0.");
+                vecs.emplace_back(cur_root_id._id);
+            }
+            status = status && (root_level == vecs.size() - 1);
+            ErrorAssert(root_level == vecs.size() - 1, LOG_TAG_TEST, "Root level should be %u.", vecs.size() - 1);
+
+            vec_id = buffer_manager.Record_Vector(level);
+            status = status && (vec_id._level == level);
+            ErrorAssert(vec_id._level == level, LOG_TAG_TEST, "Vector level should be %u.", level);
+            status = status && (vec_id == (vecs[level] + 1));
+            ErrorAssert(vec_id == (vecs[level]+1), LOG_TAG_TEST, "Vector ID " VECTORID_LOG_FMT
+                " should be %u.", VECTORID_LOG(vec_id), (vecs[level]+1));
+            vecs[level] = vec_id._id;
+        }
+
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Buffer Manager:%s", buffer_manager.to_string().c_str());
+
+        rs = buffer_manager.Shutdown();
+        status = status && (rs.Is_OK());
+        ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager shutdown failed with status %s.", rs.Msg());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_buffer::insert_test.");
         return status;
     }
 
@@ -42,16 +100,6 @@ protected:
 
     static constexpr uint16_t dim = 8;
     static constexpr uint16_t size = 3;
-
-    const uint16_t _data16[size][dim] = {{1, 2, 3, 4, 5, 6, 7, 8},
-                                         {9, 10, 11, 12, 13, 14, 15, 16},
-                                         {17, 18, 19, 20, 21, 22, 23, 24}};
-    const uint64_t _ids16[size] = {1ul, 2ul, 3ul};
-
-    const float _dataf[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
-                                     {9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f},
-                                     {8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f}};
-    const uint64_t _idsf[size] = {4ul, 5ul, 6ul};
 
 friend class TestBase<Test>;
 };
