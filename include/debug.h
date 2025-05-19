@@ -11,6 +11,9 @@
 #undef BUILD
 #define BUILD DEBUG
 #define FAULT_INJECTION // todo: add to compile time flags
+#define TESTABLE friend class UT::Test
+#else
+#define TESTABLE
 #endif
 
 // might add other modes as well later and consider not completly disabling the logs in release

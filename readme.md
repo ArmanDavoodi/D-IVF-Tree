@@ -11,8 +11,9 @@
     * Comment style
     * Implement a memory arena to check for memory leaks
     * Cleanup the Makefile and handle different flags for different builds
-    * correct stackframe printing
-    * testing the ANN for copper node more througly after a better implementation
+    * Correct stackframe printing
+    * Testing the ANN for copper node more througly after a better implementation
+    * Add filepath to the tests and debug log
 ## Nice for Future
     * Setting up the project to work with gdb
     * Put the created gdb cores into the ut/out/cores directory

@@ -4,12 +4,6 @@
 #include "common.h"
 #include "vector_utils.h"
 
-#ifdef TESTING
-namespace UT {
-class Test;
-};
-#endif
-
 namespace copper {
 
 template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
@@ -236,7 +230,7 @@ protected:
 
     std::vector<std::vector<VectorInfo>> directory;
 
-friend class UT::Test;
+TESTABLE;
 };
 
 };

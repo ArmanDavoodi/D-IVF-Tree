@@ -7,12 +7,6 @@
 
 #include <algorithm>
 
-#ifdef TESTING
-namespace UT {
-class Test;
-};
-#endif
-
 // Todo: better logs and asserts -> style: <Function name>(self data(a=?), input data): msg, additonal variables if needed
 
 /*
@@ -250,7 +244,7 @@ protected:
     VectorSet<T, _DIM, _MAX_SIZE> _bucket;
 
 // friend class VectorIndex;
-friend class UT::Test;
+TESTABLE;
 };
 
 template <typename T, uint16_t _DIM,
@@ -682,7 +676,7 @@ protected:
         return Split<KL_MIN, KL_MAX>(candids, 0);
     }
 
-friend class UT::Test;
+TESTABLE;
 };
 
 };

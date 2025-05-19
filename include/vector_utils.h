@@ -2,13 +2,8 @@
 #define COPPER_VECTOR_UTILS_H_
 
 #include "common.h"
-#include "queue"
 
-#ifdef TESTING
-namespace UT {
-class Test;
-};
-#endif
+#include <queue>
 
 namespace copper {
 
@@ -268,7 +263,8 @@ friend class VectorSet;
 friend class VectorPair<T, _DIM>;
 template <typename, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t, typename, typename>
 friend class Buffer_Manager;
-friend class UT::Test;
+
+TESTABLE;
 };
 
 template<typename T, uint16_t _DIM>
@@ -474,7 +470,7 @@ protected:
     VectorID _ids[_DIM * _CAP];
     uint16_t _size;
 
-friend class UT::Test;
+TESTABLE;
 };
 
 template<typename V_TYPE, uint16_t _DIM, typename D_TYPE = double>

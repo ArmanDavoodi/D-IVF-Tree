@@ -5,10 +5,6 @@
 #include "vector_utils.h"
 #include "buffer.h"
 
-namespace UT {
-class Test;
-};
-
 namespace copper {
 
 template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
@@ -106,7 +102,7 @@ protected:
     VectorID _parent_id;
     VectorSet<T, _DIM, _MAX_SIZE> _bucket;
 
-friend class UT::Test;
+TESTABLE;
 };
 
 template <typename T, uint16_t _DIM,
@@ -223,7 +219,7 @@ protected:
         return RetStatus::Success();
     }
 
-friend class UT::Test;
+TESTABLE;
 };
 
 };
