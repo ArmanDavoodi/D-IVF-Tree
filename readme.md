@@ -1,15 +1,22 @@
 # Tasks:
 ## Major Milestones:
-    * Complete UT for Vector
     * Complete UT for CopperNode
-    * Implmenting Buffer Manager
-    * Complete Copper Index Implementation for In memory single node
+    * Adding option for choosing clustering algorithm
+    * Complete Copper Index Implementation for In memory single node single thread
+    * Adding a thread pool and thread utils
 ## Minor Milestones:
+    * Add a better sampling method when getting the approximate nearest neighbours in copper node
+    * Add new UT for bufferpool
+    * Code cleanup
+    * Comment style
+    * Implement a memory arena to check for memory leaks
+    * Cleanup the Makefile and handle different flags for different builds
+    * correct stackframe printing
+    * testing the ANN for copper node more througly after a better implementation
+## Nice for Future
     * Setting up the project to work with gdb
     * Put the created gdb cores into the ut/out/cores directory
-    * Enable run_ut script to execute all UTs.
-    * Enable run_ut script to execute multiple selected UTs. -> low priority
-    * Enable run_ut script to execute multiple selected UTs with regex filter. -> low priority
+    * Implementing Delete
 
 ## Notes:
 *  Remember to check the todos.

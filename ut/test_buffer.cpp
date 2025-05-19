@@ -28,9 +28,9 @@ public:
         copper::Buffer_Manager<uint16_t, dim, KI_MIN, KI_MAX, KL_MIN, KL_MAX,
             uint16_t, copper::L2_Distance<uint16_t, dim, double>> _buffer_manager;
         using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX,
-            uint16_t, copper::L2_Distance<uint16_t, dim, double>>;
+            double, copper::L2_Distance<uint16_t, dim, double>>;
         using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX,
-            uint16_t, copper::L2_Distance<uint16_t, dim, double>>;
+            double, copper::L2_Distance<uint16_t, dim, double>>;
 
         copper::RetStatus rs = _buffer_manager.Init();
         status = status && (rs.Is_OK());
@@ -124,15 +124,15 @@ protected:
     static constexpr uint16_t dim = 8;
     static constexpr uint16_t size = 3;
 
-    const uint16_t _data16[size][dim] = {{1, 2, 3, 4, 5, 6, 7, 8},
-                                         {9, 10, 11, 12, 13, 14, 15, 16},
-                                         {17, 18, 19, 20, 21, 22, 23, 24}};
-    const uint64_t _ids16[size] = {1ul, 2ul, 3ul};
+    // const uint16_t _data16[size][dim] = {{1, 2, 3, 4, 5, 6, 7, 8},
+    //                                      {9, 10, 11, 12, 13, 14, 15, 16},
+    //                                      {17, 18, 19, 20, 21, 22, 23, 24}};
+    // const uint64_t _ids16[size] = {1ul, 2ul, 3ul};
 
-    const float _dataf[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
-                                     {9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f},
-                                     {8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f}};
-    const uint64_t _idsf[size] = {4ul, 5ul, 6ul};
+    // const float _dataf[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
+    //                                  {9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f},
+    //                                  {8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f}};
+    // const uint64_t _idsf[size] = {4ul, 5ul, 6ul};
 
 friend class TestBase<Test>;
 };

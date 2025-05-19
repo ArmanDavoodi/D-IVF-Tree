@@ -58,5 +58,6 @@
         "regex": "cpp",
         "istream": "cpp",
         "sstream": "cpp"
-    }
+    },
+    "C_Cpp.default.cppStandard": ""
 }

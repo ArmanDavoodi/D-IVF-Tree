@@ -70,6 +70,14 @@ enum LOG_TAG_BITS : uint64_t {
 #define OUT (stdout)
 #endif
 
+#ifndef PRINT_CALLSTACK_LEVEL
+#define PRINT_CALLSTACK_LEVEL (LOG_LEVEL_ZERO)
+#endif
+
+#ifndef PRINT_CALLSTACK_MAX_FRAMES
+#define PRINT_CALLSTACK_MAX_FRAMES (10)
+#endif
+
 #define _COLORF_BLACK "\033[0;30m"
 #define _COLORF_RED "\033[0;31m"
 #define _COLORF_GREEN "\033[0;32m"
@@ -125,8 +133,100 @@ enum LOG_TAG_BITS : uint64_t {
     using SourceLoc = std::source_location;
 #endif
 
+
+#ifdef OS_THREAD_ID
+#undef OS_THREAD_ID
+#endif
+
+#ifdef THREAD_ID
+#undef THREAD_ID
+#endif
+
+#ifdef _WIN32
+#include <windows.h> // For GetCurrentThreadId
+using os_thread_id = DWORD;
+
+#define OS_THREAD_ID ((copper::os_thread_id)(GetCurrentThreadId()))
+
+std::string print_callstack() {
+    /* Not implemented */
+    return "";
+}
+
+#else // Assume POSIX (Linux, macOS, etc.)
+#include <unistd.h>  // For syscall
+#include <sys/syscall.h> // For SYS_gettid (Linux)
+// On macOS, pthread_threadid_np could be used, but gettid is more common
+// for what GDB shows on Linux-like systems.
+// For a truly portable solution you might need #ifdef __APPLE__ and
+// use pthread_self() and a debugger-specific mapping or pthread_getthreadid_np()
+
+#include <execinfo.h>
+#include <cxxabi.h>
+
+using os_thread_id = pid_t; // pid_t is typically int or long
+
+// SYS_gettid returns the kernel thread ID (LWP ID)
+#define OS_THREAD_ID ((os_thread_id)(syscall(SYS_gettid)))
+
+std::string print_callstack() {
+    std::string callstack = "[";
+    void* frames[PRINT_CALLSTACK_MAX_FRAMES];
+    int numFrames = backtrace(frames, PRINT_CALLSTACK_MAX_FRAMES);
+
+    // Get symbolic names
+    std::unique_ptr<char*, decltype(&free)> symbols(
+        backtrace_symbols(frames, numFrames),
+        free
+    );
+
+    if (!symbols) {
+        callstack += "Error retrieving callstack]";
+        return callstack;
+    }
+
+    // Iterate through the symbols and demangle C++ names
+    for (int i = 0; i < numFrames; ++i) {
+        std::string symbolStr = symbols.get()[i];
+
+        // Attempt to demangle C++ names
+        size_t start_mangled = symbolStr.find('(');
+        size_t end_mangled = symbolStr.find('+', start_mangled);
+
+        if (start_mangled != std::string::npos && end_mangled != std::string::npos) {
+            std::string mangled_name = symbolStr.substr(start_mangled + 1, end_mangled - (start_mangled + 1));
+            int status;
+            std::unique_ptr<char, decltype(&free)> demangled_name(
+                abi::__cxa_demangle(mangled_name.c_str(), 0, 0, &status),
+                free
+            );
+
+            if (status == 0 && demangled_name) {
+                // Successfully demangled
+                callstack += symbolStr.substr(0, start_mangled + 1) + demangled_name.get() +
+                             symbolStr.substr(end_mangled);
+            }
+            else {
+                // Demangling failed or not a mangled name
+                callstack += symbolStr;
+            }
+        }
+        else {
+            callstack += symbolStr;
+        }
+        if (i != numFrames - 1) {
+            callstack += ", ";
+        }
+    }
+
+    return callstack + "]";
+}
+
+#endif
 namespace copper {
 
+using thread_id = unsigned long;
+#define THREAD_ID ((copper::thread_id)(OS_THREAD_ID))
 struct Log_Msg {
     constexpr static int MAX_MSG_SIZE = 2500;
     char _msg[MAX_MSG_SIZE] = "";
@@ -216,21 +316,6 @@ inline const char* tagtostr(uint64_t tag)
     }
 }
 
-inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
-                const char* file_name, const char* func_name, size_t line,
-                size_t thread_id) {
-
-    char time_str[100];
-    timetostr(_time, time_str); // todo add coloring if needed
-    fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
-        leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
-    fflush(OUT);
-    if (level == LOG_LEVEL_PANIC) {
-        sleep(1); // wait to make sure everything is flushed
-        assert(false);
-    }
-}
-
 inline bool Pass_Min_Level(LOG_LEVELS level) {
     return ((uint8_t)(level) <= LOG_MIN_LEVEL);
 }
@@ -243,6 +328,33 @@ inline bool Pass_Level(LOG_LEVELS level) {
     return ((uint8_t)(level) <= (uint8_t)(LOG_LEVEL));
 }
 
+inline bool Pass_CallStack_Level(LOG_LEVELS level) {
+    return ((uint8_t)(level) <= (uint8_t)(PRINT_CALLSTACK_LEVEL));
+}
+
+inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
+                const char* file_name, const char* func_name, size_t line,
+                thread_id thread_id) {
+
+    char time_str[100];
+    timetostr(_time, time_str); // todo add coloring if needed
+    if (Pass_CallStack_Level(level)) {
+        std::string callstack = print_callstack();
+        fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, callstack.c_str(),
+            msg._msg);
+    }
+    else {
+        fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
+    }
+    fflush(OUT);
+    if (level == LOG_LEVEL_PANIC) {
+        copper::sleep(1); // wait to make sure everything is flushed
+        assert(false);
+    }
+}
+
 };
 
 #ifdef ENABLE_TEST_LOGGING
@@ -253,8 +365,7 @@ inline bool Pass_Level(LOG_LEVELS level) {
             if (copper::Pass_Level((level))){\
                 copper::Log((level), (tag), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
                             std::chrono::system_clock::now(),\
-                            __FILE__, __PRETTY_FUNCTION__, __LINE__,\
-                            std::hash<std::thread::id>{}(std::this_thread::get_id()));\
+                            __FILE__, __PRETTY_FUNCTION__, __LINE__, THREAD_ID);\
             }\
         }\
     } while(0)

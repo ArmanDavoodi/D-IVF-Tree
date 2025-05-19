@@ -180,6 +180,10 @@ public:
         FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Erase is not implemented");
     }
 
+    inline uint64_t Get_Height() {
+        return directory.size();
+    }
+
     inline std::string to_string() {
         std::string str = "<Height: " + std::to_string(directory.size()) + ", ";
         str += "Directory:[";

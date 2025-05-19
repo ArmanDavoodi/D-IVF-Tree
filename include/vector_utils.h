@@ -91,7 +91,7 @@ public:
                 delete[] _data;
             }
             else {
-                CLOG(LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Existing data not deleted. this=%lu, _data=%lu", this, _data);
+                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Existing data not deleted. this=%lu, _data=%lu", this, _data);
             }
         }
 
@@ -285,6 +285,7 @@ public:
 
     inline VectorPair<T, _DIM>& operator=(VectorPair<T, _DIM>&& other) {
         id = other.id;
+        vector.Invalidate();
         vector = std::move(other.vector);
         return *this;
     }
@@ -293,6 +294,7 @@ public:
     Vector<T, _DIM> vector;
 protected:
     VectorPair(VectorID _id, T* data, bool delete_on_destroy=true) : id(_id), vector(data, delete_on_destroy) {}
+    // VectorPair(VectorID _id, const T* data, bool delete_on_destroy=true) : id(_id), vector(data) {}
 
 
 template<typename, uint16_t, uint16_t>

@@ -98,7 +98,7 @@ public:
             "input vector: (id: %lu, level: %lu), centroid vector: (id: %lu, level: %lu)"
             , vec_id._id, vec_id._level, _centroid_id._id, _centroid_id._level);
         FatalAssert(vec.Is_Valid(), LOG_TAG_COPPER_NODE, "Cannot insert invalid vector %lu into the bucket with id %lu.",
-                    vec_id._id, _centroid_id._id)
+                    vec_id._id, _centroid_id._id);
 
         return _bucket.Insert(vec, vec_id);
     }
@@ -135,8 +135,9 @@ public:
         return update;
     }
 
+    /* Do not make the function const or we have to use copy constructor each time we use operator[] on bucket */
     inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k, uint16_t sample_size,
-            std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours) const {
+            std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours) {
         FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
         FatalAssert(k > 0, LOG_TAG_COPPER_NODE, "Number of neighbours should not be 0");
         FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
@@ -150,12 +151,12 @@ public:
         FatalAssert(neighbours.size() <= k, LOG_TAG_COPPER_NODE,
             "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
-        if (neighbours.size() < k && neighbours.size() - k > sample_size) {
-            sample_size = neighbours.size() - k;
+        if (neighbours.size() < k && k - neighbours.size() > sample_size) {
+            sample_size = k - neighbours.size();
         }
 
         if (sample_size > _bucket.Size()) {
-            sample_size = _bucket.Size()
+            sample_size = _bucket.Size();
         }
 
         // TODO a more efficient and accurate sampling method should be implemented rather than only checking the n first elements
@@ -166,7 +167,7 @@ public:
             neighbours.emplace_back(vec.id, distance);
             std::push_heap(neighbours.begin(), neighbours.end(), _more_similar);
             if (neighbours.size() > k) {
-                std::pop_heap(neighbours.begin(), neighbours.end(), _more_similar)
+                std::pop_heap(neighbours.begin(), neighbours.end(), _more_similar);
                 neighbours.pop_back();
             }
         }
@@ -230,18 +231,21 @@ public:
     }
 
     inline bool Contains(VectorID id) const {
-        return _bucket.Contains(id)
+        return _bucket.Contains(id);
     }
 
     inline Vector<T, _DIM> Compute_Current_Centroid() const {
-        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size())
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE, "Node does not have enough elements. "
+                    "size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
+        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
     }
 
 protected:
     _DIST _dist;
     _DIST_ID_PAIR_SIMILARITY _more_similar{_dist};
 
-    VectorID _centroid_id;
+    const VectorID _centroid_id;
     VectorID _parent_id;
     VectorSet<T, _DIM, _MAX_SIZE> _bucket;
 
@@ -274,6 +278,7 @@ public:
         FatalAssert(_root.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "root should be a centroid: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
         FatalAssert(_root.Is_Leaf(), LOG_TAG_VECTOR_INDEX, "first root should be a leaf: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
         rs = _bufmgr.UpdateClusterAddress(_root, new Leaf_Node(_root));
+        _levels = 2;
         return rs;
     }
 
@@ -303,6 +308,9 @@ public:
         else {
             rc = RetStatus::Fail(""); //todo
         }
+
+        FatalAssert(_levels == _bufmgr.Get_Height(), LOG_TAG_VECTOR_INDEX,
+                    "Levels mismatch: _levels=%hhu, _bufmgr.directory.size()=%lu", _levels, _bufmgr.Get_Height());
 
         return rc;
     }
@@ -417,7 +425,7 @@ NEIGHBOUR_EXTRACTION:
 
         FatalAssert(heap_stack.top().first._level == 1ul, LOG_TAG_VECTOR_INDEX,
                     "node level of the current stack top(%lu) is not 1", heap_stack.top().first._level);
-        FatalAssert(level == 1hhu, LOG_TAG_VECTOR_INDEX,
+        FatalAssert(level == 1, LOG_TAG_VECTOR_INDEX,
             "level(%hhu) is not 1", level);
 
         while (!heap_stack.empty()) {
@@ -442,7 +450,7 @@ NEIGHBOUR_EXTRACTION:
 
         if (sort) {
             std::sort_heap(neighbours.begin(), neighbours.end(),
-                            sort_from_more_similar_to_less ? _more_similar : _less_similar)
+                            sort_from_more_similar_to_less ? _more_similar : _less_similar);
         }
         return rc;
     }
@@ -486,6 +494,7 @@ protected:
     VectorID _root;
     uint16_t _split_internal;
     uint16_t _split_leaf;
+    uint64_t _levels;
 
     inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
         FatalAssert(_root.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID.");
@@ -529,7 +538,7 @@ protected:
             FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Failed tp assign parent_id");
         }
         else {
-            vector_id = _bufmgr.Record_Vector(container_node->Level() - 1huu);
+            vector_id = _bufmgr.Record_Vector(container_node->Level() - 1);
             FatalAssert(vector_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Failed to record vector.");
         }
 
@@ -576,7 +585,7 @@ protected:
             }
 
             if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
-                centroids.emplace_back(nodes.back()->Compute_Current_Centroid())
+                centroids.emplace_back(nodes.back()->Compute_Current_Centroid());
             }
         }
         centroids[0] = node->Compute_Current_Centroid();
@@ -587,14 +596,16 @@ protected:
     template<uint16_t _K_MIN, uint16_t _K_MAX>
     inline RetStatus Expand_Tree(Node<_K_MIN, _K_MAX>* root, const Vector<T, _DIM>& centroid) {
         // todo assert root is not nul and is indeed root and centroid is valid
+        RetStatus rs = RetStatus::Success();
         VectorID new_root_id = _bufmgr.Record_Root();
         Internal_Node* new_root = new Internal_Node(new_root_id);
         _bufmgr.UpdateClusterAddress(new_root_id, new_root);
         _bufmgr.UpdateVectorAddress(_root, new_root->Insert(centroid, _root));
         _root = new_root_id;
         root->Assign_Parent(new_root_id);
+        ++_levels;
         // todo assert success of every operation
-        // todo return
+        return rs;
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
@@ -632,7 +643,7 @@ protected:
         rs = Clustering<_K_MIN, _K_MAX>(candidates, node_idx, centroids);
         node_centroid = centroids[0];
         FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Clustering failed");
-        FatalAssert(node_centroid.Is_Valid(), LOG_TAG_VECTOR_INDEX, "new centroid vector of base node is invalid")
+        FatalAssert(node_centroid.Is_Valid(), LOG_TAG_VECTOR_INDEX, "new centroid vector of base node is invalid");
         FatalAssert(candidates.size() > last_size, LOG_TAG_VECTOR_INDEX, "No new nodes were created.");
         FatalAssert(candidates.size() - last_size == centroids.size() - 1, LOG_TAG_VECTOR_INDEX, "Missmatch between number of created nodes and number of centroids. Number of created nodes:%lu, number of centroids:%lu",
             candidates.size() - last_size, centroids.size());
@@ -651,7 +662,7 @@ protected:
             size_t closest = Find_Closest_Cluster<_K_MIN, _K_MAX>(parents, centroids[node_it]);
 
             if (parents[closest]->Is_Full()) {
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX, "Node %lu is Full.", parents[closest]->_centroid_id)
+                CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX, "Node %lu is Full.", parents[closest]->_centroid_id);
             }
 
             Record_Into<_K_MIN, _K_MAX>(centroids[node_it], parents[closest], candidates[node_it + last_size - 1]);
