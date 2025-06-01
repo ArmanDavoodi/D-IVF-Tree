@@ -1,5 +1,6 @@
 #include "test.h"
 
+#include "core.h"
 #include "buffer.h"
 #include "dummy_copper.h"
 
@@ -25,12 +26,10 @@ public:
         bool status = true;
         constexpr uint16_t KI_MAX = 4, KI_MIN = 2;
         constexpr uint16_t KL_MAX = 8, KL_MIN = 1;
-        copper::Buffer_Manager<uint16_t, dim, KI_MIN, KI_MAX, KL_MIN, KL_MAX,
-            uint16_t, copper::L2_Distance<uint16_t, dim, double>> _buffer_manager;
-        using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX,
-            double, copper::L2_Distance<uint16_t, dim, double>>;
-        using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX,
-            double, copper::L2_Distance<uint16_t, dim, double>>;
+        copper::Buffer_Manager<uint16_t, dim, KI_MIN, KI_MAX, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>
+            _buffer_manager;
+        using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>;
+        using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX, double, copper::Simple_Divide_L2>;
 
         copper::RetStatus rs = _buffer_manager.Init();
         status = status && (rs.Is_OK());

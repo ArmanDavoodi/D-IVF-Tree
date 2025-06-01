@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+#include <concepts>
 
 #include "debug.h"
 
@@ -134,6 +135,20 @@ typedef void* Address;
 
 constexpr Address INVALID_ADDRESS = nullptr;
 
+template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE> class Copper_Node;
+
+template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE> class VectorIndex;
+
+template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE> class Buffer_Manager;
+
+template<typename T, uint16_t _DIM>
+struct VectorPair;
+
+template<typename T, uint16_t _DIM, uint16_t _CAP>
+class VectorSet;
 
 // Todo: Log VectorIndex: VectorIndex(RootID:%s(%lu, %lu, %lu), # levels:lu, # nodes:lu, # vectors:lu, size:lu)
 

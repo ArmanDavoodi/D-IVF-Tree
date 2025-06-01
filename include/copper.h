@@ -4,6 +4,7 @@
 #include "common.h"
 #include "vector_utils.h"
 #include "buffer.h"
+#include "core.h"
 
 #include <algorithm>
 
@@ -36,25 +37,46 @@
 namespace copper {
 
 template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
-            typename DIST_TYPE, typename _DIST>
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
 class Copper_Node {
 static_assert(_MIN_SIZE > 0);
 static_assert(_MAX_SIZE > _MIN_SIZE);
 static_assert(_MAX_SIZE / 2 >= _MIN_SIZE);
 static_assert(_DIM > 0);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const std::pair<VectorID, DIST_TYPE>& a,
+             const std::pair<VectorID, DIST_TYPE>& b) {
+        { core.More_Similar_Comp()(a, b) } -> std::same_as<bool>;
+        { core.Less_Similar_Comp()(a, b) } -> std::same_as<bool>;
+    },
+    "_CORE must have a More_Similar_Comp() and Less_Similar_Comp() method returning a callable object accepting"
+        "(const std::pair<VectorID, DIST_TYPE>&, const std::pair<VectorID, DIST_TYPE>&) and returning bool"
+);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) {
+        { core.Distance(a, b) } -> std::same_as<DIST_TYPE>;
+    },
+    "_CORE must have a Distance(const Vector<T, _DIM>&, const Vector<T, _DIM>&) method returning DIST_TYPE"
+);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const DIST_TYPE& a, const DIST_TYPE& b) {
+        { core.More_Similar(a, b) } -> std::same_as<bool>;
+    },
+    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
+        " is less than the second one."
+);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const T* vectors, size_t size) {
+        { core.Compute_Centroid(vectors, size) } -> std::same_as<Vector<T, _DIM>>;
+    },
+    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
+        " is less than the second one."
+);
+
 public:
     static constexpr uint16_t _DIM_ = _DIM;
     static constexpr uint16_t _MIN_SIZE_ = _MIN_SIZE;
     static constexpr uint16_t _MAX_SIZE_ = _MAX_SIZE;
-
-    struct _DIST_ID_PAIR_SIMILARITY {
-        _DIST _cmp;
-
-        _DIST_ID_PAIR_SIMILARITY(_DIST _d) : _cmp(_d) {}
-        inline bool operator()(const std::pair<VectorID, DIST_TYPE>& a, const std::pair<VectorID, DIST_TYPE>& b) const {
-            return _cmp(a.second, b.second);
-        }
-    };
 
     Copper_Node(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
         FatalAssert(id.Is_Valid(), LOG_TAG_COPPER_NODE, "Copper_Node(id = " VECTORID_LOG_FMT "): "
@@ -106,7 +128,7 @@ public:
     //     return RetStatus::Success();
     // }
 
-    inline VectorUpdate MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _DIST>* _dest) {
+    inline VectorUpdate MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
         FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
         FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
             "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
@@ -157,11 +179,11 @@ public:
         // TODO after using a more efficient sampling method, we should also handle the case where there is no sampling
         for (uint16_t i = 0; i < sample_size; ++i) {
             const VectorPair<T, _DIM> vec = _bucket[i];
-            DIST_TYPE distance = _dist(query, vec.vector);
+            DIST_TYPE distance = _core.Distance(query, vec.vector);
             neighbours.emplace_back(vec.id, distance);
-            std::push_heap(neighbours.begin(), neighbours.end(), _more_similar);
+            std::push_heap(neighbours.begin(), neighbours.end(), _core.More_Similar_Comp());
             if (neighbours.size() > k) {
-                std::pop_heap(neighbours.begin(), neighbours.end(), _more_similar);
+                std::pop_heap(neighbours.begin(), neighbours.end(), _core.More_Similar_Comp());
                 neighbours.pop_back();
             }
         }
@@ -180,12 +202,12 @@ public:
             "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
 
         VectorPair<T, _DIM> best_vec = _bucket[0];
-        DIST_TYPE best_dist = _dist(query, best_vec.vector);
+        DIST_TYPE best_dist = _core.Distance(query, best_vec.vector);
 
         for (uint16_t i = 1; i < _bucket.Size(); ++i) {
             VectorPair<T, _DIM> next_vec = _bucket[i];
-            DIST_TYPE new_dist = _dist(query, next_vec.vector);
-            if (_dist(new_dist, best_dist)) {
+            DIST_TYPE new_dist = _core.Distance(query, next_vec.vector);
+            if (_core.More_Similar(new_dist, best_dist)) {
                 best_dist = new_dist;
                 best_vec = std::move(next_vec);
             }
@@ -232,12 +254,11 @@ public:
         FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
         FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE, "Node does not have enough elements. "
                     "size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
-        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
+        return _core.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
     }
 
 protected:
-    _DIST _dist;
-    _DIST_ID_PAIR_SIMILARITY _more_similar{_dist};
+    _CORE<T, _DIM, DIST_TYPE> _core;
 
     const VectorID _centroid_id;
     VectorID _parent_id;
@@ -247,9 +268,8 @@ protected:
 TESTABLE;
 };
 
-template <typename T, uint16_t _DIM,
-            uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-            typename DIST_TYPE, typename _DIST>
+template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
 class VectorIndex {
 static_assert(KI_MIN > 0);
 static_assert(KI_MAX > KI_MIN);
@@ -257,10 +277,50 @@ static_assert(KI_MAX / 2 >= KI_MIN);
 static_assert(KL_MIN > 0);
 static_assert(KL_MAX > KL_MIN);
 static_assert(KL_MAX / 2 >= KL_MIN);
-static_assert(std::is_invocable_r_v<DIST_TYPE, _DIST(), const Vector<T, _DIM>&, const Vector<T, _DIM>&>,
-              "_DIST must be callable on two vectors and return DIST_TYPE");
-static_assert(std::is_invocable_r_v<bool(), _DIST(), const DIST_TYPE&, const DIST_TYPE&>,
-              "_DIST must be callable on two distances and return bool");
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const std::pair<VectorID, DIST_TYPE>& a,
+             const std::pair<VectorID, DIST_TYPE>& b) {
+        { core.More_Similar_Comp()(a, b) } -> std::same_as<bool>;
+        { core.Less_Similar_Comp()(a, b) } -> std::same_as<bool>;
+    },
+    "_CORE must have a More_Similar_Comp() and Less_Similar_Comp() method returning a callable object accepting"
+        "(const std::pair<VectorID, DIST_TYPE>&, const std::pair<VectorID, DIST_TYPE>&) and returning bool"
+);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) {
+        { core.Distance(a, b) } -> std::same_as<DIST_TYPE>;
+    },
+    "_CORE must have a Distance(const Vector<T, _DIM>&, const Vector<T, _DIM>&) method returning DIST_TYPE"
+);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const DIST_TYPE& a, const DIST_TYPE& b) {
+        { core.More_Similar(a, b) } -> std::same_as<bool>;
+    },
+    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
+        " is less than the second one."
+);
+static_assert(
+    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const T* vectors, size_t size) {
+        { core.Compute_Centroid(vectors, size) } -> std::same_as<Vector<T, _DIM>>;
+    },
+    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
+        " is less than the second one."
+);
+static_assert(
+    requires(
+        const _CORE<T, _DIM, DIST_TYPE>& core,
+        std::vector<Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE>*>& inodes,
+        std::vector<Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE>*>& lnodes,
+        size_t node_idx, uint16_t _split_leaf,
+        std::vector<Vector<T, _DIM>>& centroids,
+        Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE>& bufmgr
+    ) {
+        { core.Cluster<KI_MIN, KI_MAX>(inodes, node_idx, _split_leaf, centroids, bufmgr) } -> std::same_as<RetStatus>;
+        { core.Cluster<KL_MIN, KL_MAX>(lnodes, node_idx, _split_leaf, centroids, bufmgr) } -> std::same_as<RetStatus>;
+    },
+    "_CORE must have a template function Cluster with two uint16_t template arguments (_K_MIN, _K_MAX) and signature: "
+    "RetStatus Cluster(std::vector<Node<_K_MIN, _K_MAX>*>&, size_t, std::vector<Vector<T, _DIM>>&, Buffer_Manager<T, _DIM, _K_MIN, _K_MAX, _K_MIN, _K_MAX, _CORE<T, _DIM, DIST_TYPE>>&) const"
+);
 
 public:
 
@@ -373,8 +433,8 @@ public:
         Vector<T, _DIM> node_centroid_vector = _bufmgr->Get_Vector(node_id);
         FatalAssert(node_centroid_vector.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Could not get vector with id %lu.", node_id._id);
 
-        heap_stack.push_back({node_id, _dist(query, node_centroid_vector)});
-        std::push_heap(heap_stack.begin(), heap_stack.end(), _more_similar);
+        heap_stack.push_back({node_id, _core.Distance(query, node_centroid_vector)});
+        std::push_heap(heap_stack.begin(), heap_stack.end(), _core.More_Similar_Comp());
 
         if (node_id.Is_Leaf()) {
             goto NEIGHBOUR_EXTRACTION;
@@ -390,7 +450,7 @@ public:
             }
 
             while (!heap_stack.empty()) {
-                std::pop_heap(heap_stack.begin(), heap_stack.end(), _more_similar);
+                std::pop_heap(heap_stack.begin(), heap_stack.end(), _core.More_Similar_Comp());
                 std::pair<VectorID, DIST_TYPE> dist_id_pair = heap_stack.back();
                 heap_stack.pop_back();
 
@@ -404,7 +464,7 @@ public:
                 Internal_Node* node = _bufmgr.Get_Node(dist_id_pair.first);
                 FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to get node with id %lu.",
                             dist_id_pair.first);
-                rc = node->ApproximateKNearestNeighbours(query, search_k, search_sampling, neighbours, _more_similar);
+                rc = node->ApproximateKNearestNeighbours(query, search_k, search_sampling, neighbours);
                 FatalAssert(rc.Is_OK(), LOG_TAG_VECTOR_INDEX, "ANN search failed at node(%lu) with err(%s).",
                             dist_id_pair.first, rc.Msg());
             }
@@ -423,7 +483,7 @@ NEIGHBOUR_EXTRACTION:
             "level(%hhu) is not 1", level);
 
         while (!heap_stack.empty()) {
-            std::pop_heap(heap_stack.begin(), heap_stack.end(), _more_similar);
+            std::pop_heap(heap_stack.begin(), heap_stack.end(), _core.More_Similar_Comp());
             std::pair<VectorID, DIST_TYPE> dist_id_pair = heap_stack.back();
             heap_stack.pop_back();
 
@@ -437,14 +497,14 @@ NEIGHBOUR_EXTRACTION:
             Leaf_Node* leaf = _bufmgr.Get_Leaf(dist_id_pair.first);
             FatalAssert(leaf != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to get leaf with id %lu.",
                             dist_id_pair.first);
-            rc = leaf->ApproximateKNearestNeighbours(query, k, _vector_search, neighbours, _more_similar);
+            rc = leaf->ApproximateKNearestNeighbours(query, k, _vector_search, neighbours);
             FatalAssert(rc.Is_OK(), LOG_TAG_VECTOR_INDEX, "ANN search failed at leaf(%lu) with err(%s).",
                             dist_id_pair.first, rc.Msg());
         }
 
         if (sort) {
             std::sort_heap(neighbours.begin(), neighbours.end(),
-                            sort_from_more_similar_to_less ? _more_similar : _less_similar);
+                            sort_from_more_similar_to_less ? _core.More_Similar_Comp() : _core.Less_Similar_Comp());
         }
         return rc;
     }
@@ -455,36 +515,16 @@ NEIGHBOUR_EXTRACTION:
 
 protected:
 
-    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _DIST> Internal_Node;
-    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _DIST> Leaf_Node;
+    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
+    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
     template<uint16_t _K_MIN, uint16_t _K_MAX>
         requires((_K_MIN == KI_MIN && _K_MAX == KI_MAX) || (_K_MIN == KL_MIN && _K_MAX == KL_MAX))
-    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _DIST>;
+    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _CORE>;
 
-    struct _DIST_ID_PAIR_SIMILARITY {
-        _DIST _cmp;
-
-        _DIST_ID_PAIR_SIMILARITY(_DIST _d) : _cmp(_d) {}
-        inline bool operator()(const std::pair<VectorID, DIST_TYPE>& a, const std::pair<VectorID, DIST_TYPE>& b) const {
-            return _cmp(a.second, b.second);
-        }
-    };
-
-    struct _DIST_ID_PAIR_REVERSE_SIMILARITY {
-        _DIST _cmp;
-
-        _DIST_ID_PAIR_REVERSE_SIMILARITY(_DIST _d) : _cmp(_d) {}
-        inline bool operator()(const std::pair<VectorID, DIST_TYPE>& a, const std::pair<VectorID, DIST_TYPE>& b) const {
-            return !_cmp(a.second, b.second);
-        }
-    };
-
-    _DIST _dist;
-    _DIST_ID_PAIR_SIMILARITY _more_similar{_dist};
-    _DIST_ID_PAIR_REVERSE_SIMILARITY _less_similar{_dist};
+    _CORE<T, _DIM, DIST_TYPE> _core; /* Todo: avoid copying _core */
 
     size_t _size;
-    Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _DIST> _bufmgr;
+    Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE> _bufmgr;
     VectorID _root;
     uint16_t _split_internal;
     uint16_t _split_leaf;
@@ -543,51 +583,6 @@ protected:
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Clustering(std::vector<Node<_K_MIN, _K_MAX>*>& nodes, size_t node_idx,
-                                std::vector<Vector<T, _DIM>>& centroids) {
-        FatalAssert(nodes.size() > node_idx, LOG_TAG_VECTOR_INDEX, "nodes should contain node.");
-        Node<_K_MIN, _K_MAX>* node = nodes[node_idx];
-        FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "node should not be nullptr.");
-        FatalAssert(node->Is_Full(), LOG_TAG_VECTOR_INDEX, "node should be full.");
-
-        RetStatus rs = RetStatus::Success();
-
-        uint16_t split_into = (_K_MAX / _split_leaf < _K_MIN ? _K_MAX / _K_MIN : _split_leaf);
-        if (split_into < 2) {
-            split_into = 2;
-        }
-
-        uint16_t num_vec_per_node = _K_MAX / split_into;
-        uint16_t num_vec_rem = _K_MAX % split_into;
-        nodes.reserve(nodes.size() + split_into - 1);
-        centroids.reserve(split_into);
-        centroids.emplace_back(nullptr);
-        for (uint16_t i = num_vec_per_node + num_vec_rem; i < _K_MAX; ++i) {
-            if ((i - num_vec_rem) % num_vec_per_node == 0) {
-                VectorID vector_id = _bufmgr.Record_Vector(node->Level());
-                FatalAssert(vector_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Failed to record vector.");
-                nodes.emplace_back(new Node<_K_MIN, _K_MAX>(vector_id));
-                _bufmgr.UpdateClusterAddress(vector_id, nodes.back());
-            }
-            VectorUpdate update = node->MigrateLastVectorTo(nodes.back());
-            // todo check update is ok and everything is successfull
-
-            _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
-            if (update.vector_id.Is_Centroid()) {
-                _bufmgr.Get_Node(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
-                // todo check  successfull
-            }
-
-            if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
-                centroids.emplace_back(nodes.back()->Compute_Current_Centroid());
-            }
-        }
-        centroids[0] = node->Compute_Current_Centroid();
-
-        return rs;
-    }
-
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
     inline RetStatus Expand_Tree(Node<_K_MIN, _K_MAX>* root, const Vector<T, _DIM>& centroid) {
         // todo assert root is not nul and is indeed root and centroid is valid
         RetStatus rs = RetStatus::Success();
@@ -606,13 +601,13 @@ protected:
     inline size_t Find_Closest_Cluster(const std::vector<Node<_K_MIN, _K_MAX>*>& candidates,
                                        const Vector<T, _DIM>& vec) {
         size_t best_idx = 0;
-        DIST_TYPE best_dist = _dist(vec, _bufmgr.Get_Vector(candidates[0]->_centroid_id));
+        DIST_TYPE best_dist = _core.Distance(vec, _bufmgr.Get_Vector(candidates[0]->_centroid_id));
         // todo assert candidates[0]->_centroid_id and its vector
 
         for (size_t i = 1; i < candidates.size(); ++i) { // todo check for memory leaks and stuff
-            DIST_TYPE tmp_dist = _dist(vec, _bufmgr.Get_Vector(candidates[i]->_centroid_id));
+            DIST_TYPE tmp_dist = _core.Distance(vec, _bufmgr.Get_Vector(candidates[i]->_centroid_id));
             // todo assert candidates[0]->_centroid_id and its vector
-            if (_dist(tmp_dist, best_dist)) {
+            if (_core.More_Similar(tmp_dist, best_dist)) {
                 best_idx = i;
                 best_dist = tmp_dist;
             }
@@ -634,7 +629,7 @@ protected:
         // if node is root, node_centroid vector will be invalid and a new vector will be created for node centroid
         // otherwise, node_centroid will only be updated
         Vector<T, _DIM> node_centroid = _bufmgr.Get_Vector(node->CentroidID());
-        rs = Clustering<_K_MIN, _K_MAX>(candidates, node_idx, centroids);
+        rs = _core.Cluster<_K_MIN, _K_MAX>(candidates, node_idx, _split_leaf, centroids, _bufmgr);
         node_centroid = centroids[0];
         FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Clustering failed");
         FatalAssert(node_centroid.Is_Valid(), LOG_TAG_VECTOR_INDEX, "new centroid vector of base node is invalid");

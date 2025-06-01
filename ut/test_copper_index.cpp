@@ -180,10 +180,8 @@ protected:
     static constexpr uint16_t KI_MAX = 4, KI_MIN = 2;
     static constexpr uint16_t KL_MAX = 8, KL_MIN = 2;
 
-    using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX,
-            double, copper::L2_Distance<uint16_t, dim, double>>;
-    using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX,
-        double, copper::L2_Distance<uint16_t, dim, double>>;
+    using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>;
+    using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX, double, copper::Simple_Divide_L2>;
 
     const uint16_t _data16[size][dim] = {
         {1, 2, 3, 4},

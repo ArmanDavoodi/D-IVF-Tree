@@ -17,16 +17,6 @@ struct VectorUpdate {
 };
 
 template<typename T, uint16_t _DIM>
-struct VectorPair;
-
-template<typename T, uint16_t _DIM, uint16_t _CAP>
-class VectorSet;
-
-template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-        typename DIST_TYPE, typename _DIST>
-class Buffer_Manager;
-
-template<typename T, uint16_t _DIM>
 class Vector {
 static_assert(_DIM > 0);
 
@@ -261,7 +251,8 @@ protected:
 template<typename, uint16_t, uint16_t>
 friend class VectorSet;
 friend class VectorPair<T, _DIM>;
-template <typename, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t, typename, typename>
+template <typename, uint16_t, uint16_t, uint16_t, uint16_t, uint16_t, typename,
+          template<typename, uint16_t, typename> class>
 friend class Buffer_Manager;
 
 TESTABLE;
@@ -472,44 +463,5 @@ protected:
 
 TESTABLE;
 };
-
-template<typename V_TYPE, uint16_t _DIM, typename D_TYPE = double>
-class L2_Distance {
-public:
-    D_TYPE operator()(const Vector<V_TYPE, _DIM>& a, const Vector<V_TYPE, _DIM>& b) const {
-        FatalAssert(a.Is_Valid(), LOG_TAG_BASIC, "a is invalid");
-        FatalAssert(b.Is_Valid(), LOG_TAG_BASIC, "b is invalid");
-
-        D_TYPE dist = 0;
-        for (size_t i = 0; i < _DIM; ++i) {
-            dist += ((D_TYPE)a[i] - (D_TYPE)b[i]) * ((D_TYPE)a[i] - (D_TYPE)b[i]);
-        }
-        return dist;
-    }
-
-    bool operator()(const D_TYPE& a, const D_TYPE& b) const {
-        return a < b;
-    }
-
-    Vector<V_TYPE, _DIM> Compute_Centroid(const V_TYPE* vectors, size_t size) {
-        FatalAssert(size > 0, LOG_TAG_BASIC, "size cannot be 0");
-        FatalAssert(vectors != nullptr, LOG_TAG_BASIC, "size cannot be 0");
-        Vector<V_TYPE, _DIM> centroid(vectors);
-        for (size_t v = 1; v < size; ++v) {
-            for (uint16_t e = 0; e < _DIM; ++e) {
-                centroid[e] += vectors[v * _DIM + e];
-            }
-        }
-
-        for (uint16_t e = 0; e < _DIM; ++e) {
-            centroid[e] /= size;
-        }
-
-        return centroid;
-    }
-};
-
-
-
 };
 #endif

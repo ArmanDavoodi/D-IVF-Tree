@@ -4,25 +4,17 @@
 #include "common.h"
 #include "vector_utils.h"
 #include "buffer.h"
+#include "core.h"
 
 namespace copper {
 
 template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
-            typename DIST_TYPE, typename _DIST>
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
 class Copper_Node {
 public:
     static constexpr uint16_t _DIM_ = _DIM;
     static constexpr uint16_t _MIN_SIZE_ = _MIN_SIZE;
     static constexpr uint16_t _MAX_SIZE_ = _MAX_SIZE;
-
-    struct _DIST_ID_PAIR_SIMILARITY {
-        _DIST _cmp;
-
-        _DIST_ID_PAIR_SIMILARITY(_DIST _d) : _cmp(_d) {}
-        inline bool operator()(const std::pair<VectorID, DIST_TYPE>& a, const std::pair<VectorID, DIST_TYPE>& b) const {
-            return _cmp(a.second, b.second);
-        }
-    };
 
     Copper_Node(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
@@ -44,7 +36,7 @@ public:
         return INVALID_ADDRESS;
     }
 
-    inline VectorUpdate MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _DIST>* _dest) {
+    inline VectorUpdate MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
         VectorUpdate update;
         return update;
     }
@@ -91,12 +83,11 @@ public:
     }
 
     inline Vector<T, _DIM> Compute_Current_Centroid() const {
-        return _dist.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
+        return _core.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
     }
 
 protected:
-    _DIST _dist;
-    _DIST_ID_PAIR_SIMILARITY _more_similar{_dist};
+    _CORE<T, _DIM, DIST_TYPE> _core;
 
     VectorID _centroid_id;
     VectorID _parent_id;
@@ -105,9 +96,8 @@ protected:
 TESTABLE;
 };
 
-template <typename T, uint16_t _DIM,
-            uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-            typename DIST_TYPE, typename _DIST>
+template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
 class VectorIndex {
 public:
 
@@ -147,36 +137,16 @@ public:
 
 protected:
 
-    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _DIST> Internal_Node;
-    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _DIST> Leaf_Node;
+    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
+    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
     template<uint16_t _K_MIN, uint16_t _K_MAX>
         requires((_K_MIN == KI_MIN && _K_MAX == KI_MAX) || (_K_MIN == KL_MIN && _K_MAX == KL_MAX))
-    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _DIST>;
+    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _CORE>;
 
-    struct _DIST_ID_PAIR_SIMILARITY {
-        _DIST _cmp;
-
-        _DIST_ID_PAIR_SIMILARITY(_DIST _d) : _cmp(_d) {}
-        inline bool operator()(const std::pair<VectorID, DIST_TYPE>& a, const std::pair<VectorID, DIST_TYPE>& b) const {
-            return _cmp(a.second, b.second);
-        }
-    };
-
-    struct _DIST_ID_PAIR_REVERSE_SIMILARITY {
-        _DIST _cmp;
-
-        _DIST_ID_PAIR_REVERSE_SIMILARITY(_DIST _d) : _cmp(_d) {}
-        inline bool operator()(const std::pair<VectorID, DIST_TYPE>& a, const std::pair<VectorID, DIST_TYPE>& b) const {
-            return !_cmp(a.second, b.second);
-        }
-    };
-
-    _DIST _dist;
-    _DIST_ID_PAIR_SIMILARITY _more_similar{_dist};
-    _DIST_ID_PAIR_REVERSE_SIMILARITY _less_similar{_dist};
+    _CORE<T, _DIM, DIST_TYPE> _core;
 
     size_t _size;
-    Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _DIST> _bufmgr;
+    Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE> _bufmgr;
     VectorID _root;
     uint16_t _split_internal;
     uint16_t _split_leaf;
@@ -189,13 +159,6 @@ protected:
     inline VectorID Record_Into(const Vector<T, _DIM>& vec, Node<_K_MIN, _K_MAX>* container_node,
                                 Node<_K_MIN, _K_MAX>* node = nullptr) {
         return INVALID_VECTOR_ID;
-    }
-
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Clustering(std::vector<Node<_K_MIN, _K_MAX>*>& nodes, size_t node_idx,
-                                std::vector<Vector<T, _DIM>>& centroids) {
-        RetStatus rs = RetStatus::Success();
-        return rs;
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>

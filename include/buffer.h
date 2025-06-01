@@ -6,9 +6,6 @@
 
 namespace copper {
 
-template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
-            typename DIST_TYPE, typename _DIST> class Copper_Node;
-
 struct VectorInfo {
     Address vector_address; // valid if not root: points to the vector data
     Address cluster_address; // If it is a centroid -> is the address of the cluster with that id/ if a vector, address of the container leaf
@@ -17,14 +14,13 @@ struct VectorInfo {
     VectorInfo(Address data, Address cluster) : vector_address(data), cluster_address(cluster) {}
 };
 
-
 template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-        typename DIST_TYPE, typename _DIST>
+          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
 class Buffer_Manager {
 // TODO: reuse deleted IDs
 public:
-    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _DIST> Internal_Node;
-    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _DIST> Leaf_Node;
+    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
+    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
 
     inline RetStatus Init() {
         FatalAssert(directory.empty(), LOG_TAG_BUFFER, "Buffer already initialized");
