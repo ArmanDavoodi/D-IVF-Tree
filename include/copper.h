@@ -395,34 +395,9 @@ public:
     }
 
     inline RetStatus Delete(VectorID vec_id) {
-        // FatalAssert(_root.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID.");
-        // FatalAssert(_root.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID -> root should be a centroid.");
-        // FatalAssert(vec_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid input vector id.");
-        // FatalAssert(!vec_id.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "Invalid input vector id -> vector should not be a centroid.");
-        // FatalAssert(_levels > 1, LOG_TAG_VECTOR_INDEX, "Height of the tree should be at least two but is %hhu.", _levels);
-
         FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Delete not implemented");
 
         RetStatus rc = RetStatus::Success();
-        // Leaf_Node* leaf = _bufmgr->Get_Container_Leaf(vec_id);
-        // FatalAssert(leaf != nullptr, LOG_TAG_VECTOR_INDEX, "Container leaf not found.");
-
-        // if (leaf->Is_Almost_Empty()) {
-        //     // todo handle merge
-        //     CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Merge is not implemented.");
-        // }
-
-        // Vector<T, _DIM> swapped_vector = Vector<T, _DIM>::NEW_INVALID();
-        // VectorID swapped_vector_id = INVALID_VECTOR_ID;
-
-        // rc = leaf->Delete(vec_id, swapped_vector_id, swapped_vector);
-        // if (!rc.Is_OK()) {
-        //     CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Recovery in case of delete failure not implemented.");
-        // }
-
-        // // todo handle the swapped vector
-        // CLOG(LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "Handling swapped vectors is not implemented.");
-        // rc = RetStatus::Fail("Not implemented");
         return rc;
     }
 
