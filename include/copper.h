@@ -352,8 +352,8 @@ public:
             rs = Search_Nodes<Internal_Node>(vec, upper_layer, lower_layer, node_per_layer);
             FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Search nodes failed with error: %s", rs.Msg());
             FatalAssert(!lower_layer.empty(), LOG_TAG_VECTOR_INDEX, "Lower layer should not be empty.");
-            FatalAssert(lower_layer.size() <= _internal_k, LOG_TAG_VECTOR_INDEX,
-                        "Lower layer size (%lu) is larger than internal k (%hu).", lower_layer.size(), _internal_k);
+            FatalAssert(lower_layer.size() <= node_per_layer, LOG_TAG_VECTOR_INDEX,
+                        "Lower layer size (%lu) is larger than internal k (%hu).", lower_layer.size(), node_per_layer);
             FatalAssert(lower_layer.fron().first._level == next._level - 1, LOG_TAG_VECTOR_INDEX,
                         "Lower layer first element level (%hhu) does not match expected level (%hhu).",
                         lower_layer.front().first._level, next._level - 1);
@@ -506,7 +506,7 @@ protected:
         RetStatus rs = RetStatus::Success();
         lower_layer.clear();
         lower_layer.reserve(n);
-
+        uint16_t level = upper_layer.front().first._level;
         for (const std::pair<VectorID, DIST_TYPE>& node_data : upper_layer) {
             VectorID node_id = node_data.first;
 
@@ -514,6 +514,8 @@ protected:
                         VECTORID_LOG(node_id));
             FatalAssert(node_id.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "Node id should be a centroid: " VECTORID_LOG_FMT,
                         VECTORID_LOG(node_id));
+            FatalAssert(node_id._level == level, LOG_TAG_VECTOR_INDEX, "Node level mismatch: expected %hhu, got %hhu.",
+                        level, node_id._level);
 
             NodeType* node = _bufmgr.Get_Node<NodeType>(node_id);
             FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "nullptr node with id " VECTORID_LOG_FMT ".",
