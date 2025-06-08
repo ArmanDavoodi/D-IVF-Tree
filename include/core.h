@@ -109,16 +109,19 @@ public:
         return _dist.Compute_Centroid(vectors, size);
     }
 
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Cluster(std::vector<Node<_K_MIN, _K_MAX>*>& nodes, size_t node_idx,
+    template<typename NodeType, uint16_t _KI_MIN, uint16_t _KI_MAX, uint16_t _KL_MIN, uint16_t _KL_MAX>
+    inline RetStatus Cluster(std::vector<NodeType*>& nodes, size_t node_idx,
                              std::vector<Vector<T, _DIM>>& centroids, uint16_t _split_leaf,
-                             Buffer_Manager<T, _DIM, _K_MIN, _K_MAX, _K_MIN, _K_MAX, DIST_TYPE, CORE>& _bufmgr) const {
-        static_assert(_K_MIN > 0);
-        static_assert(_K_MAX > _K_MIN);
-        static_assert(_K_MAX / 2 >= _K_MIN);
+                             Buffer_Manager<T, _DIM, _KI_MIN, _KI_MAX, _KL_MIN, _KL_MAX, DIST_TYPE, CORE>& _bufmgr)
+                             const {
+
+        static_assert(
+            std::is_same_v<NodeType, Node<_KI_MIN, _KI_MAX>> || std::is_same_v<NodeType, Node<_KL_MIN, _KL_MAX>>,
+            "NodeType must be either Node<_KI_MIN, _KI_MAX> or Node<_KL_MIN, _KL_MAX>"
+        );
 
         FatalAssert(nodes.size() > node_idx, LOG_TAG_VECTOR_INDEX, "nodes should contain node.");
-        Node<_K_MIN, _K_MAX>* node = nodes[node_idx];
+        NodeType* node = nodes[node_idx];
         FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "node should not be nullptr.");
         FatalAssert(node->Is_Full(), LOG_TAG_VECTOR_INDEX, "node should be full.");
 
@@ -138,15 +141,18 @@ public:
             if ((i - num_vec_rem) % num_vec_per_node == 0) {
                 VectorID vector_id = _bufmgr.Record_Vector(node->Level());
                 FatalAssert(vector_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Failed to record vector.");
-                nodes.emplace_back(new Node<_K_MIN, _K_MAX>(vector_id));
+                nodes.emplace_back(new NodeType(vector_id));
                 _bufmgr.UpdateClusterAddress(vector_id, nodes.back());
             }
             VectorUpdate update = node->MigrateLastVectorTo(nodes.back());
             // todo check update is ok and everything is successfull
 
             _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
-            if (update.vector_id.Is_Centroid()) {
-                _bufmgr.Get_Node(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
+            if (update.vector_id.Is_Leaf()) {
+                _bufmgr.Get_Node<Node<_KL_MIN, _KL_MAX>*>(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
+                // todo check  successfull
+            } else if (update.vector_id.Is_Internal_Node()) {
+                _bufmgr.Get_Node<Node<_KI_MIN, _KI_MAX>*>(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
                 // todo check  successfull
             }
 

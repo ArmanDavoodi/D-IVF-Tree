@@ -51,21 +51,25 @@ public:
         return RetStatus::Success();
     }
 
-    inline Internal_Node* Get_Node(VectorID node_id) {
+    template<typename NodeType>
+    inline NodeType* Get_Node(VectorID node_id) {
+        static_assert(std::is_same<NodeType, Internal_Node>::value || std::is_same<NodeType, Leaf_Node>::value,
+                  "NodeType must be either Internal_Node or Leaf_Node");
+
         FatalAssert(node_id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Node Id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
-        FatalAssert(node_id.Is_Internal_Node(), LOG_TAG_BUFFER, "Node ID:%lu is not an internal node", node_id._id);
+        FatalAssert(node_id.Is_Centroid(), LOG_TAG_BUFFER, "ID:%lu is a vector ID", node_id._id);
         FatalAssert(directory.size() > node_id._level, LOG_TAG_BUFFER, "Node ID:%lu level is out of bounds. max_level:%lu", node_id._id, directory.size());
         FatalAssert(directory[node_id._level].size() > node_id._val, LOG_TAG_BUFFER, "Node ID:%lu val is out of bounds. max_val:%lu", node_id._id, directory[node_id._level].size());
         FatalAssert(directory[node_id._level][node_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Node not found in the buffer. Node ID:%lu", node_id._id);
 
-        Internal_Node* node = (Internal_Node*)(directory[node_id._level][node_id._val].cluster_address);
+        NodeType* node = (NodeType*)(directory[node_id._level][node_id._val].cluster_address);
         FatalAssert(node->_centroid_id == node_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu",
             node_id._id, node->_centroid_id._id);
 
         return node;
     }
 
-    inline Leaf_Node* Get_Leaf(VectorID leaf_id) {
+    /* inline Leaf_Node* Get_Leaf(VectorID leaf_id) {
         FatalAssert(leaf_id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Leaf Id: " VECTORID_LOG_FMT, VECTORID_LOG(leaf_id));
         FatalAssert(leaf_id.Is_Leaf(), LOG_TAG_BUFFER, "Leaf ID:%lu is not a leaf", leaf_id._id);
         FatalAssert(directory.size() > leaf_id._level, LOG_TAG_BUFFER, "Leaf ID:%lu level is out of bounds. max_level:%lu", leaf_id._id, directory.size());
@@ -76,7 +80,7 @@ public:
         FatalAssert(leaf->_centroid_id == leaf_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu", leaf_id._id, leaf->_centroid_id._id);
 
         return leaf;
-    }
+    } */
 
     inline Leaf_Node* Get_Container_Leaf(VectorID vec_id) {
         FatalAssert(vec_id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Vector Id: " VECTORID_LOG_FMT, VECTORID_LOG(vec_id));
