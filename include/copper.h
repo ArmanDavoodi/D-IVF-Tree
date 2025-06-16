@@ -87,16 +87,16 @@ public:
 
     inline RetStatus Assign_Parent(VectorID parent_id) {
         FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Assign_Parent(self = " NODE_LOG_FMT
-                    ", parent_id = " VECTORID_LOG_FMT "): Node does not have a valid centroid.", NODE_PTR_LOG(this),
+                    ", parent_id = " VECTORID_LOG_FMT "): Node does not have a valid centroid.", NODE_PTR_LOG(this, false),
                     VECTORID_LOG(parent_id));
         FatalAssert(_centroid_id.Is_Centroid(), LOG_TAG_COPPER_NODE, "Assign_Parent(self = " NODE_LOG_FMT
-                    ", parent_id = " VECTORID_LOG_FMT "): Node is not a centroid.", NODE_PTR_LOG(this),
+                    ", parent_id = " VECTORID_LOG_FMT "): Node is not a centroid.", NODE_PTR_LOG(this, false),
                     VECTORID_LOG(parent_id));
         FatalAssert(parent_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Assign_Parent(self = " NODE_LOG_FMT
-                    ", parent_id = " VECTORID_LOG_FMT "): Cannot assign an invalid id to parent.", NODE_PTR_LOG(this),
+                    ", parent_id = " VECTORID_LOG_FMT "): Cannot assign an invalid id to parent.", NODE_PTR_LOG(this, false),
                     VECTORID_LOG(parent_id));
         FatalAssert(parent_id._level == _centroid_id._level + 1, LOG_TAG_COPPER_NODE, "Assign_Parent(self = " NODE_LOG_FMT
-            ", parent_id = " VECTORID_LOG_FMT "): Level mismatch between parent and self.", NODE_PTR_LOG(this),
+            ", parent_id = " VECTORID_LOG_FMT "): Level mismatch between parent and self.", NODE_PTR_LOG(this, false),
             VECTORID_LOG(parent_id));
 
         _parent_id = parent_id;
@@ -115,8 +115,11 @@ public:
             , vec_id._id, vec_id._level, _centroid_id._id, _centroid_id._level);
         FatalAssert(vec.Is_Valid(), LOG_TAG_COPPER_NODE, "Cannot insert invalid vector %lu into the bucket with id %lu.",
                     vec_id._id, _centroid_id._id);
-
-        return _bucket.Insert(vec, vec_id);
+        Address addr = _bucket.Insert(vec, vec_id);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE,
+                 "Insert: Node-Bucket=%s, Inserted VectorID=" VECTORID_LOG_FMT ", Vector=%s",
+                 _bucket.to_string().c_str(), VECTORID_LOG(vec_id), vec.to_string().c_str());
+        return addr;
     }
 
     // inline RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector<T, _DIM>& swapped_vec) {
@@ -164,6 +167,10 @@ public:
         FatalAssert(neighbours.size() <= k, LOG_TAG_COPPER_NODE,
             "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE,
+                 "Search: Node-Bucket=%s", _bucket.to_string().c_str());
+        PRINT_VECTOR_PAIR_BATCH(neighbours, "Search: Neighbours before search");
+
         for (uint16_t i = 0; i < _bucket.Size(); ++i) {
             const VectorPair<T, _DIM> vec = _bucket[i];
             DIST_TYPE distance = _core.Distance(query, vec.vector);
@@ -174,6 +181,7 @@ public:
                 neighbours.pop_back();
             }
         }
+        PRINT_VECTOR_PAIR_BATCH(neighbours, "Search: Neighbours after search");
 
         FatalAssert(neighbours.size() <= k, LOG_TAG_COPPER_NODE,
             "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
@@ -181,27 +189,27 @@ public:
         return RetStatus::Success();
     }
 
-    inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
-        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
-            "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
-        FatalAssert(_bucket.Size() <= _MAX_SIZE, LOG_TAG_COPPER_NODE,
-            "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
+    // inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
+    //     FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+    //     FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
+    //         "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
+    //     FatalAssert(_bucket.Size() <= _MAX_SIZE, LOG_TAG_COPPER_NODE,
+    //         "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
 
-        VectorPair<T, _DIM> best_vec = _bucket[0];
-        DIST_TYPE best_dist = _core.Distance(query, best_vec.vector);
+    //     VectorPair<T, _DIM> best_vec = _bucket[0];
+    //     DIST_TYPE best_dist = _core.Distance(query, best_vec.vector);
 
-        for (uint16_t i = 1; i < _bucket.Size(); ++i) {
-            VectorPair<T, _DIM> next_vec = _bucket[i];
-            DIST_TYPE new_dist = _core.Distance(query, next_vec.vector);
-            if (_core.More_Similar(new_dist, best_dist)) {
-                best_dist = new_dist;
-                best_vec = std::move(next_vec);
-            }
-        }
+    //     for (uint16_t i = 1; i < _bucket.Size(); ++i) {
+    //         VectorPair<T, _DIM> next_vec = _bucket[i];
+    //         DIST_TYPE new_dist = _core.Distance(query, next_vec.vector);
+    //         if (_core.More_Similar(new_dist, best_dist)) {
+    //             best_dist = new_dist;
+    //             best_vec = std::move(next_vec);
+    //         }
+    //     }
 
-        return best_vec.id;
-    }
+    //     return best_vec.id;
+    // }
 
     inline uint16_t Size() const {
         return _bucket.Size();
@@ -242,6 +250,10 @@ public:
         FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE, "Node does not have enough elements. "
                     "size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
         return _core.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
+    }
+
+    inline std::string bucket_to_string() const {
+        return _bucket.to_string();
     }
 
 protected:
@@ -344,6 +356,10 @@ public:
 
         RetStatus rs = RetStatus::Success();
 
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
+             vec.to_string().c_str(), _size, _levels);
+
         std::vector<std::pair<VectorID, DIST_TYPE>> upper_layer, lower_layer;
         upper_layer.emplace_back(_root, 0);
         VectorID next = _root;
@@ -385,11 +401,15 @@ public:
             }
         }
         else {
-            rc = RetStatus::Fail(""); //todo
+            rs = RetStatus::Fail(""); //todo
         }
-
+        FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Insert failed with error: %s", rc.Msg());
         FatalAssert(_levels == _bufmgr.Get_Height(), LOG_TAG_VECTOR_INDEX,
                     "Levels mismatch: _levels=%hhu, _bufmgr.directory.size()=%lu", _levels, _bufmgr.Get_Height());
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Insert END: Vector=%s, vec_id=" VECTORID_LOG_FMT ", _size=%lu, _levels=%hhu",
+             vec.to_string().c_str(), VECTORID_LOG(vec_id), _size, _levels);
 
         return rc;
     }
@@ -472,26 +492,26 @@ protected:
     uint16_t _split_leaf;
     uint64_t _levels;
 
-    inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
-        FatalAssert(_root.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID.");
-        FatalAssert(_root.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID -> root should be a centroid.");
+    // inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
+    //     FatalAssert(_root.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID.");
+    //     FatalAssert(_root.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID -> root should be a centroid.");
 
-        if (_root.Is_Leaf()) {
-            return _bufmgr.Get_Node<Leaf_Node>(_root);
-        }
-        VectorID next = _root;
+    //     if (_root.Is_Leaf()) {
+    //         return _bufmgr.Get_Node<Leaf_Node>(_root);
+    //     }
+    //     VectorID next = _root;
 
-        while (!next.Is_Leaf()) {
-            FatalAssert(next.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid vector id:%lu", next._id);
-            Internal_Node* node = _bufmgr.Get_Node<Internal_Node>(next);
-            FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "nullptr node with id %lu.", next._id);
-            next = node->Find_Nearest(query);
-        }
+    //     while (!next.Is_Leaf()) {
+    //         FatalAssert(next.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid vector id:%lu", next._id);
+    //         Internal_Node* node = _bufmgr.Get_Node<Internal_Node>(next);
+    //         FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "nullptr node with id %lu.", next._id);
+    //         next = node->Find_Nearest(query);
+    //     }
 
-        FatalAssert(next.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid vector id:%lu", next._id);
-        FatalAssert(next.Is_Leaf(), LOG_TAG_VECTOR_INDEX, "Invalid leaf vector id:%lu", next._id);
-        return _bufmgr.Get_Node<Leaf_Node>(next);
-    }
+    //     FatalAssert(next.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid vector id:%lu", next._id);
+    //     FatalAssert(next.Is_Leaf(), LOG_TAG_VECTOR_INDEX, "Invalid leaf vector id:%lu", next._id);
+    //     return _bufmgr.Get_Node<Leaf_Node>(next);
+    // }
 
     template<typename NodeType>
     inline RetStatus Search_Nodes(const Vector<T, _DIM>& query,
@@ -502,6 +522,10 @@ protected:
         FatalAssert(n > 0, LOG_TAG_VECTOR_INDEX, "Number of nodes to search for should be greater than 0.");
         FatalAssert(!upper_layer.empty(), LOG_TAG_VECTOR_INDEX, "Upper layer should not be empty.");
         FatalAssert(query.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Query vector is invalid.");
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Search_Nodes BEGIN: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu",
+             query.to_string().c_str(), n, upper_layer.size(), upper_layer.front().first._level);
 
         RetStatus rs = RetStatus::Success();
         lower_layer.clear();
@@ -521,10 +545,21 @@ protected:
             FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "nullptr node with id " VECTORID_LOG_FMT ".",
                         VECTORID_LOG(node_id));
 
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+                 "Search_Nodes: node_id=" VECTORID_LOG_FMT ", node_centroid=%s, node_type=%s",
+                 VECTORID_LOG(node_id), _bufmgr.Get_Vector_By_ID(node_id).to_string().c_str(),
+                 ((node->Is_Leaf()) ? "Leaf" : "Internal"));
+
             rs = node->Search(query, n, lower_layer);
             FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Search failed at node " VECTORID_LOG_FMT " with err(%s).",
                         VECTORID_LOG(node_id), rs.Msg());
         }
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Search_Nodes END: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu, "
+             "lower_layer_size=%lu, lower_level=%hhu",
+             query.to_string().c_str(), n, upper_layer.size(), upper_layer.front().first._level, lower_layer.size(),
+             lower_layer.front().first._level);
 
         return rs;
     }
@@ -571,6 +606,9 @@ protected:
         _root = new_root_id;
         root->Assign_Parent(new_root_id);
         ++_levels;
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Expand_Tree: New root created with id=" VECTORID_LOG_FMT ", previous root id= " VECTORID_LOG_FMT,
+             VECTORID_LOG(new_root_id), VECTORID_LOG(root->CentroidID()));
         // todo assert success of every operation
         return rs;
     }
@@ -579,11 +617,11 @@ protected:
     inline size_t Find_Closest_Cluster(const std::vector<Node<_K_MIN, _K_MAX>*>& candidates,
                                        const Vector<T, _DIM>& vec) {
         size_t best_idx = 0;
-        DIST_TYPE best_dist = _core.Distance(vec, _bufmgr.Get_Vector(candidates[0]->_centroid_id));
+        DIST_TYPE best_dist = _core.Distance(vec, _bufmgr.Get_Vector_By_ID(candidates[0]->_centroid_id));
         // todo assert candidates[0]->_centroid_id and its vector
 
         for (size_t i = 1; i < candidates.size(); ++i) { // todo check for memory leaks and stuff
-            DIST_TYPE tmp_dist = _core.Distance(vec, _bufmgr.Get_Vector(candidates[i]->_centroid_id));
+            DIST_TYPE tmp_dist = _core.Distance(vec, _bufmgr.Get_Vector_By_ID(candidates[i]->_centroid_id));
             // todo assert candidates[0]->_centroid_id and its vector
             if (_core.More_Similar(tmp_dist, best_dist)) {
                 best_idx = i;
@@ -606,7 +644,12 @@ protected:
         std::vector<Vector<T, _DIM>> centroids;
         // if node is root, node_centroid vector will be invalid and a new vector will be created for node centroid
         // otherwise, node_centroid will only be updated
-        Vector<T, _DIM> node_centroid = _bufmgr.Get_Vector(node->CentroidID());
+        Vector<T, _DIM> node_centroid = _bufmgr.Get_Vector_By_ID(node->CentroidID());
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Split BEGIN: " NODE_LOG_FMT, "Centroid:%s"
+             NODE_PTR_LOG(node, true), node_centroid.to_string().c_str());
+
         rs = _core.Cluster<_K_MIN, _K_MAX>(candidates, node_idx, _split_leaf, centroids, _bufmgr);
         node_centroid = centroids[0];
         FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "Clustering failed");
@@ -632,6 +675,12 @@ protected:
                 CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX, "Node %lu is Full.", parents[closest]->_centroid_id);
             }
 
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+                 "Split: Put Node " NODE_LOG_FMT, " Centroid:%s, into Parent " NODE_LOG_FMT,
+                 " Parent_Centroid:%s", NODE_PTR_LOG(candidates[node_it + last_size - 1], true),
+                 centroids[node_it].to_string().c_str(), Node_PTR_LOG(parents[closest], true),
+                 _bufmgr.Get_Vector_By_ID(parents[closest]->CentroidID()).to_string().c_str());
+
             Record_Into<_K_MIN, _K_MAX>(centroids[node_it], parents[closest], candidates[node_it + last_size - 1]);
 
             // todo assert ok
@@ -640,6 +689,10 @@ protected:
                 FatalAssert(rs.Is_OK(), LOG_TAG_VECTOR_INDEX, "");
             }
         }
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "Split END: " NODE_LOG_FMT, "Centroid:%s"
+             NODE_PTR_LOG(node, true), node_centroid.to_string().c_str());
         return rs;
     }
 

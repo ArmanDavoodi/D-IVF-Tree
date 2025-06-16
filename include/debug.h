@@ -42,6 +42,7 @@ enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_BUFFER_BIT,
     LOG_TAG_COPPER_NODE_BIT,
     LOG_TAG_VECTOR_INDEX_BIT,
+    LOG_TAG_CORE_BIT,
     LOG_TAG_NOT_IMPLEMENTED_BIT,
     LOG_TAG_TEST_BIT,
     NUM_TAGS
@@ -53,6 +54,7 @@ enum LOG_TAG_BITS : uint64_t {
 #define LOG_TAG_BUFFER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_BUFFER_BIT))
 #define LOG_TAG_COPPER_NODE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_COPPER_NODE_BIT))
 #define LOG_TAG_VECTOR_INDEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_INDEX_BIT))
+#define LOG_TAG_CORE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CORE_BIT))
 #define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
 #define LOG_TAG_TEST (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_TEST_BIT))
 
@@ -311,6 +313,8 @@ inline const char* tagtostr(uint64_t tag)
         return "Copper Node" ;
     case LOG_TAG_VECTOR_INDEX:
         return "Vector Index" ;
+    case LOG_TAG_CORE:
+        return "Core" ;
     case LOG_TAG_NOT_IMPLEMENTED:
         return "Not Implemented" ;
     case LOG_TAG_TEST:

@@ -66,7 +66,7 @@ public:
                         back_vec.to_string().c_str(), vec.to_string().c_str());
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Node:" NODE_LOG_FMT, NODE_PTR_LOG(&node));
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Node:" NODE_LOG_FMT, NODE_PTR_LOG(&node, false));
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Node Bucket: %s", node._bucket.to_string().c_str());
 
         vec_id._val += 1;
@@ -85,9 +85,9 @@ public:
         status = status && (node.Size() == size - 1);
         ErrorAssert(node.Size() == size - 1, LOG_TAG_TEST,
                     "Node size mismatch. Expected=%hu, Actual=%hu", size - 1, node.Size());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Node:" NODE_LOG_FMT, NODE_PTR_LOG(&node));
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Node:" NODE_LOG_FMT, NODE_PTR_LOG(&node, false));
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Node Bucket: %s", node._bucket.to_string().c_str());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Node:" NODE_LOG_FMT, NODE_PTR_LOG(&other_node));
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Node:" NODE_LOG_FMT, NODE_PTR_LOG(&other_node, false));
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Node Bucket: %s", other_node._bucket.to_string().c_str());
 
         const uint16_t target[dim] = {18, 19, 23, 14};
