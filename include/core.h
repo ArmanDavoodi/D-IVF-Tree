@@ -68,32 +68,32 @@ struct _DIST_ID_PAIR_REVERSE_SIMILARITY {
  * Usually, a Core should not get a _DIST template as the clustering algorithm may depend on the _DIST itself
  * but in this case, Simple_Divide can be used with any distance function.
  */
-template <typename T, uint16_t _DIM, typename DIST_TYPE, template<typename, uint16_t, typename> class _DIST>
-class Simple_Divide { /* better naming */
+template <typename T, uint16_t _DIM, typename DIST_TYPE = double>
+class Simple_Divide_L2 { /* better naming */
 static_assert(
-    requires(const _DIST<T, _DIM, DIST_TYPE>& _dist, const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) {
+    requires(const L2_Distance<T, _DIM, DIST_TYPE>& _dist, const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) {
         { _dist(a, b) } -> std::same_as<DIST_TYPE>;
     },
-    "_DIST must be callable on two vectors and return DIST_TYPE"
+    "L2_Distance must be callable on two vectors and return DIST_TYPE"
 );
 static_assert(
-    requires(const _DIST<T, _DIM, DIST_TYPE>& _dist, const DIST_TYPE& a, const DIST_TYPE& b) {
+    requires(const L2_Distance<T, _DIM, DIST_TYPE>& _dist, const DIST_TYPE& a, const DIST_TYPE& b) {
         { _dist(a, b) } -> std::same_as<bool>;
     },
-    "_DIST must be callable on two distances and return bool"
+    "L2_Distance must be callable on two distances and return bool"
 );
 
 public:
-    template<typename V_TYPE, uint16_t DIMENTION, typename D_TYPE>
-    using CORE = Simple_Divide<V_TYPE, DIMENTION, D_TYPE, _DIST>;
+    // template<typename V_TYPE, uint16_t DIMENTION, typename D_TYPE>
+    // using CORE = Simple_Divide<V_TYPE, DIMENTION, D_TYPE, _DIST>;
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, CORE>;
+    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, Simple_Divide_L2>;
 
-    inline const _DIST_ID_PAIR_SIMILARITY<DIST_TYPE, _DIST<T, _DIM, DIST_TYPE>>& More_Similar_Comp() const {
+    inline const _DIST_ID_PAIR_SIMILARITY<DIST_TYPE, L2_Distance<T, _DIM, DIST_TYPE>>& More_Similar_Comp() const {
         return _more_similar_cmp;
     }
 
-    inline const _DIST_ID_PAIR_REVERSE_SIMILARITY<DIST_TYPE, _DIST<T, _DIM, DIST_TYPE>>& Less_Similar_Comp() const {
+    inline const _DIST_ID_PAIR_REVERSE_SIMILARITY<DIST_TYPE, L2_Distance<T, _DIM, DIST_TYPE>>& Less_Similar_Comp() const {
         return _less_similar_cmp;
     }
 
@@ -111,8 +111,8 @@ public:
 
     template<typename NodeType, uint16_t _KI_MIN, uint16_t _KI_MAX, uint16_t _KL_MIN, uint16_t _KL_MAX>
     inline RetStatus Cluster(std::vector<NodeType*>& nodes, size_t node_idx,
-                             std::vector<Vector<T, _DIM>>& centroids, uint16_t _split_leaf,
-                             Buffer_Manager<T, _DIM, _KI_MIN, _KI_MAX, _KL_MIN, _KL_MAX, DIST_TYPE, CORE>& _bufmgr)
+                             std::vector<Vector<T, _DIM>>& centroids, uint16_t split_into,
+                             Buffer_Manager<T, _DIM, _KI_MIN, _KI_MAX, _KL_MIN, _KL_MAX, DIST_TYPE, Simple_Divide_L2>& _bufmgr)
                              const {
 
         static_assert(
@@ -124,20 +124,22 @@ public:
         NodeType* node = nodes[node_idx];
         FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "node should not be nullptr.");
         FatalAssert(node->Is_Full(), LOG_TAG_VECTOR_INDEX, "node should be full.");
+        FatalAssert(split_into > 0, LOG_TAG_VECTOR_INDEX, "split_into should be greater than 0.");
 
         RetStatus rs = RetStatus::Success();
 
-        uint16_t split_into = (_K_MAX / _split_leaf < _K_MIN ? _K_MAX / _K_MIN : _split_leaf);
+        split_into = (NodeType::_MAX_SIZE_ / split_into < NodeType::_MIN_SIZE_ ?
+                      NodeType::_MAX_SIZE_ / NodeType::_MIN_SIZE_ : split_into);
         if (split_into < 2) {
             split_into = 2;
         }
 
-        uint16_t num_vec_per_node = _K_MAX / split_into;
-        uint16_t num_vec_rem = _K_MAX % split_into;
+        uint16_t num_vec_per_node = NodeType::_MAX_SIZE_ / split_into;
+        uint16_t num_vec_rem = NodeType::_MAX_SIZE_ % split_into;
         nodes.reserve(nodes.size() + split_into - 1);
         centroids.reserve(split_into);
         centroids.emplace_back(nullptr);
-        for (uint16_t i = num_vec_per_node + num_vec_rem; i < _K_MAX; ++i) {
+        for (uint16_t i = num_vec_per_node + num_vec_rem; i < NodeType::_MAX_SIZE_; ++i) {
             if ((i - num_vec_rem) % num_vec_per_node == 0) {
                 VectorID vector_id = _bufmgr.Record_Vector(node->Level());
                 FatalAssert(vector_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Failed to record vector.");
@@ -149,10 +151,10 @@ public:
 
             _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
             if (update.vector_id.Is_Leaf()) {
-                _bufmgr.Get_Node<Node<_KL_MIN, _KL_MAX>*>(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
+                _bufmgr.template Get_Node<Node<_KL_MIN, _KL_MAX>>(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
                 // todo check  successfull
             } else if (update.vector_id.Is_Internal_Node()) {
-                _bufmgr.Get_Node<Node<_KI_MIN, _KI_MAX>*>(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
+                _bufmgr.template Get_Node<Node<_KI_MIN, _KI_MAX>>(update.vector_id)->Assign_Parent(nodes.back()->CentroidID());
                 // todo check  successfull
             }
 
@@ -170,13 +172,13 @@ public:
     }
 
 protected:
-    _DIST<T, _DIM, DIST_TYPE> _dist;
-    _DIST_ID_PAIR_SIMILARITY<DIST_TYPE, _DIST<T, _DIM, DIST_TYPE>> _more_similar_cmp{_dist};
-    _DIST_ID_PAIR_REVERSE_SIMILARITY<DIST_TYPE, _DIST<T, _DIM, DIST_TYPE>> _less_similar_cmp{_dist};
+    L2_Distance<T, _DIM, DIST_TYPE> _dist;
+    _DIST_ID_PAIR_SIMILARITY<DIST_TYPE, L2_Distance<T, _DIM, DIST_TYPE>> _more_similar_cmp{_dist};
+    _DIST_ID_PAIR_REVERSE_SIMILARITY<DIST_TYPE, L2_Distance<T, _DIM, DIST_TYPE>> _less_similar_cmp{_dist};
 };
 
-template <typename T, uint16_t _DIM, typename DIST_TYPE = double>
-using Simple_Divide_L2 = Simple_Divide<T, _DIM, DIST_TYPE, L2_Distance>;
+// template <typename T, uint16_t _DIM, typename DIST_TYPE = double>
+// using Simple_Divide_L2 = Simple_Divide<T, _DIM, DIST_TYPE, L2_Distance>;
 
 };
 

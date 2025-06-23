@@ -155,19 +155,19 @@ class VectorSet;
 #define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
 #define VECTORID_LOG(vid) (!((vid).Is_Valid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
 
-#define NODE_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT "%s)"
+#define NODE_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
 // todo remove
 #define NODE_PTR_LOG(node, print_bucket)\
-    ((node) == nullptr ? "NULL" :\
+    (((node) == nullptr) ? "NULL" :\
         (!((node)->CentroidID().Is_Valid()) ? "INV" : ((node)->CentroidID().Is_Vector() ? "Non-Centroid" : \
             ((node)->CentroidID().Is_Leaf() ? "Leaf" : ((node)->CentroidID().Is_Internal_Node() ? "Internal" \
                 : "UNDEF"))))),\
-    ((node) == nullptr ? 0 : std::remove_reference_t<decltype(*(node))>::_MIN_SIZE_),\
-    ((node) == nullptr ? 0 : std::remove_reference_t<decltype(*(node))>::_MAX_SIZE_),\
-    VECTORID_LOG(((node) == nullptr ? copper::INVALID_VECTOR_ID : (node)->CentroidID())),\
-    ((node) == nullptr ? 0 : (node)->Size()),\
-    VECTORID_LOG(((node) == nullptr ? copper::INVALID_VECTOR_ID : (node)->ParentID())),\
-    ((print_bucket) ? (((node) == nullptr) ? "" : std::string(", bucket: ") + (node)->bucket_to_string().c_str()) : "")
+    (((node) == nullptr) ? 0 : std::remove_reference_t<decltype(*(node))>::_MIN_SIZE_),\
+    (((node) == nullptr) ? 0 : std::remove_reference_t<decltype(*(node))>::_MAX_SIZE_),\
+    VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->CentroidID())),\
+    (((node) == nullptr) ? 0 : (node)->Size()),\
+    VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->ParentID())),\
+    ((print_bucket) ? ((((node) == nullptr)) ? "NULL" : ((node)->bucket_to_string()).c_str()) : "OMITTED")
 
 /* #define NODE_VAL_LOG(node)\
     (!((node).CentroidID().Is_Valid()) ? "INV" : ((node).CentroidID().Is_Vector() ? "Non-Centroid" : \
@@ -176,7 +176,7 @@ class VectorSet;
     std::remove_reference_t<decltype((node))>::_MIN_SIZE_, std::remove_reference_t<decltype((node))>::_MAX_SIZE_,\
     VECTORID_LOG((node).CentroidID()), ((node).Size()), VECTORID_LOG((node).ParentID()) */
 
-#define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%lu)"
+#define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
 #ifdef ENABLE_TEST_LOGGING

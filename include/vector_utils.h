@@ -22,7 +22,7 @@ static_assert(_DIM > 0);
 
 public:
     Vector() : _data(new T[_DIM]), _delete_on_destroy(true) {
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Default Constructor: Created vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Default Constructor: Created vector. _data=%p. this=%p, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
@@ -32,7 +32,7 @@ public:
             memcpy(_data, data, _DIM * sizeof(T));
         }
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
-            "Created vector based on pointer data. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+            "Created vector based on pointer data. _data=%p. this=%p, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
@@ -51,7 +51,7 @@ public:
         }
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
-            "Created vector based on another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+            "Created vector based on another vector. _data=%p. this=%p, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
@@ -61,7 +61,7 @@ public:
         _vec._delete_on_destroy = false;
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
-            "Created vector based on rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+            "Created vector based on rvalue vector. _data=%p. this=%p, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
     }
 
@@ -72,11 +72,11 @@ public:
     inline void Invalidate() {
         if (_data != nullptr) {
             if (_delete_on_destroy) {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Deleted vector _data=%lu. this=%lu", _data, this);
+                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Deleted vector _data=%p. this=%p", _data, this);
                 delete[] _data;
             }
             else {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Existing data not deleted. this=%lu, _data=%lu", this, _data);
+                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR, "Existing data not deleted. this=%p, _data=%p", this, _data);
             }
         }
 
@@ -102,7 +102,7 @@ public:
         }
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
-            "assigned vector to another vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+            "assigned vector to another vector. _data=%p. this=%p, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
 
         return *this;
@@ -125,7 +125,7 @@ public:
         }
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
-            "assigned vector to another rvalue vector. _data=%lu. this=%lu, _delete_on_destroy=%s.",
+            "assigned vector to another rvalue vector. _data=%p. this=%p, _delete_on_destroy=%s.",
             _data, this, _delete_on_destroy ? "T" : "F");
 
         return *this;
@@ -194,7 +194,7 @@ public:
         return _data;
     }
 
-    inline std::string to_string() {
+    inline std::string to_string() const {
         if (!Is_Valid()) {
             return std::string("INVALID");
         }
@@ -215,20 +215,20 @@ protected:
 
     Vector(T* data, bool delete_on_destroy) : _data(data), _delete_on_destroy(delete_on_destroy) {
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR,
-            "Created vector using private constructor. _data=%lu. this=%lu, _delete_on_destroy=%s.",
-            _data, this, _delete_on_destroy ? "T" : "F");
+            "Created vector using private constructor. _data=%p. this=%p, _delete_on_destroy=%s.",
+            _data, this, (_delete_on_destroy ? "T" : "F"));
     }
 
     /* Not tested. */
     // Vector(const Vector<T, _DIM>& _vec, T* loc, bool delete_on_destroy)
     //         : _delete_on_destroy(delete_on_destroy) {
-    //     ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_VECTOR, "Input vector is invalid. this=%lu, _vec=%lu.", this, &_vec);
+    //     ErrorAssert((_vec.Is_Valid() || loc == nullptr), LOG_TAG_VECTOR, "Input vector is invalid. this=%p, _vec=%p.", this, &_vec);
     //     if (!_vec.Is_Valid()) {
     //         _data = nullptr;
     //     }
     //     else {
-    //         CLOG_IF_TRUE(loc == _vec._data ,LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Deep copy on the same location. this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
-    //         CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Delete on destroy is true with valid location! this=%lu, _vec=%lu, loc=%lu.", this, &_vec, loc);
+    //         CLOG_IF_TRUE(loc == _vec._data ,LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Deep copy on the same location. this=%p, _vec=%p, loc=%p.", this, &_vec, loc);
+    //         CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Delete on destroy is true with valid location! this=%p, _vec=%p, loc=%p.", this, &_vec, loc);
     //         _data = (loc ? loc : new T[_DIM]);
     //         memcpy(_data, _vec._data, _DIM * sizeof(T));
     //     }
@@ -238,7 +238,7 @@ protected:
     //         : _delete_on_destroy(delete_on_destroy) {
     //     FatalAssert((vec.size() >= _DIM), LOG_TAG_VECTOR, "Input vector is too small.");
 
-    //     CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Delete on destroy is true with valid location! this=%lu, loc=%lu.", this, loc);
+    //     CLOG_IF_TRUE((loc != nullptr && delete_on_destroy), LOG_LEVEL_WARNING, LOG_TAG_VECTOR, "Delete on destroy is true with valid location! this=%p, loc=%p.", this, loc);
     //     _data = (loc ? loc : new T[_DIM]);
     //     memcpy(_data, &vec[0], _DIM * sizeof(T));
     // }
@@ -378,10 +378,9 @@ public:
         return Get_Vector(Get_Index(id));
     }
 
-    inline const Vector<T, _DIM> Get_Vector(uint16_t idx) const {
+    inline const Vector<const T, _DIM> Get_Vector(uint16_t idx) const {
         FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-
-        return Vector<T, _DIM>(_beg + (idx * _DIM), false);
+        return Vector<const T, _DIM>((_beg + (idx * _DIM)), false);
     }
 
     inline const Vector<T, _DIM> Get_Vector_By_ID(VectorID id) const {
@@ -435,11 +434,15 @@ public:
         return _beg;
     }
 
+    inline const T* Get_Typed_Address() const {
+        return _beg;
+    }
+
     inline uint16_t Size() const {
         return _size;
     }
 
-    std::string to_string() {
+    std::string to_string() const {
         std::string str = "<Vectors: [";
         for (uint16_t i = 0; i < _size; ++i) {
             str += Get_Vector(i).to_string();

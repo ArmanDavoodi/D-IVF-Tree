@@ -63,8 +63,8 @@ public:
         FatalAssert(directory[node_id._level][node_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Node not found in the buffer. Node ID:%lu", node_id._id);
 
         NodeType* node = (NodeType*)(directory[node_id._level][node_id._val].cluster_address);
-        FatalAssert(node->_centroid_id == node_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu",
-            node_id._id, node->_centroid_id._id);
+        FatalAssert(node->CentroidID() == node_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu",
+            node_id._id, node->CentroidID()._id);
 
         return node;
     }

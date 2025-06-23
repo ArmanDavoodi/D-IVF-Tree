@@ -235,13 +235,22 @@ using thread_id = unsigned long;
 #define THREAD_ID ((copper::thread_id)(OS_THREAD_ID))
 struct Log_Msg {
     constexpr static int MAX_MSG_SIZE = 2500;
-    char _msg[MAX_MSG_SIZE] = "";
+    char *_msg = nullptr;
 
     Log_Msg(const char* msg, ...) {
+        _msg = new char[MAX_MSG_SIZE];
+        // Sanity check: try to parse the format string using vsnprintf with a copy of the va_list.
         va_list argptr;
         va_start(argptr, msg);
+
+#if defined(__GNUC__) || defined(__clang__)
+        // Use __builtin___vsnprintf_chk to check format string at compile time if possible
+        __builtin___vsnprintf_chk(_msg, MAX_MSG_SIZE-3, 0, __builtin_object_size(_msg, 0), msg, argptr);
+#endif
+
         int num_writen = vsnprintf(_msg, MAX_MSG_SIZE-3, msg, argptr);
         va_end(argptr);
+
         if (num_writen > MAX_MSG_SIZE-3) {
             _msg[MAX_MSG_SIZE-4] = '.';
             _msg[MAX_MSG_SIZE-3] = '.';
@@ -251,6 +260,8 @@ struct Log_Msg {
         else if (num_writen < 0) {
             sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
         }
+        delete[] _msg; // delete the old message
+        _msg = nullptr;
     }
 };
 

@@ -10,17 +10,14 @@ public:
         tests["test_vector::vector_test1"] = &Test::vector_test1;
         tests["test_vector::vector_test2"] = &Test::vector_test2;
         tests["test_vector::vector_set"] = &Test::vector_set;
-        // tests["test_vector::distance_L2"] = &Test::distance_L2; /* Todo: move to test_core.cpp */
 
         test_priority["test_vector::vector_test1"] = 0;
         test_priority["test_vector::vector_test2"] = 1;
         test_priority["test_vector::vector_set"] = 2;
-        // test_priority["test_vector::distance_L2"] = 3;
 
         all_tests.insert("test_vector::vector_test1");
         all_tests.insert("test_vector::vector_test2");
         all_tests.insert("test_vector::vector_set");
-        // all_tests.insert("test_vector::distance_L2");
     }
 
     ~Test() {}
@@ -329,197 +326,6 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_set.");
         return status;
     }
-
-    // bool distance_L2() {
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::distance_L2 for %luth time...", try_count);
-    //     bool status = true;
-    //     std::string data0 = "{", data1 = "{", data2 = "{";
-    //     for (uint16_t i = 0; i < dim; ++i) {
-    //         data0 += std::to_string(_data16[0][i]);
-    //         data1 += std::to_string(_data16[1][i]);
-    //         data2 += std::to_string(_data16[2][i]);
-    //         if (i < dim - 1) {
-    //             data0 += ", ";
-    //             data1 += ", ";
-    //             data2 += ", ";
-    //         }
-    //         else {
-    //             data0 += "}";
-    //             data1 += "}";
-    //             data2 += "}";
-    //         }
-    //     }
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data1=%s", data0.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data2=%s", data1.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data3=%s", data2.c_str());
-
-    //     std::string dataf0 = "{", dataf1 = "{", dataf2 = "{";
-    //     for (uint16_t i = 0; i < dim; ++i) {
-    //         dataf0 += std::to_string(_dataf[0][i]);
-    //         dataf1 += std::to_string(_dataf[1][i]);
-    //         dataf2 += std::to_string(_dataf[2][i]);
-    //         if (i < dim - 1) {
-    //             dataf0 += ", ";
-    //             dataf1 += ", ";
-    //             dataf2 += ", ";
-    //         }
-    //         else {
-    //             dataf0 += "}";
-    //             dataf1 += "}";
-    //             dataf2 += "}";
-    //         }
-    //     }
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Dataf1=%s", dataf0.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Dataf2=%s", dataf1.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Dataf3=%s", dataf2.c_str());
-
-    //     copper::L2_Distance<uint16_t, dim, double> _du;
-    //     copper::L2_Distance<float, dim, double> _df;
-
-    //     double udist[size][size], fdist[size][size];
-    //     double b_udist[size][size], b_fdist[size][size];
-
-    //     std::string udist_str = "";
-    //     std::string fdist_str = "";
-    //     std::string b_udist_str = "";
-    //     std::string b_fdist_str = "";
-
-    //     for (uint16_t i = 0; i < size; ++i) {
-    //         for (uint16_t j = 0; j < size; ++j) {
-    //             if (j > i)
-    //                 continue;
-
-    //             b_udist[i][j] = 0;
-    //             b_fdist[i][j] = 0;
-    //             for (uint16_t k = 0; k < dim; ++k) {
-    //                 b_udist[i][j] += (((double)_data16[i][k] - (double)_data16[j][k]) *
-    //                                   ((double)_data16[i][k] - (double)_data16[j][k]));
-    //                 b_fdist[i][j] += (((double)_dataf[i][k] - (double)_dataf[j][k]) *
-    //                                   ((double)_dataf[i][k] - (double)_dataf[j][k]));
-    //             }
-    //             udist[i][j] = _du(copper::Vector<uint16_t, dim>(_data16[i]), copper::Vector<uint16_t, dim>(_data16[j]));
-    //             fdist[i][j] = _df(copper::Vector<float, dim>(_dataf[i]), copper::Vector<float, dim>(_dataf[j]));
-
-    //             status = status && (udist[i][j] == b_udist[i][j]);
-    //             ErrorAssert(udist[i][j] == b_udist[i][j], LOG_TAG_TEST,
-    //                         "uint16 distance calculation err: calc=%f, ground_truth=%f", udist[i][j], b_udist[i][j]);
-
-    //             status = status && (fdist[i][j] == b_fdist[i][j]);
-    //             ErrorAssert(fdist[i][j] == b_fdist[i][j], LOG_TAG_TEST,
-    //                         "float distance calculation err: calc=%f, ground_truth=%f", fdist[i][j], b_fdist[i][j]);
-
-    //             udist_str += "<" + std::to_string(i) + ", " + std::to_string(j) + ">" + std::to_string(udist[i][j]);
-    //             fdist_str += "<" + std::to_string(i) + ", " + std::to_string(j) + ">" + std::to_string(fdist[i][j]);
-    //             b_udist_str += "<" + std::to_string(i) + ", " + std::to_string(j) + ">" + std::to_string(b_udist[i][j]);
-    //             b_fdist_str += "<" + std::to_string(i) + ", " + std::to_string(j) + ">" + std::to_string(b_fdist[i][j]);
-    //             if (j < size - 1) {
-    //                 udist_str += ", ";
-    //                 fdist_str += ", ";
-    //                 b_udist_str += ", ";
-    //                 b_fdist_str += ", ";
-    //             }
-    //         }
-    //     }
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "udist: %s", udist_str.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "b_udist: %s", b_udist_str.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fdist: %s", fdist_str.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "b_fdist: %s", b_fdist_str.c_str());
-
-    //     const uint16_t uquery[dim] = {2, 1, 5, 3, 2, 8, 15, 16};
-    //     const float fquery[dim] = {0.15f, 20.4f, -9.0f, 1.1f, 10.0f, 6.0f, 5.1f, 9.55f};
-
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "uquery: %s", copper::Vector<uint16_t, dim>(uquery).to_string().c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fquery: %s", copper::Vector<float, dim>(fquery).to_string().c_str());
-
-    //     double uquery_dist[size], fquery_dist[size], b_uquery_dist[size], b_fquery_dist[size];
-    //     std::string uquery_dist_str = "";
-    //     std::string fquery_dist_str = "";
-    //     std::string b_uquery_dist_str = "";
-    //     std::string b_fquery_dist_str = "";
-    //     for (uint16_t i = 0; i < size; ++i) {
-    //         b_uquery_dist[i] = 0;
-    //         b_fquery_dist[i] = 0;
-    //         for (uint16_t k = 0; k < dim; ++k) {
-    //             b_uquery_dist[i] += (((double)uquery[k] - (double)_data16[i][k]) *
-    //                                  ((double)uquery[k] - (double)_data16[i][k]));
-    //             b_fquery_dist[i] += (((double)fquery[k] - (double)_dataf[i][k]) *
-    //                                  ((double)fquery[k] - (double)_dataf[i][k]));
-    //         }
-    //         uquery_dist[i] = _du(copper::Vector<uint16_t, dim>(uquery), copper::Vector<uint16_t, dim>(_data16[i]));
-    //         fquery_dist[i] = _df(copper::Vector<float, dim>(fquery), copper::Vector<float, dim>(_dataf[i]));
-
-    //         status = status && (uquery_dist[i] == b_uquery_dist[i]);
-    //         ErrorAssert(uquery_dist[i] == b_uquery_dist[i], LOG_TAG_TEST,
-    //                     "uint16 distance calculation err: calc=%f, ground_truth=%f", uquery_dist[i], b_uquery_dist[i]);
-
-    //         status = status && (fquery_dist[i] == b_fquery_dist[i]);
-    //         ErrorAssert(fquery_dist[i] == b_fquery_dist[i], LOG_TAG_TEST,
-    //                     "float distance calculation err: calc=%f, ground_truth=%f", fquery_dist[i], b_fquery_dist[i]);
-
-    //         uquery_dist_str += std::to_string(uquery_dist[i]);
-    //         fquery_dist_str += std::to_string(fquery_dist[i]);
-    //         b_uquery_dist_str += std::to_string(b_uquery_dist[i]);
-    //         b_fquery_dist_str += std::to_string(b_fquery_dist[i]);
-    //         if (i < size - 1) {
-    //             uquery_dist_str += ", ";
-    //             fquery_dist_str += ", ";
-    //             b_uquery_dist_str += ", ";
-    //             b_fquery_dist_str += ", ";
-    //         }
-    //     }
-
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "uquery_dist: %s", uquery_dist_str.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "b_uquery_dist: %s", b_uquery_dist_str.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fquery_dist: %s", fquery_dist_str.c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "b_fquery_dist: %s", b_fquery_dist_str.c_str());
-
-    //     /* The most similar vector to query should be first -> for L2 that is the minimum distance */
-    //     std::sort(uquery_dist, uquery_dist + size, _du);
-    //     std::sort(fquery_dist, fquery_dist + size, _df);
-    //     for (uint16_t i = 0; i < size - 1; ++i) {
-    //         status = status && (uquery_dist[i] <= uquery_dist[i + 1]);
-    //         ErrorAssert(uquery_dist[i] <= uquery_dist[i + 1], LOG_TAG_TEST,
-    //                     "uint16 l2 similarity err: %f should be less than %f", uquery_dist[i], uquery_dist[i + 1]);
-    //         status = status && (fquery_dist[i] <= fquery_dist[i + 1]);
-    //         ErrorAssert(fquery_dist[i] <= fquery_dist[i + 1], LOG_TAG_TEST,
-    //                     "float l2 similarity err: %f should be less than %f", fquery_dist[i], fquery_dist[i + 1]);
-    //     }
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "uquery_dist_sorted: %s", copper::Vector<double, size>(uquery_dist).to_string().c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fquery_dist_sorted: %s", copper::Vector<double, size>(fquery_dist).to_string().c_str());
-
-    //     copper::Vector<uint16_t, dim> ucent = _du.Compute_Centroid((const uint16_t*)_data16, size);
-    //     copper::Vector<float, dim> fcent = _df.Compute_Centroid((const float*)_dataf, size);
-
-    //     copper::Vector<uint16_t, dim> b_ucent;
-    //     copper::Vector<float, dim> b_fcent;
-    //     for (uint16_t i = 0; i < dim; ++i) {
-    //         b_ucent[i] = 0;
-    //         b_fcent[i] = 0;
-    //         for (uint16_t j = 0; j < size; ++j) {
-    //             b_ucent[i] += _data16[j][i];
-    //             b_fcent[i] += _dataf[j][i];
-    //         }
-    //         b_ucent[i] /= size;
-    //         b_fcent[i] /= size;
-    //     }
-
-    //     status = status && (ucent == b_ucent);
-    //     ErrorAssert(ucent == b_ucent, LOG_TAG_TEST,
-    //                 "uint16 centroid calculation err: calc=%s, ground_truth=%s", ucent.to_string().c_str(),
-    //                 b_ucent.to_string().c_str());
-    //     status = status && (fcent == b_fcent);
-    //     ErrorAssert(fcent == b_fcent, LOG_TAG_TEST,
-    //                 "float centroid calculation err: calc=%s, ground_truth=%s", fcent.to_string().c_str(),
-    //                 b_fcent.to_string().c_str());
-
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "ucent: %s", ucent.to_string().c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "b_ucent: %s", b_ucent.to_string().c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "fcent: %s", fcent.to_string().c_str());
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "b_fcent: %s", b_fcent.to_string().c_str());
-
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::distance_L2.");
-    //     return status;
-    // }
 
     void Init(size_t t_count) {
         try_count = t_count;

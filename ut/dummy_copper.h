@@ -3,8 +3,8 @@
 
 #include "common.h"
 #include "vector_utils.h"
-#include "buffer.h"
-#include "core.h"
+
+/* Needs core.h and buffer.h */
 
 namespace copper {
 
@@ -29,26 +29,32 @@ public:
     }
 
     inline RetStatus Assign_Parent(VectorID parent_id) {
+        _parent_id = parent_id;
         return RetStatus::Success();
     }
 
     inline Address Insert(const Vector<T, _DIM>& vec, VectorID vec_id) {
-        return INVALID_ADDRESS;
+        Address addr = _bucket.Insert(vec, vec_id);
+        return addr;
     }
 
     inline VectorUpdate MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
         VectorUpdate update;
+        update.vector_id = _bucket.Get_Last_VectorID();
+        const Vector<T, _DIM> &v = _bucket.Get_Last_Vector();
+        update.vector_data = _dest->Insert(std::move(v), update.vector_id);
+        _bucket.Delete_Last();
         return update;
     }
 
-    inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k, uint16_t sample_size,
-            std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours) const {
+    inline RetStatus Search(const Vector<T, _DIM>& query, size_t k,
+                            std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours) {
         return RetStatus::Success();
     }
 
-    inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
-        return INVALID_VECTOR_ID;
-    }
+    // inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
+    //     return INVALID_VECTOR_ID;
+    // }
 
     inline uint16_t Size() const {
         return _bucket.Size();
@@ -86,6 +92,10 @@ public:
         return _core.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
     }
 
+    inline std::string bucket_to_string() const {
+        return _bucket.to_string();
+    }
+
 protected:
     _CORE<T, _DIM, DIST_TYPE> _core;
 
@@ -111,7 +121,7 @@ public:
         return rs;
     }
 
-    inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id) {
+    inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id, uint16_t node_per_layer) {
         RetStatus rc = RetStatus::Success();
         return rc;
     }
@@ -125,8 +135,6 @@ public:
     inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k,
                                         uint16_t _internal_k, uint16_t _leaf_k,
                                         std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours,
-                                        uint16_t _internal_search = KI_MAX,
-                                        uint16_t _leaf_search = KI_MAX, uint16_t _vector_search = KL_MAX,
                                         bool sort = true, bool sort_from_more_similar_to_less = true) {
         return RetStatus::Success();
     }
@@ -143,16 +151,20 @@ protected:
         requires((_K_MIN == KI_MIN && _K_MAX == KI_MAX) || (_K_MIN == KL_MIN && _K_MAX == KL_MAX))
     using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _CORE>;
 
-    _CORE<T, _DIM, DIST_TYPE> _core;
+    _CORE<T, _DIM, DIST_TYPE> _core; /* Todo: avoid copying _core */
 
     size_t _size;
     Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE> _bufmgr;
     VectorID _root;
     uint16_t _split_internal;
     uint16_t _split_leaf;
+    uint64_t _levels;
 
-    inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
-        return nullptr;
+    template<typename NodeType>
+    inline RetStatus Search_Nodes(const Vector<T, _DIM>& query,
+                                  const std::vector<std::pair<VectorID, DIST_TYPE>>& upper_layer,
+                                  std::vector<std::pair<VectorID, DIST_TYPE>>& lower_layer, size_t n) {
+        return RetStatus::Success();
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
