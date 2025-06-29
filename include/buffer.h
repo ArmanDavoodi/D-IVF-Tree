@@ -1,8 +1,7 @@
 #ifndef COPPER_BUFFER_H_
 #define COPPER_BUFFER_H_
 
-#include "common.h"
-#include "vector_utils.h"
+#include "interface/buffer.h"
 
 namespace copper {
 
@@ -13,16 +12,10 @@ struct VectorInfo {
     VectorInfo() : vector_address(INVALID_ADDRESS), cluster_address(INVALID_ADDRESS) {}
     VectorInfo(Address data, Address cluster) : vector_address(data), cluster_address(cluster) {}
 };
-
-template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
-class Buffer_Manager {
+class BufferManager : public BufferManagerInterface {
 // TODO: reuse deleted IDs
 public:
-    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
-    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
-
-    inline RetStatus Init() {
+    inline RetStatus Init() override {
         FatalAssert(directory.empty(), LOG_TAG_BUFFER, "Buffer already initialized");
 
         /* Create the vector level -> level 0 */
@@ -30,17 +23,13 @@ public:
         return RetStatus::Success();
     }
 
-    inline RetStatus Shutdown() {
+    inline RetStatus Shutdown() override {
         FatalAssert(!directory.empty(), LOG_TAG_BUFFER, "Buffer not initialized");
         for (size_t level = directory.size() - 1; level > 0; --level) {
             for (VectorInfo& vec : directory[level]) {
                 if (vec.cluster_address != INVALID_ADDRESS) {
-                    if (level > 1) {
-                        delete (Internal_Node*)(vec.cluster_address);
-                    }
-                    else {
-                        delete (Leaf_Node*)(vec.cluster_address);
-                    }
+                    static_cast<CopperNodeInterface*>(vec.cluster_address)->Destroy();
+                    free(vec.cluster_address);
                     vec.cluster_address = INVALID_ADDRESS;
                 }
             }
@@ -51,10 +40,7 @@ public:
         return RetStatus::Success();
     }
 
-    template<typename NodeType>
-    inline NodeType* Get_Node(VectorID node_id) {
-        static_assert(std::is_same<NodeType, Internal_Node>::value || std::is_same<NodeType, Leaf_Node>::value,
-                  "NodeType must be either Internal_Node or Leaf_Node");
+    inline CopperNodeInterface* GetNode(VectorID node_id) override {
 
         FatalAssert(node_id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Node Id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
         FatalAssert(node_id.Is_Centroid(), LOG_TAG_BUFFER, "ID:%lu is a vector ID", node_id._id);
@@ -62,34 +48,37 @@ public:
         FatalAssert(directory[node_id._level].size() > node_id._val, LOG_TAG_BUFFER, "Node ID:%lu val is out of bounds. max_val:%lu", node_id._id, directory[node_id._level].size());
         FatalAssert(directory[node_id._level][node_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Node not found in the buffer. Node ID:%lu", node_id._id);
 
-        NodeType* node = (NodeType*)(directory[node_id._level][node_id._val].cluster_address);
+        CopperNodeInterface* node = static_cast<CopperNodeInterface*>
+                                        (directory[node_id._level][node_id._val].cluster_address);
         FatalAssert(node->CentroidID() == node_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu",
             node_id._id, node->CentroidID()._id);
 
         return node;
     }
 
-    /* inline Leaf_Node* Get_Leaf(VectorID leaf_id) {
+    /* inline CopperNodeInterface* GetLeaf(VectorID leaf_id) override {
         FatalAssert(leaf_id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Leaf Id: " VECTORID_LOG_FMT, VECTORID_LOG(leaf_id));
         FatalAssert(leaf_id.Is_Leaf(), LOG_TAG_BUFFER, "Leaf ID:%lu is not a leaf", leaf_id._id);
         FatalAssert(directory.size() > leaf_id._level, LOG_TAG_BUFFER, "Leaf ID:%lu level is out of bounds. max_level:%lu", leaf_id._id, directory.size());
         FatalAssert(directory[leaf_id._level].size() > leaf_id._val, LOG_TAG_BUFFER, "Leaf ID:%lu val is out of bounds. max_val:%lu", leaf_id._id, directory[leaf_id._level].size());
         FatalAssert(directory[leaf_id._level][leaf_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Leaf not found in the buffer. Leaf ID:%lu", leaf_id._id);
 
-        Leaf_Node* leaf = (Leaf_Node*)(directory[leaf_id._level][leaf_id._val].cluster_address);
+        CopperNodeInterface* leaf = (CopperNodeInterface*)(directory[leaf_id._level][leaf_id._val].cluster_address);
         FatalAssert(leaf->_centroid_id == leaf_id, LOG_TAG_BUFFER, "Mismatch in ID. Base ID:%lu, Found ID:%lu", leaf_id._id, leaf->_centroid_id._id);
 
         return leaf;
     } */
 
-    inline Leaf_Node* Get_Container_Leaf(VectorID vec_id) {
+    inline CopperNodeInterface* GetContainerLeaf(VectorID vec_id) {
         FatalAssert(vec_id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Vector Id: " VECTORID_LOG_FMT, VECTORID_LOG(vec_id));
         FatalAssert(vec_id.Is_Vector(), LOG_TAG_BUFFER, "Vector ID:%lu is not a vector", vec_id._id);
         FatalAssert(directory.size() > vec_id._level, LOG_TAG_BUFFER, "Vector ID:%lu level is out of bounds. max_level:%lu", vec_id._id, directory.size());
         FatalAssert(directory[vec_id._level].size() > vec_id._val, LOG_TAG_BUFFER, "Vector ID:%lu val is out of bounds. max_val:%lu", vec_id._id, directory[vec_id._level].size());
         FatalAssert(directory[vec_id._level][vec_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER, "Leaf not found in the buffer. Vector ID:%lu", vec_id._id);
 
-        Leaf_Node* leaf = (Leaf_Node*)(directory[vec_id._level][vec_id._val].cluster_address);
+        CopperNodeInterface* leaf = static_cast<CopperNodeInterface*>
+                                        (directory[vec_id._level][vec_id._val].cluster_address);
+
         FatalAssert(leaf->_centroid_id.Is_Valid(), LOG_TAG_BUFFER,  "Invalid Leaf ID. Vector ID:%lu", vec_id._id);
         FatalAssert(leaf->_centroid_id.Is_Leaf(), LOG_TAG_BUFFER,  "Cluster %lu is not a leaf. Vector ID:%lu", leaf->_centroid_id, vec_id._id);
         FatalAssert(leaf->Contains(vec_id), LOG_TAG_BUFFER, "Parent leaf:%lu dose not contain the vector:%lu", leaf->_centroid_id, vec_id._id);
@@ -97,13 +86,13 @@ public:
         return leaf;
     }
 
-    inline Vector<T, _DIM> Get_Vector(VectorID id) {
+    inline Vector GetVector(VectorID id) {
         FatalAssert(id.Is_Valid(), LOG_TAG_BUFFER, "Invalid Vector Id: " VECTORID_LOG_FMT, VECTORID_LOG(id));
         FatalAssert(directory.size() > id._level, LOG_TAG_BUFFER, "Vector ID:%lu level is out of bounds. max_level:%lu", id._id, directory.size());
         FatalAssert(directory[id._level].size() > id._val, LOG_TAG_BUFFER, "Vector ID:%lu val is out of bounds. max_val:%lu", id._id, directory[id._level].size());
         FatalAssert(directory[id._level][id._val].vector_address != INVALID_ADDRESS , LOG_TAG_BUFFER, "Vector not found in the buffer. Vector ID:%lu", id._id);
 
-        return Vector<T, _DIM>(directory[id._level][id._val].vector_address, false);
+        return Vector(directory[id._level][id._val].vector_address, false);
     }
 
     inline bool In_Buffer(VectorID id) {
@@ -178,8 +167,8 @@ public:
         return directory.size();
     }
 
-    inline std::string to_string() {
-        std::string str = "<Height: " + std::to_string(directory.size()) + ", ";
+    inline String to_string() {
+        String str = "<Height: " + std::to_string(directory.size()) + ", ";
         str += "Directory:[";
         for (size_t i = 0; i < directory.size(); ++i) {
             str += "Level" + std::to_string(i) + ":[";

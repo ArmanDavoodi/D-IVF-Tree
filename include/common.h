@@ -6,6 +6,9 @@
 #include <cstring>
 #include <type_traits>
 #include <concepts>
+#include <stdlib.h>
+
+#include "utils/string.h"
 
 #include "debug.h"
 
@@ -54,23 +57,23 @@ union VectorID {
     VectorID(const uint64_t& ID) : _id(ID) {}
     VectorID(const VectorID& ID) : _id(ID._id) {}
 
-    inline bool Is_Valid() const {
+    inline bool IsValid() const {
         return (_id != INVALID_VECTOR_ID) && (_val < MAX_ID_PER_LEVEL);
     }
 
-    inline bool Is_Centroid() const {
+    inline bool IsCentroid() const {
         return _level > VECTOR_LEVEL;
     }
 
-    inline bool Is_Vector() const {
+    inline bool IsVector() const {
         return _level == VECTOR_LEVEL;
     }
 
-    inline bool Is_Leaf() const {
+    inline bool IsLeaf() const {
         return _level == LEAF_LEVEL;
     }
 
-    inline bool Is_Internal_Node() const {
+    inline bool IsInternalNode() const {
         return _level > LEAF_LEVEL;
     }
 
@@ -86,22 +89,6 @@ union VectorID {
         return _id != ID._id;
     }
 
-    // inline bool operator<=(const VectorID& ID) const {
-    //     return _id <= ID._id;
-    // }
-
-    // inline bool operator>=(const VectorID& ID) const {
-    //     return _id >= ID._id;
-    // }
-
-    // inline bool operator<(const VectorID& ID) const {
-    //     return _id < ID._id;
-    // }
-
-    // inline bool operator>(const VectorID& ID) const {
-    //     return _id > ID._id;
-    // }
-
     inline void operator=(const uint64_t& ID) {
         _id = ID;
     }
@@ -113,43 +100,72 @@ union VectorID {
     inline bool operator!=(const uint64_t& ID) const {
         return _id != ID;
     }
-
-    // inline bool operator<=(const uint64_t& ID) const {
-    //     return _id <= ID;
-    // }
-
-    // inline bool operator>=(const uint64_t& ID) const {
-    //     return _id >= ID;
-    // }
-
-    // inline bool operator<(const uint64_t& ID) const {
-    //     return _id < ID;
-    // }
-
-    // inline bool operator>(const uint64_t& ID) const {
-    //     return _id > ID;
-    // }
 };
 
 typedef void* Address;
+typedef const void* ConstAddress;
+
+typedef void* DTYPE;
+typedef void* VTYPE;
 
 constexpr Address INVALID_ADDRESS = nullptr;
 
-template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE> class Copper_Node;
-
-template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE> class VectorIndex;
-
-template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE> class Buffer_Manager;
-
-template<typename T, uint16_t _DIM>
-struct VectorPair;
-
-template<typename T, uint16_t _DIM, uint16_t _CAP>
+class CopperNodeInterface;
+class VectorIndexInterface;
+class BufferManagerInterface;
 class VectorSet;
 
+enum ClusteringType : int8_t {
+    Invalid = -1,
+    Simple_Divide,
+    NumTypes
+};
+inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypes] = {"Simple_Divide"};
+inline constexpr bool IsValid(ClusteringType type) {
+    return ((type != ClusteringType::Invalid) && (type != ClusteringType::NumTypes));
+}
+
+enum DistanceType : int8_t {
+    Invalid = -1,
+    L2,
+    NumTypes
+};
+inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypes] = {"L2"};
+inline constexpr bool IsValid(DistanceType type) {
+    return ((type != DistanceType::Invalid) && (type != DistanceType::NumTypes));
+}
+
+enum DataType : int8_t {
+    Invalid = -1,
+    UInt16,
+    Float,
+    Double,
+    NumTypes
+};
+inline constexpr char* DATA_TYPE_NAME[DataType::NumTypes] = {"uint16", "float", "double"};
+inline constexpr size_t SIZE_OF_TYPE[DataType::NumTypes] = {sizeof(uint16_t), sizeof(float), sizeof(double)};
+inline constexpr bool IsValid(DataType type) {
+    return ((type != DataType::Invalid) && (type != DataType::NumTypes));
+}
+
+String DataToString(const void* data, DataType type) {
+    if (data == nullptr) {
+        return String("NULL");
+    }
+    switch (type) {
+        case DataType::UInt16: {
+            return String("%hu", *(reinterpret_cast<const uint16_t*>(data)));
+        }
+        case DataType::Float: {
+            return String("%f", *(reinterpret_cast<const float*>(data)));
+        }
+        case DataType::Double: {
+            return String("%lf", *(reinterpret_cast<const double*>(data)));
+        }
+        default:
+            return String("Invalid DataType");
+    }
+}
 // Todo: Log VectorIndex: VectorIndex(RootID:%s(%lu, %lu, %lu), # levels:lu, # nodes:lu, # vectors:lu, size:lu)
 
 #define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
@@ -159,36 +175,29 @@ class VectorSet;
 // todo remove
 #define NODE_PTR_LOG(node, print_bucket)\
     (((node) == nullptr) ? "NULL" :\
-        (!((node)->CentroidID().Is_Valid()) ? "INV" : ((node)->CentroidID().Is_Vector() ? "Non-Centroid" : \
-            ((node)->CentroidID().Is_Leaf() ? "Leaf" : ((node)->CentroidID().Is_Internal_Node() ? "Internal" \
+        (!((node)->CentroidID().IsValid()) ? "INV" : ((node)->CentroidID().IsVector() ? "Non-Centroid" : \
+            ((node)->CentroidID().IsLeaf() ? "Leaf" : ((node)->CentroidID().IsInternalNode() ? "Internal" \
                 : "UNDEF"))))),\
     (((node) == nullptr) ? 0 : std::remove_reference_t<decltype(*(node))>::_MIN_SIZE_),\
     (((node) == nullptr) ? 0 : std::remove_reference_t<decltype(*(node))>::_MAX_SIZE_),\
     VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->CentroidID())),\
     (((node) == nullptr) ? 0 : (node)->Size()),\
     VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->ParentID())),\
-    ((print_bucket) ? ((((node) == nullptr)) ? "NULL" : ((node)->bucket_to_string()).c_str()) : "OMITTED")
-
-/* #define NODE_VAL_LOG(node)\
-    (!((node).CentroidID().Is_Valid()) ? "INV" : ((node).CentroidID().Is_Vector() ? "Non-Centroid" : \
-            ((node).CentroidID().Is_Leaf() ? "Leaf" : ((node).CentroidID().Is_Internal_Node() ? "Internal" \
-                : "UNDEF")))),\
-    std::remove_reference_t<decltype((node))>::_MIN_SIZE_, std::remove_reference_t<decltype((node))>::_MAX_SIZE_,\
-    VECTORID_LOG((node).CentroidID()), ((node).Size()), VECTORID_LOG((node).ParentID()) */
+    ((print_bucket) ? ((((node) == nullptr)) ? "NULL" : ((node)->BucketToString()).ToCStr()) : "OMITTED")
 
 #define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
 #ifdef ENABLE_TEST_LOGGING
-#define PRINT_VECTOR_PAIR_BATCH(vector, msg) \
+#define PRINT_VECTOR_PAIR_BATCH(vector, type, msg) \
     do { \
-        std::string str = ""; \
+        copper::String str = ""; \
         for (const auto& pair : (vector)) { \
-            str += VECTORID_LOG_FMT ", Distance:%lu; ", \
-                VECTORID_LOG(pair.first), std::to_string(pair.second); \
+            str += String(VECTORID_LOG_FMT ", Distance:%lu; ", \
+                          VECTORID_LOG(pair.first), DataToString(&(pair.second), (type))); \
         } \
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE, "%s: Batch Size: %lu, Vector Pair Batch: %s", \
-            (msg), (vector).size(), str.c_str()); \
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "%s: Batch Size: %lu, Vector Pair Batch: %s", \
+            (msg), (vector).size(), str.ToCStr()); \
     } while (0)
 
 };

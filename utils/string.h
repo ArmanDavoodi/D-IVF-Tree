@@ -1,0 +1,224 @@
+#ifndef STRING_H_
+#define STRING_H_
+
+#include <cstring>
+#include <stdarg.h>
+#include <stdio.h>
+#include <string>
+
+namespace copper {
+
+class String {
+public:
+    String() : _data(nullptr), size(0) {}
+
+    String(const String& other) : _data(((other.size == 0) ? nullptr : new char[other.size + 1])), size(other.size) {
+        if (other.size > 0) {
+            memcpy(_data, other._data, sizeof(char) * (size + 1));
+        }
+    }
+
+    String(String&& other) : _data(other._data), size(other.size) {
+        other._data = nullptr;
+        other.size = 0;
+    }
+
+    String(const std::string& other) :  _data(((other.size() == 0) ? nullptr : new char[other.size() + 1])),
+                                        size(other.size()) {
+        if (size > 0) {
+            memcpy(_data, &(other[0]), sizeof(char) * (size));
+            _data[size] = 0;
+        }
+    }
+
+    String(const char* fmt, ...) : _data(nullptr), size(0) {
+        if (fmt == nullptr) {
+            return;
+        }
+
+        va_list argptr;
+        va_start(argptr, fmt);
+
+        size = vsnprintf(NULL, 0, fmt, argptr);
+        if (size < 0) {
+            size = 0;
+            return;
+        }
+
+        _data = new char[size + 1];
+
+        int num_writen = vsnprintf(_data, size + 1, fmt, argptr);
+        va_end(argptr);
+        if (num_writen != size) {
+            delete _data;
+            _data = nullptr;
+            size = 0;
+            return;
+        }
+    }
+
+    String& operator=(const String& other) {
+        if (_data != nullptr) {
+            delete[] _data;
+            _data = nullptr;
+            size = 0;
+        }
+
+        if (other.size > 0) {
+            size = other.size;
+            _data = new char[size + 1];
+            memcpy(_data, other._data, sizeof(char) * (size + 1));
+        }
+
+        return *this;
+    }
+
+    String& operator=(String&& other) {
+        if (_data != nullptr) {
+            delete[] _data;
+            _data = nullptr;
+            size = 0;
+        }
+
+        if (other.size > 0) {
+            size = other.size;
+            _data = other._data;
+            other._data = nullptr;
+            other.size = 0;
+        }
+
+        return *this;
+    }
+
+    String& operator=(const char* other) {
+        if (_data != nullptr) {
+            delete[] _data;
+            _data = nullptr;
+            size = strlen(other);
+        }
+
+        if (size > 0) {
+            _data = new char[size + 1];
+            memcpy(_data, other, sizeof(char) * (size + 1));
+        }
+
+        return *this;
+    }
+
+    String& operator=(const std::string& other) {
+        if (_data != nullptr) {
+            delete[] _data;
+            _data = nullptr;
+            size = other.size();
+        }
+
+        if (size > 0) {
+            _data = new char[size + 1];
+            memcpy(_data, &(other[0]), sizeof(char) * (size));
+            _data[size] = 0;
+        }
+
+        return *this;
+    }
+
+    ~String() {
+        if (_data != nullptr) {
+            delete _data;
+            _data = nullptr;
+            size = 0;
+        }
+    }
+
+    inline char& operator[](size_t index) {
+        return _data[index];
+    }
+
+    inline const char& operator[](size_t index) const {
+        return _data[index];
+    }
+
+    inline String operator+(const String& other) const {
+        String res;
+        res.size = size + other.size;
+        if (res.size == 0) {
+            return res;
+        }
+
+        res._data = new char[res.size + 1];
+        size_t offset = 0;
+        if (size > 0) {
+            memcpy(res._data, _data, sizeof(char) * size);
+            offset = size;
+        }
+
+        if (other.size > 0) {
+            memcpy(res._data + offset, other._data, sizeof(char) * other.size);
+        }
+
+        res._data[res.size] = 0;
+        return res;
+    }
+
+    inline String& operator+=(const String& other) {
+        return (*this = (*this + other));
+    }
+
+    inline bool SameAs(const String& other) const {
+        return ((_data == other._data) && (size == other.size));
+    }
+
+    inline bool operator==(const String& other) const {
+        if (SameAs(other)) {
+            return true;
+        }
+
+        if (other._data == nullptr || _data == nullptr) {
+            return false;
+        }
+
+        return !(strcmp(_data, other._data));
+    }
+
+    inline bool operator!=(const String& other) const {
+        return !(*this == other);
+    }
+
+    inline bool operator>(const String& other) const {
+        if (SameAs(other)) {
+            return false;
+        }
+
+        if (other._data == nullptr) {
+            return true;
+        }
+
+        if (_data == nullptr) {
+            return false;
+        }
+
+        return (strcmp(_data, other._data) > 0);
+    }
+
+    inline bool operator<(const String& other) const {
+        return (other > *this);
+    }
+
+    inline bool operator<=(const String& other) const {
+        return ((*this < other) || (*this == other));
+    }
+
+    inline bool operator>=(const String& other) const {
+        return ((*this > other) || (*this == other));
+    }
+
+    const char* ToCStr() const {
+        return _data;
+    }
+protected:
+    char* _data;
+    size_t size;
+};
+
+};
+
+#endif

@@ -2,23 +2,23 @@
 
 #include "copper.h"
 
-// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
+// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_CopperNode
 namespace UT {
 class Test {
 public:
     Test() {
-        tests["test_copper_index::copper_node_test"] = &Test::copper_node_test;
+        tests["test_copper_index::CopperNode_test"] = &Test::CopperNode_test;
 
-        test_priority["test_copper_index::copper_node_test"] = 0;
+        test_priority["test_copper_index::CopperNode_test"] = 0;
 
-        all_tests.insert("test_copper_index::copper_node_test");
+        all_tests.insert("test_copper_index::CopperNode_test");
 
     }
 
     ~Test() {}
 
-    bool copper_node_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_copper_index::copper_node_test for %luth time...", try_count);
+    bool CopperNode_test() {
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_copper_index::CopperNode_test for %luth time...", try_count);
         bool status = true;
         // copper::RetStatus rs = copper::RetStatus::Success();
         // copper::VectorID vec_id = copper::INVALID_VECTOR_ID;
@@ -156,7 +156,7 @@ public:
         //             "Third neighbour id should be same as the current vector id. neighbours[2].first=" VECTORID_LOG_FMT
         //             ", _ids16[1]=%lu", VECTORID_LOG(neighbours[2].first), _ids16[1]);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::copper_node_test.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::CopperNode_test.");
         return status;
     }
 
@@ -180,8 +180,8 @@ protected:
     static constexpr uint16_t KI_MAX = 4, KI_MIN = 2;
     static constexpr uint16_t KL_MAX = 8, KL_MIN = 2;
 
-    using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>;
-    using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX, double, copper::Simple_Divide_L2>;
+    using LeafNode = copper::CopperNode<uint16_t, dim, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>;
+    using InternalNode = copper::CopperNode<uint16_t, dim, KI_MIN, KI_MAX, double, copper::Simple_Divide_L2>;
 
     const uint16_t _data16[size][dim] = {
         {1, 2, 3, 4},

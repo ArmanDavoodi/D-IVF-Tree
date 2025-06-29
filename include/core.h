@@ -87,7 +87,7 @@ public:
     // template<typename V_TYPE, uint16_t DIMENTION, typename D_TYPE>
     // using CORE = Simple_Divide<V_TYPE, DIMENTION, D_TYPE, _DIST>;
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, Simple_Divide_L2>;
+    using Node = CopperNode<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, Simple_Divide_L2>;
 
     inline const _DIST_ID_PAIR_SIMILARITY<DIST_TYPE, L2_Distance<T, _DIM, DIST_TYPE>>& More_Similar_Comp() const {
         return _more_similar_cmp;
@@ -112,7 +112,7 @@ public:
     template<typename NodeType, uint16_t _KI_MIN, uint16_t _KI_MAX, uint16_t _KL_MIN, uint16_t _KL_MAX>
     inline RetStatus Cluster(std::vector<NodeType*>& nodes, size_t node_idx,
                              std::vector<Vector<T, _DIM>>& centroids, uint16_t split_into,
-                             Buffer_Manager<T, _DIM, _KI_MIN, _KI_MAX, _KL_MIN, _KL_MAX, DIST_TYPE, Simple_Divide_L2>& _bufmgr)
+                             BufferManager<T, _DIM, _KI_MIN, _KI_MAX, _KL_MIN, _KL_MAX, DIST_TYPE, Simple_Divide_L2>& _bufmgr)
                              const {
 
         static_assert(
@@ -120,11 +120,11 @@ public:
             "NodeType must be either Node<_KI_MIN, _KI_MAX> or Node<_KL_MIN, _KL_MAX>"
         );
 
-        FatalAssert(nodes.size() > node_idx, LOG_TAG_VECTOR_INDEX, "nodes should contain node.");
+        FatalAssert(nodes.size() > node_idx, LOG_TAG_VectorIndex, "nodes should contain node.");
         NodeType* node = nodes[node_idx];
-        FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "node should not be nullptr.");
-        FatalAssert(node->Is_Full(), LOG_TAG_VECTOR_INDEX, "node should be full.");
-        FatalAssert(split_into > 0, LOG_TAG_VECTOR_INDEX, "split_into should be greater than 0.");
+        FatalAssert(node != nullptr, LOG_TAG_VectorIndex, "node should not be nullptr.");
+        FatalAssert(node->Is_Full(), LOG_TAG_VectorIndex, "node should be full.");
+        FatalAssert(split_into > 0, LOG_TAG_VectorIndex, "split_into should be greater than 0.");
 
         RetStatus rs = RetStatus::Success();
 
@@ -142,7 +142,7 @@ public:
         for (uint16_t i = num_vec_per_node + num_vec_rem; i < NodeType::_MAX_SIZE_; ++i) {
             if ((i - num_vec_rem) % num_vec_per_node == 0) {
                 VectorID vector_id = _bufmgr.Record_Vector(node->Level());
-                FatalAssert(vector_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Failed to record vector.");
+                FatalAssert(vector_id.Is_Valid(), LOG_TAG_VectorIndex, "Failed to record vector.");
                 nodes.emplace_back(new NodeType(vector_id));
                 _bufmgr.UpdateClusterAddress(vector_id, nodes.back());
             }

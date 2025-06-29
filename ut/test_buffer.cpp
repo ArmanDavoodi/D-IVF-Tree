@@ -4,7 +4,7 @@
 #include "buffer.h"
 #include "dummy_copper.h"
 
-// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
+// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_CopperNode
 namespace UT {
 class Test {
 public:
@@ -26,12 +26,12 @@ public:
         bool status = true;
         constexpr uint16_t KI_MAX = 4, KI_MIN = 2;
         constexpr uint16_t KL_MAX = 8, KL_MIN = 1;
-        copper::Buffer_Manager<uint16_t, dim, KI_MIN, KI_MAX, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>
-            _buffer_manager;
-        using LeafNode = copper::Copper_Node<uint16_t, dim, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>;
-        using InternalNode = copper::Copper_Node<uint16_t, dim, KI_MIN, KI_MAX, double, copper::Simple_Divide_L2>;
+        copper::BufferManager<uint16_t, dim, KI_MIN, KI_MAX, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>
+            _BufferManager;
+        using LeafNode = copper::CopperNode<uint16_t, dim, KL_MIN, KL_MAX, double, copper::Simple_Divide_L2>;
+        using InternalNode = copper::CopperNode<uint16_t, dim, KI_MIN, KI_MAX, double, copper::Simple_Divide_L2>;
 
-        copper::RetStatus rs = _buffer_manager.Init();
+        copper::RetStatus rs = _BufferManager.Init();
         status = status && (rs.Is_OK());
         ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager init failed with status %s.", rs.Msg());
 
@@ -39,11 +39,11 @@ public:
         first_root_id._id = 0;
         first_root_id._level = 1;
 
-        copper::VectorID cur_root_id = _buffer_manager.Record_Root();
+        copper::VectorID cur_root_id = _BufferManager.Record_Root();
         status = status && (cur_root_id == first_root_id);
         ErrorAssert(cur_root_id == first_root_id, LOG_TAG_TEST, "First Root ID should be same as first ID. First ID: " VECTORID_LOG_FMT
             ", cur_root_id: " VECTORID_LOG_FMT, VECTORID_LOG(first_root_id), VECTORID_LOG(cur_root_id));
-        rs = _buffer_manager.UpdateClusterAddress(cur_root_id, new LeafNode(cur_root_id));
+        rs = _BufferManager.UpdateClusterAddress(cur_root_id, new LeafNode(cur_root_id));
         status = status && (rs.Is_OK());
         ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
 
@@ -51,7 +51,7 @@ public:
         uint64_t root_level = 1;
         std::vector<uint64_t> vecs;
 
-        copper::VectorID vec_id = _buffer_manager.Record_Vector(0);
+        copper::VectorID vec_id = _BufferManager.Record_Vector(0);
         status = status && (vec_id == 0);
         ErrorAssert(vec_id == 0, LOG_TAG_TEST, "first Vector ID should be 0.");
         vecs.emplace_back(vec_id._id);
@@ -64,21 +64,21 @@ public:
                 j = j / (level == 0 ? KL_MAX : KI_MAX);
             }
             if (level >= root_level) {
-                cur_root_id = _buffer_manager.Record_Root();
+                cur_root_id = _BufferManager.Record_Root();
                 status = status && (cur_root_id._level == root_level + 1);
                 ErrorAssert(cur_root_id._level == root_level + 1, LOG_TAG_TEST, "Root level should be %u.", root_level + 1);
                 root_level = cur_root_id._level;
                 status = status && (cur_root_id._val == 0);
                 ErrorAssert(cur_root_id._val == 0, LOG_TAG_TEST, "Root val should be 0.");
                 vecs.emplace_back(cur_root_id._id);
-                rs = _buffer_manager.UpdateClusterAddress(cur_root_id, new InternalNode(cur_root_id));
+                rs = _BufferManager.UpdateClusterAddress(cur_root_id, new InternalNode(cur_root_id));
                 status = status && (rs.Is_OK());
                 ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
             }
             status = status && (root_level == vecs.size() - 1);
             ErrorAssert(root_level == vecs.size() - 1, LOG_TAG_TEST, "Root level should be %u.", vecs.size() - 1);
 
-            vec_id = _buffer_manager.Record_Vector(level);
+            vec_id = _BufferManager.Record_Vector(level);
             status = status && (vec_id._level == level);
             ErrorAssert(vec_id._level == level, LOG_TAG_TEST, "Vector level should be %u.", level);
             status = status && (vec_id == (vecs[level] + 1));
@@ -86,20 +86,20 @@ public:
                 " should be %u.", VECTORID_LOG(vec_id), (vecs[level]+1));
             vecs[level] = vec_id._id;
             if (level == 1) {
-                rs = _buffer_manager.UpdateClusterAddress(vec_id, new LeafNode(vec_id));
+                rs = _BufferManager.UpdateClusterAddress(vec_id, new LeafNode(vec_id));
                 status = status && (rs.Is_OK());
                 ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
             }
             else if (level > 1) {
-                rs = _buffer_manager.UpdateClusterAddress(vec_id, new InternalNode(vec_id));
+                rs = _BufferManager.UpdateClusterAddress(vec_id, new InternalNode(vec_id));
                 status = status && (rs.Is_OK());
                 ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
             }
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Buffer Manager:%s", _buffer_manager.to_string().c_str());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Buffer Manager:%s", _BufferManager.to_string().c_str());
 
-        rs = _buffer_manager.Shutdown();
+        rs = _BufferManager.Shutdown();
         status = status && (rs.Is_OK());
         ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "Buffer manager shutdown failed with status %s.", rs.Msg());
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_buffer::insert_test.");

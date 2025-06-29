@@ -10,21 +10,21 @@ namespace copper {
 
 template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
           typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
-class Copper_Node {
+class CopperNode {
 public:
     static constexpr uint16_t _DIM_ = _DIM;
     static constexpr uint16_t _MIN_SIZE_ = _MIN_SIZE;
     static constexpr uint16_t _MAX_SIZE_ = _MAX_SIZE;
 
-    Copper_Node(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
+    CopperNode(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
-            "Copper_Node<%hu, %hu>(id = " VECTORID_LOG_FMT "): Created node. this=%p", _MIN_SIZE, _MAX_SIZE,
+            "CopperNode<%hu, %hu>(id = " VECTORID_LOG_FMT "): Created node. this=%p", _MIN_SIZE, _MAX_SIZE,
             VECTORID_LOG(id), this);
     }
 
-    ~Copper_Node() {
+    ~CopperNode() {
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
-            "Copper_Node<%hu, %hu>(id = " VECTORID_LOG_FMT "): Destroyed node. this=%p", _MIN_SIZE, _MAX_SIZE,
+            "CopperNode<%hu, %hu>(id = " VECTORID_LOG_FMT "): Destroyed node. this=%p", _MIN_SIZE, _MAX_SIZE,
             VECTORID_LOG(_centroid_id), this);
     }
 
@@ -38,7 +38,7 @@ public:
         return addr;
     }
 
-    inline VectorUpdate MigrateLastVectorTo(Copper_Node<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
+    inline VectorUpdate MigrateLastVectorTo(CopperNode<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
         VectorUpdate update;
         update.vector_id = _bucket.Get_Last_VectorID();
         const Vector<T, _DIM> &v = _bucket.Get_Last_Vector();
@@ -145,16 +145,16 @@ public:
 
 protected:
 
-    typedef Copper_Node<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
-    typedef Copper_Node<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
+    typedef CopperNode<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
+    typedef CopperNode<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
     template<uint16_t _K_MIN, uint16_t _K_MAX>
         requires((_K_MIN == KI_MIN && _K_MAX == KI_MAX) || (_K_MIN == KL_MIN && _K_MAX == KL_MAX))
-    using Node = Copper_Node<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _CORE>;
+    using Node = CopperNode<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _CORE>;
 
     _CORE<T, _DIM, DIST_TYPE> _core; /* Todo: avoid copying _core */
 
     size_t _size;
-    Buffer_Manager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE> _bufmgr;
+    BufferManager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE> _bufmgr;
     VectorID _root;
     uint16_t _split_internal;
     uint16_t _split_leaf;

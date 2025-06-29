@@ -43,6 +43,7 @@ enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_COPPER_NODE_BIT,
     LOG_TAG_VECTOR_INDEX_BIT,
     LOG_TAG_CORE_BIT,
+    LOG_TAG_MEMORY_BIT,
     LOG_TAG_NOT_IMPLEMENTED_BIT,
     LOG_TAG_TEST_BIT,
     NUM_TAGS
@@ -55,6 +56,7 @@ enum LOG_TAG_BITS : uint64_t {
 #define LOG_TAG_COPPER_NODE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_COPPER_NODE_BIT))
 #define LOG_TAG_VECTOR_INDEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_INDEX_BIT))
 #define LOG_TAG_CORE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CORE_BIT))
+#define LOG_TAG_MEMORY (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_MEMORY_BIT))
 #define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
 #define LOG_TAG_TEST (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_TEST_BIT))
 
@@ -234,34 +236,52 @@ namespace copper {
 using thread_id = unsigned long;
 #define THREAD_ID ((copper::thread_id)(OS_THREAD_ID))
 struct Log_Msg {
-    constexpr static int MAX_MSG_SIZE = 2500;
     char *_msg = nullptr;
 
     Log_Msg(const char* msg, ...) {
-        _msg = new char[MAX_MSG_SIZE];
-        // Sanity check: try to parse the format string using vsnprintf with a copy of the va_list.
         va_list argptr;
         va_start(argptr, msg);
-
-#if defined(__GNUC__) || defined(__clang__)
-        // Use __builtin___vsnprintf_chk to check format string at compile time if possible
-        __builtin___vsnprintf_chk(_msg, MAX_MSG_SIZE-3, 0, __builtin_object_size(_msg, 0), msg, argptr);
-#endif
-
-        int num_writen = vsnprintf(_msg, MAX_MSG_SIZE-3, msg, argptr);
+        int num_writen = vsnprintf(NULL, 0, msg, argptr);
+        if (num_writen < 0) {
+            goto ERROR;
+        }
+        _msg = new char[num_writen + 1];
+        num_writen = vsnprintf(_msg, num_writen + 1, msg, argptr);
         va_end(argptr);
 
-        if (num_writen > MAX_MSG_SIZE-3) {
-            _msg[MAX_MSG_SIZE-4] = '.';
-            _msg[MAX_MSG_SIZE-3] = '.';
-            _msg[MAX_MSG_SIZE-2] = '.';
-            _msg[MAX_MSG_SIZE-1] = '\0';
+        if (num_writen >= 0) {
+            goto END;
         }
-        else if (num_writen < 0) {
-            sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
+
+ERROR:
+        sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
+END:
+    }
+
+    Log_Msg(const Log_Msg& other) {
+        if (other._msg == nullptr) {
+            _msg = nullptr;
+            return;
         }
-        delete[] _msg; // delete the old message
-        _msg = nullptr;
+        size_t size = strlen(other._msg);
+        if (size == 0) {
+            _msg = nullptr;
+            return;
+        }
+        _msg = new char[size + 1];
+        _msg[0] = 0;
+        strcpy(_msg, other._msg);
+    }
+
+    Log_Msg(Log_Msg&& other) : _msg(other._msg) {
+        other._msg = nullptr;
+    }
+
+    ~Log_Msg() {
+        if (_msg != nullptr) {
+            delete[] _msg;
+            _msg = nullptr;
+        }
     }
 };
 
@@ -326,6 +346,8 @@ inline const char* tagtostr(uint64_t tag)
         return "Vector Index" ;
     case LOG_TAG_CORE:
         return "Core" ;
+    case LOG_TAG_MEMORY:
+        return "Memory";
     case LOG_TAG_NOT_IMPLEMENTED:
         return "Not Implemented" ;
     case LOG_TAG_TEST:
