@@ -35,7 +35,7 @@ public:
     virtual VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) = 0;
 
     virtual RetStatus Search(const Vector& query, size_t k,
-                             std::vector<std::pair<VectorID, DTYPE>>& neighbours) = 0;
+                             std::vector<std::pair<VectorID, void>>& neighbours) = 0;
 
     // virtual VectorID Find_Nearest(const Vector& query) = 0;
 
