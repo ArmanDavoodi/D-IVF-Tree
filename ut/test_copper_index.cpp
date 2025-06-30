@@ -108,8 +108,8 @@ public:
         // copper::Vector<uint16_t, dim> query(_data16[3]);
         // query[0] = 12;
         // rs = node.ApproximateKNearestNeighbours(query, 3, 7, neighbours);
-        // status = status && (rs.Is_OK());
-        // ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
+        // status = status && (rs.IsOK());
+        // ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
         // status = status && (neighbours.size() == 3);
         // ErrorAssert(neighbours.size() == 3, LOG_TAG_TEST,
         //             "ApproximateKNearestNeighbours should return 3 neighbours. size=%lu", neighbours.size());
@@ -134,8 +134,8 @@ public:
 
         // /* Todo: change when a better sampling alg is used */
         // rs = node.ApproximateKNearestNeighbours(query, 3, 4, neighbours);
-        // status = status && (rs.Is_OK());
-        // ErrorAssert(rs.Is_OK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
+        // status = status && (rs.IsOK());
+        // ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
         // status = status && (neighbours.size() == 3);
         // ErrorAssert(neighbours.size() == 3, LOG_TAG_TEST,
         //             "ApproximateKNearestNeighbours should return 3 neighbours. size=%lu", neighbours.size());

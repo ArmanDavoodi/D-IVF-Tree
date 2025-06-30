@@ -18,6 +18,8 @@ struct CopperNodeAttributes {
     CopperCoreAttributes core;
     uint16_t min_size;
     uint16_t max_size;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* similarityComparator;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* reverseSimilarityComparator;
 };
 
 struct CopperAttributes {
@@ -26,6 +28,17 @@ struct CopperAttributes {
     uint16_t leaf_max_size;
     uint16_t internal_min_size;
     uint16_t internal_max_size;
+    uint16_t split_internal;
+    uint16_t split_leaf;
+
+    String ToString() const {
+        return String("{dimention=%hu, clusteringAlg=%s, distanceAlg=%s, "
+                      "leaf_min_size=%hu, leaf_max_size=%hu, "
+                      "internal_min_size=%hu, internal_max_size=%hu, "
+                      "split_internal=%hu, split_leaf=%hu}",
+                      core.dimention, CLUSTERING_TYPE_NAME[core.clusteringAlg], DISTANCE_TYPE_NAME[core.distanceAlg],
+                      leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, split_internal, split_leaf);
+    }
 };
 
 #define CHECK_CORE_ATTRIBUTES(attr, tag) \
@@ -83,8 +96,8 @@ public:
 
 class VectorIndexInterface {
 public:
-    virtual RetStatus Init(CopperCoreAttributes attr) = 0;
-    virtual RetStatus Shutdown() = 0;
+    VectorIndexInterface() = default;
+    virtual ~VectorIndexInterface() = default;
 
     virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) = 0;
     virtual RetStatus Delete(VectorID vec_id) = 0;
@@ -96,6 +109,18 @@ public:
 
     virtual size_t Size() const = 0;
 protected:
+    inline static DIST_ID_PAIR_SIMILARITY_INTERFACE* GetDistancePairSimilarityComparator(DistanceType distanceAlg,
+                                                                                         bool reverse) {
+        switch (distanceAlg) {
+            case DistanceType::L2:
+                return (reverse ?
+                        static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_REVERSE_SIMILARITY()) :
+                        static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_SIMILARITY()));
+            default:
+                FatalAssert(false, LOG_TAG_COPPER_NODE, "Invalid distance algorithm: %d", (int)distanceAlg);
+        }
+    }
+
     virtual RetStatus SearchNodes(const Vector& query,
                                   const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
                                   std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) = 0;

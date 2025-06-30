@@ -50,35 +50,14 @@ struct CopperNodeHeaderData {
 };
 
 struct CopperNodeData {
-    static DIST_ID_PAIR_SIMILARITY_INTERFACE* GetDistancePairSimilarityComparator(DistanceType distanceAlg,
-                                                                                  bool reverse) {
-        switch (distanceAlg) {
-            case DistanceType::L2:
-                return (reverse ?
-                        static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_REVERSE_SIMILARITY()) :
-                        static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_SIMILARITY()));
-            default:
-                FatalAssert(false, LOG_TAG_COPPER_NODE, "Invalid distance algorithm: %d", (int)distanceAlg);
-        }
-    }
-
     CopperNodeData(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
         _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
         _bucket(attr.core.dimention, attr.max_size),
-        _similarityComparator(GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
-        _reverseSimilarityComparator(GetDistancePairSimilarityComparator(attr.core.distanceAlg, true)) {
+        _similarityComparator(attr.similarityComparator),
+        _reverseSimilarityComparator(attr.reverseSimilarityComparator) {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
         CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_COPPER_NODE);
         CHECK_NODE_ATTRIBUTES(attr, LOG_TAG_COPPER_NODE);
-    }
-
-    void Destroy() {
-        if (_similarityComparator != nullptr) {
-            delete _similarityComparator;
-        }
-        if (_reverseSimilarityComparator != nullptr) {
-            delete _reverseSimilarityComparator;
-        }
     }
 
     const VectorID _centroid_id;
@@ -97,9 +76,7 @@ static_assert((sizeof(CopperNodeHeaderData) == sizeof(CopperNodeData)) ||
 class CopperNode : public CopperNodeInterface {
 public:
     CopperNode(VectorID id, CopperNodeAttributes attr) : _data(id, attr) {}
-    ~CopperNode() override {
-        _data.Destroy();
-    };
+    ~CopperNode() override = default;
 
     RetStatus AssignParent(VectorID parent_id) override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
@@ -300,80 +277,88 @@ TESTABLE;
 
 class VectorIndex : public VectorIndexInterface {
 public:
-
-    RetStatus Init() {
+    VectorIndex(CopperAttributes attr) : _attr(attr),
+                                         _similarityComparator(
+                                            GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
+                                         _reverseSimilarityComparator(
+                                            GetDistancePairSimilarityComparator(attr.core.distanceAlg, true)),
+                                         _size(0), _root(INVALID_VECTOR_ID), _levels(2) {
         RetStatus rs = RetStatus::Success();
-        _bufmgr.Init();
-        _root = _bufmgr.Record_Root();
-        FatalAssert(_root.Is_Valid(), LOG_TAG_VectorIndex, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        FatalAssert(_root.Is_Centroid(), LOG_TAG_VectorIndex, "root should be a centroid: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        FatalAssert(_root.Is_Leaf(), LOG_TAG_VectorIndex, "first root should be a leaf: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        rs = _bufmgr.UpdateClusterAddress(_root, new Leaf_Node(_root));
-        FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Failed to update cluster address for root: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        _attr = attr;
+        rs = _bufmgr.Init();
+        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to init buffer manager.");
+        _root = _bufmgr.RecordRoot();
+        FatalAssert(_root.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        FatalAssert(_root.IsCentroid(), LOG_TAG_VECTOR_INDEX, "root should be a centroid: "
+                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        FatalAssert(_root.IsLeaf(), LOG_TAG_VECTOR_INDEX, "first root should be a leaf: "
+                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
+
+        rs = _bufmgr.UpdateClusterAddress(_root, CreateNewNode(_root));
+        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root: "
+                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
         _levels = 2;
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_VectorIndex,
-             "Init Copper Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu",
-             VECTORID_LOG(_root), _levels);
-        return rs;
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX,
+             "Init Copper Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
+             VECTORID_LOG(_root), _levels, _attr.ToString().ToCStr());
     }
 
     RetStatus Shutdown() {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_VectorIndex, "Shutdown Copper Index End: rs=%s", rs.Msg());
-        return rs;
+        delete _similarityComparator;
+        delete _reverseSimilarityComparator;
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown Copper Index End: rs=%s", rs.Msg());
     }
 
-    RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id, uint16_t node_per_layer) {
-        FatalAssert(_root.Is_Valid(), LOG_TAG_VectorIndex, "Invalid root ID.");
-        FatalAssert(_root.Is_Centroid(), LOG_TAG_VectorIndex, "Invalid root ID -> root should be a centroid.");
-        FatalAssert(vec.Is_Valid(), LOG_TAG_VectorIndex, "Invalid query vector.");
+    RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) {
+        FatalAssert(_root.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID.");
+        FatalAssert(_root.IsCentroid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID -> root should be a centroid.");
+        FatalAssert(vec.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid query vector.");
 
-        FatalAssert(node_per_layer > 0, LOG_TAG_VectorIndex, "node_per_layer cannot be 0.");
-        FatalAssert(_levels > 1, LOG_TAG_VectorIndex, "Height of the tree should be at least two but is %hhu.", _levels);
+        FatalAssert(node_per_layer > 0, LOG_TAG_VECTOR_INDEX, "node_per_layer cannot be 0.");
+        FatalAssert(_levels > 1, LOG_TAG_VECTOR_INDEX, "Height of the tree should be at least two but is %hhu.",
+                    _levels);
 
         RetStatus rs = RetStatus::Success();
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
-             vec.to_string().c_str(), _size, _levels);
+             vec.ToString(_attr.core.dimention).ToCStr(), _size, _levels);
 
         std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
         upper_layer.emplace_back(_root, 0);
         VectorID next = _root;
-        while (next.Is_Internal_Node()) {
+        while (next.IsCentroid()) {
+            CHECK_VECTORID_IS_VALID(next, LOG_TAG_VECTOR_INDEX);
             // Get the next layer of nodes
-            rs = Search_Nodes<Internal_Node>(vec, upper_layer, lower_layer, node_per_layer);
-            FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Search nodes failed with error: %s", rs.Msg());
-            FatalAssert(!lower_layer.empty(), LOG_TAG_VectorIndex, "Lower layer should not be empty.");
-            FatalAssert(lower_layer.size() <= node_per_layer, LOG_TAG_VectorIndex,
-                        "Lower layer size (%lu) is larger than internal k (%hu).", lower_layer.size(), node_per_layer);
-            FatalAssert(lower_layer.fron().first._level == next._level - 1, LOG_TAG_VectorIndex,
+            rs = SearchNodes(vec, upper_layer, lower_layer, next.IsInternalNode() ? node_per_layer : 1);
+            FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Search nodes failed with error: %s", rs.Msg());
+            FatalAssert(!lower_layer.empty(), LOG_TAG_VECTOR_INDEX, "Lower layer should not be empty.");
+            FatalAssert((next.IsInternalNode() ? (lower_layer.size() <= node_per_layer) : (lower_layer.size() == 1)),
+                        LOG_TAG_VECTOR_INDEX, "Lower layer size (%lu) is larger than %hu (%s).",
+                        lower_layer.size(), (next.IsInternalNode() ? node_per_layer : 1),
+                        (next.IsInternalNode() ? "internal k" : "leaf case"));
+            FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_VECTOR_INDEX,
                         "Lower layer first element level (%hhu) does not match expected level (%hhu).",
                         lower_layer.front().first._level, next._level - 1);
             next = lower_layer.front().first;
             upper_layer.swap(lower_layer);
         }
 
-        FatalAssert(next.Is_Leaf(), LOG_TAG_VectorIndex, "Next node should be a leaf but is" VECTORID_LOG_FMT,
+        CopperNode* leaf = static_cast<CopperNode*>(_bufmgr.GetNode(upper_layer.front().first));
+        CHECK_NODE_IS_VALID(leaf, LOG_TAG_VECTOR_INDEX, false);
+        FatalAssert(leaf->IsLeaf(), LOG_TAG_VECTOR_INDEX, "Next node should be a leaf but is " VECTORID_LOG_FMT,
                     VECTORID_LOG(next));
 
-        rs = Search_Nodes<Leaf_Node>(vec, upper_layer, lower_layer, 1);
-        FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Search nodes failed with error: %s", rs.Msg());
-        FatalAssert(lower_layer.size() == 1, LOG_TAG_VectorIndex,
-                    "Lower layer size (%lu) is not 1", lower_layer.size());
-
-        Leaf_Node* leaf = _bufmgr.template Get_Node<Leaf_Node>(lower_layer.front().first);
-        FatalAssert(leaf != nullptr, LOG_TAG_VectorIndex, "Leaf not found.");
-
-        if (leaf->Is_Full()) {
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_VectorIndex, "Leaf is full.");
+        if (leaf->IsFull()) {
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX, "Leaf is full.");
         }
 
-        vec_id = Record_Into<KL_MIN, KL_MAX>(vec, leaf);
-        if (vec_id.Is_Valid()) {
+        vec_id = RecordInto(vec, leaf);
+        if (vec_id.IsValid()) {
             ++_size;
-            if (leaf->Is_Full()) {
+            if (leaf->IsFull()) {
                 Split(leaf); // todo background job?
                 // todo assert success
             }
@@ -381,13 +366,14 @@ public:
         else {
             rs = RetStatus::Fail(""); //todo
         }
-        FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Insert failed with error: %s", rs.Msg());
-        FatalAssert(_levels == _bufmgr.Get_Height(), LOG_TAG_VectorIndex,
-                    "Levels mismatch: _levels=%hhu, _bufmgr.directory.size()=%lu", _levels, _bufmgr.Get_Height());
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Insert failed with error: %s", rs.Msg());
+        FatalAssert(_levels == _bufmgr.GetHeight(), LOG_TAG_VECTOR_INDEX,
+                    "Levels mismatch: _levels=%hhu, _bufmgr.directory.size()=%lu", _levels, _bufmgr.GetHeight());
+
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Insert END: Vector=%s, vec_id=" VECTORID_LOG_FMT ", _size=%lu, _levels=%hhu",
-             vec.to_string().c_str(), VECTORID_LOG(vec_id), _size, _levels);
+             vec.ToString(_attr.core.dimention).ToCStr(), VECTORID_LOG(vec_id), _size, _levels);
 
         return rs;
     }
@@ -399,23 +385,25 @@ public:
         return rs;
     }
 
-    RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k,
-                                        uint16_t _internal_k, uint16_t _leaf_k,
-                                        std::vector<std::pair<VectorID, DTYPE>>& neighbours,
-                                        bool sort = true, bool sort_from_more_similar_to_less = true) {
+    RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
+                                            uint16_t _internal_k, uint16_t _leaf_k,
+                                            std::vector<std::pair<VectorID, DTYPE>>& neighbours,
+                                            bool sort = true, bool sort_from_more_similar_to_less = true) {
 
-        FatalAssert(_root.Is_Valid(), LOG_TAG_VectorIndex, "Invalid root ID.");
-        FatalAssert(_root.Is_Centroid(), LOG_TAG_VectorIndex, "Invalid root ID -> root should be a centroid.");
-        FatalAssert(query.Is_Valid(), LOG_TAG_VectorIndex, "Invalid query vector.");
-        FatalAssert(k > 0, LOG_TAG_VectorIndex, "Number of neighbours cannot be 0.");
-        FatalAssert(_levels > 1, LOG_TAG_VectorIndex, "Height of the tree should be at least two but is %hhu.", _levels);
+        FatalAssert(_root.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID.");
+        FatalAssert(_root.IsCentroid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID -> root should be a centroid.");
+        FatalAssert(query.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid query vector.");
+        FatalAssert(k > 0, LOG_TAG_VECTOR_INDEX, "Number of neighbours cannot be 0.");
+        FatalAssert(_levels > 1, LOG_TAG_VECTOR_INDEX, "Height of the tree should be at least two but is %hhu.",
+                    _levels);
 
-        FatalAssert(_internal_k > 0, LOG_TAG_VectorIndex, "Number of internal node neighbours cannot be 0.");
-        FatalAssert(_leaf_k > 0, LOG_TAG_VectorIndex, "Number of leaf neighbours cannot be 0.");
+        FatalAssert(_internal_k > 0, LOG_TAG_VECTOR_INDEX, "Number of internal node neighbours cannot be 0.");
+        FatalAssert(_leaf_k > 0, LOG_TAG_VECTOR_INDEX, "Number of leaf neighbours cannot be 0.");
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
-             "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, num_levels=%hhu",
-             query.to_string().c_str(), k, _internal_k, _leaf_k, _size, _levels);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
+             "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
+             "num_levels=%hhu", query.ToString(_attr.core.dimention).ToCStr(), k, _internal_k,
+             _leaf_k, _size, _levels);
 
         RetStatus rs = RetStatus::Success();
         neighbours.clear();
@@ -423,35 +411,33 @@ public:
         std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
         upper_layer.emplace_back(_root, 0);
         VectorID next = _root;
-        while (next.Is_Internal_Node()) {
+        while (next.IsCentroid()) {
+            CHECK_VECTORID_IS_VALID(next, LOG_TAG_VECTOR_INDEX);
             // Get the next layer of nodes
-            rs = Search_Nodes<Internal_Node>(query, upper_layer, lower_layer, _internal_k);
-            FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Search nodes failed with error: %s", rs.Msg());
-            FatalAssert(!lower_layer.empty(), LOG_TAG_VectorIndex, "Lower layer should not be empty.");
-            FatalAssert(lower_layer.size() <= _internal_k, LOG_TAG_VectorIndex,
-                        "Lower layer size (%lu) is larger than internal k (%hu).", lower_layer.size(), _internal_k);
-            FatalAssert(lower_layer.fron().first._level == next._level - 1, LOG_TAG_VectorIndex,
+            rs = SearchNodes(query, upper_layer, lower_layer, next.IsInternalNode() ? _internal_k : _leaf_k);
+            FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Search nodes failed with error: %s", rs.Msg());
+            FatalAssert(!lower_layer.empty(), LOG_TAG_VECTOR_INDEX, "Lower layer should not be empty.");
+            FatalAssert((next.IsInternalNode() ? (lower_layer.size() <= _internal_k) : (lower_layer.size() <= _leaf_k)),
+                        LOG_TAG_VECTOR_INDEX, "Lower layer size (%lu) is larger than %hu (%s).",
+                        lower_layer.size(), (next.IsInternalNode() ? _internal_k : _leaf_k),
+                        (next.IsInternalNode() ? "internal k" : "leaf case"));
+            FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_VECTOR_INDEX,
                         "Lower layer first element level (%hhu) does not match expected level (%hhu).",
                         lower_layer.front().first._level, next._level - 1);
             next = lower_layer.front().first;
             upper_layer.swap(lower_layer);
         }
 
-        FatalAssert(next.Is_Leaf(), LOG_TAG_VectorIndex, "Next node should be a leaf but is" VECTORID_LOG_FMT,
-                    VECTORID_LOG(next));
-
-        rs = Search_Nodes<Leaf_Node>(query, upper_layer, lower_layer, _leaf_k);
-        FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Search nodes failed with error: %s", rs.Msg());
-        FatalAssert(!lower_layer.empty(), LOG_TAG_VectorIndex, "Lower layer should not be empty.");
-        FatalAssert(lower_layer.size() <= _leaf_k, LOG_TAG_VectorIndex,
-                    "Lower layer size (%lu) is larger than leaf k (%hu).", lower_layer.size(), _leaf_k);
-        neighbours.swap(lower_layer);
+        neighbours.swap(upper_layer);
         if (sort) {
-            std::sort_heap(neighbours.begin(), neighbours.end(),
-                            sort_from_more_similar_to_less ? *(_data._similarityComparator) : _core.Less_Similar_Comp());
+            std::sort_heap<std::vector<std::pair<VectorID, DTYPE>>::iterator,
+                           const DIST_ID_PAIR_SIMILARITY_INTERFACE&>(
+                           neighbours.begin(), neighbours.end(),
+                           sort_from_more_similar_to_less ? *(_similarityComparator) :
+                                                            *(_reverseSimilarityComparator));
         }
 
-        PRINT_VECTOR_PAIR_BATCH(neighbours, "ApproximateKNearestNeighbours End: neighbours=");
+        PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_VECTOR_INDEX, "ApproximateKNearestNeighbours End: neighbours=");
 
         return rs;
     }
@@ -461,42 +447,13 @@ public:
     }
 
 protected:
-
-    typedef CopperNode<T, _DIM, KI_MIN, KI_MAX, DTYPE, _CORE> Internal_Node;
-    typedef CopperNode<T, _DIM, KL_MIN, KL_MAX, DTYPE, _CORE> Leaf_Node;
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-        requires((_K_MIN == KI_MIN && _K_MAX == KI_MAX) || (_K_MIN == KL_MIN && _K_MAX == KL_MAX))
-    using Node = CopperNode<T, _DIM, _K_MIN, _K_MAX, DTYPE, _CORE>;
-
-    _CORE<T, _DIM, DTYPE> _core; /* Todo: avoid copying _core */
-
+    CopperAttributes _attr;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
     size_t _size;
-    BufferManager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DTYPE, _CORE> _bufmgr;
+    BufferManager _bufmgr;
     VectorID _root;
-    uint16_t _split_internal;
-    uint16_t _split_leaf;
     uint64_t _levels;
-
-    // Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
-    //     FatalAssert(_root.Is_Valid(), LOG_TAG_VectorIndex, "Invalid root ID.");
-    //     FatalAssert(_root.Is_Centroid(), LOG_TAG_VectorIndex, "Invalid root ID -> root should be a centroid.");
-
-    //     if (_root.Is_Leaf()) {
-    //         return _bufmgr.template Get_Node<Leaf_Node>(_root);
-    //     }
-    //     VectorID next = _root;
-
-    //     while (!next.Is_Leaf()) {
-    //         FatalAssert(next.Is_Valid(), LOG_TAG_VectorIndex, "Invalid vector id:%lu", next._id);
-    //         Internal_Node* node = _bufmgr.template Get_Node<Internal_Node>(next);
-    //         FatalAssert(node != nullptr, LOG_TAG_VectorIndex, "nullptr node with id %lu.", next._id);
-    //         next = node->Find_Nearest(query);
-    //     }
-
-    //     FatalAssert(next.Is_Valid(), LOG_TAG_VectorIndex, "Invalid vector id:%lu", next._id);
-    //     FatalAssert(next.Is_Leaf(), LOG_TAG_VectorIndex, "Invalid leaf vector id:%lu", next._id);
-    //     return _bufmgr.template Get_Node<Leaf_Node>(next);
-    // }
 
     template<typename NodeType>
     RetStatus Search_Nodes(const Vector<T, _DIM>& query,
@@ -504,11 +461,11 @@ protected:
                                   std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) {
         static_assert(std::is_same<NodeType, Internal_Node>::value || std::is_same<NodeType, Leaf_Node>::value,
                   "NodeType must be either Internal_Node or Leaf_Node");
-        FatalAssert(n > 0, LOG_TAG_VectorIndex, "Number of nodes to search for should be greater than 0.");
-        FatalAssert(!upper_layer.empty(), LOG_TAG_VectorIndex, "Upper layer should not be empty.");
-        FatalAssert(query.Is_Valid(), LOG_TAG_VectorIndex, "Query vector is invalid.");
+        FatalAssert(n > 0, LOG_TAG_VECTOR_INDEX, "Number of nodes to search for should be greater than 0.");
+        FatalAssert(!upper_layer.empty(), LOG_TAG_VECTOR_INDEX, "Upper layer should not be empty.");
+        FatalAssert(query.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Query vector is invalid.");
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Search_Nodes BEGIN: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu",
              query.to_string().c_str(), n, upper_layer.size(), upper_layer.front().first._level);
 
@@ -519,28 +476,28 @@ protected:
         for (const std::pair<VectorID, DTYPE>& node_data : upper_layer) {
             VectorID node_id = node_data.first;
 
-            FatalAssert(node_id.Is_Valid(), LOG_TAG_VectorIndex, "Invalid vector id:" VECTORID_LOG_FMT,
+            FatalAssert(node_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid vector id:" VECTORID_LOG_FMT,
                         VECTORID_LOG(node_id));
-            FatalAssert(node_id.Is_Centroid(), LOG_TAG_VectorIndex, "Node id should be a centroid: " VECTORID_LOG_FMT,
+            FatalAssert(node_id.Is_Centroid(), LOG_TAG_VECTOR_INDEX, "Node id should be a centroid: " VECTORID_LOG_FMT,
                         VECTORID_LOG(node_id));
-            FatalAssert(node_id._level == level, LOG_TAG_VectorIndex, "Node level mismatch: expected %hhu, got %hhu.",
+            FatalAssert(node_id._level == level, LOG_TAG_VECTOR_INDEX, "Node level mismatch: expected %hhu, got %hhu.",
                         level, node_id._level);
 
             NodeType* node = _bufmgr.template Get_Node<NodeType>(node_id);
-            FatalAssert(node != nullptr, LOG_TAG_VectorIndex, "nullptr node with id " VECTORID_LOG_FMT ".",
+            FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "nullptr node with id " VECTORID_LOG_FMT ".",
                         VECTORID_LOG(node_id));
 
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
                  "Search_Nodes: node_id=" VECTORID_LOG_FMT ", node_centroid=%s, node_type=%s",
                  VECTORID_LOG(node_id), _bufmgr.Get_Vector_By_ID(node_id).to_string().c_str(),
                  ((node->Is_Leaf()) ? "Leaf" : "Internal"));
 
             rs = node->Search(query, n, lower_layer);
-            FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Search failed at node " VECTORID_LOG_FMT " with err(%s).",
+            FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Search failed at node " VECTORID_LOG_FMT " with err(%s).",
                         VECTORID_LOG(node_id), rs.Msg());
         }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Search_Nodes END: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu, "
              "lower_layer_size=%lu, lower_level=%hhu",
              query.to_string().c_str(), n, upper_layer.size(), upper_layer.front().first._level, lower_layer.size(),
@@ -552,13 +509,13 @@ protected:
     template<uint16_t _K_MIN, uint16_t _K_MAX>
     VectorID Record_Into(const Vector<T, _DIM>& vec, Node<_K_MIN, _K_MAX>* container_node,
                                 Node<_K_MIN, _K_MAX>* node = nullptr) {
-        FatalAssert(container_node != nullptr, LOG_TAG_VectorIndex, "No container node provided.");
-        FatalAssert(container_node->CentroidID().Is_Valid(), LOG_TAG_VectorIndex, "container does not have a valid id.");
-        FatalAssert(container_node->Level() >= VectorID::LEAF_LEVEL, LOG_TAG_VectorIndex, "Invalid container level.");
+        FatalAssert(container_node != nullptr, LOG_TAG_VECTOR_INDEX, "No container node provided.");
+        FatalAssert(container_node->CentroidID().Is_Valid(), LOG_TAG_VECTOR_INDEX, "container does not have a valid id.");
+        FatalAssert(container_node->Level() >= VectorID::LEAF_LEVEL, LOG_TAG_VECTOR_INDEX, "Invalid container level.");
         FatalAssert(node == nullptr ||
             (node->CentroidID().Is_Valid() && node->ParentID() == INVALID_VECTOR_ID),
-            LOG_TAG_VectorIndex, "Input node should not have a parent assigned to it.");
-        FatalAssert(vec.Is_Valid(), LOG_TAG_VectorIndex, "Invalid vector.");
+            LOG_TAG_VECTOR_INDEX, "Input node should not have a parent assigned to it.");
+        FatalAssert(vec.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Invalid vector.");
 
         RetStatus rs = RetStatus::Success();
 
@@ -567,15 +524,15 @@ protected:
         if (node != nullptr) {
             vector_id = node->CentroidID();
             rs = node->Assign_Parent(container_node->CentroidID());
-            FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Failed tp assign parent_id");
+            FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed tp assign parent_id");
         }
         else {
             vector_id = _bufmgr.Record_Vector(container_node->Level() - 1);
-            FatalAssert(vector_id.Is_Valid(), LOG_TAG_VectorIndex, "Failed to record vector.");
+            FatalAssert(vector_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Failed to record vector.");
         }
 
         Address vec_add = container_node->Insert(vec, vector_id);
-        FatalAssert(vec_add != INVALID_ADDRESS, LOG_TAG_VectorIndex, "Failed to insert vector into parent.");
+        FatalAssert(vec_add != INVALID_ADDRESS, LOG_TAG_VECTOR_INDEX, "Failed to insert vector into parent.");
         _bufmgr.UpdateVectorAddress(vector_id, vec_add);
         return vector_id;
     }
@@ -591,7 +548,7 @@ protected:
         _root = new_root_id;
         root->Assign_Parent(new_root_id);
         ++_levels;
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Expand_Tree: New root created with id=" VECTORID_LOG_FMT ", previous root id= " VECTORID_LOG_FMT,
              VECTORID_LOG(new_root_id), VECTORID_LOG(root->CentroidID()));
         // todo assert success of every operation
@@ -619,10 +576,10 @@ protected:
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
     RetStatus Split(std::vector<Node<_K_MIN, _K_MAX>*>& candidates, size_t node_idx) {
-        FatalAssert(candidates.size() > node_idx, LOG_TAG_VectorIndex, "candidates should contain node.");
+        FatalAssert(candidates.size() > node_idx, LOG_TAG_VECTOR_INDEX, "candidates should contain node.");
         Node<_K_MIN, _K_MAX>* node = candidates[node_idx];
-        FatalAssert(node != nullptr, LOG_TAG_VectorIndex, "node should not be nullptr.");
-        FatalAssert(node->Is_Full(), LOG_TAG_VectorIndex, "node should be full.");
+        FatalAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "node should not be nullptr.");
+        FatalAssert(node->Is_Full(), LOG_TAG_VECTOR_INDEX, "node should be full.");
 
         RetStatus rs = RetStatus::Success();
         size_t last_size = candidates.size();
@@ -631,16 +588,16 @@ protected:
         // otherwise, node_centroid will only be updated
         Vector<T, _DIM> node_centroid = _bufmgr.Get_Vector_By_ID(node->CentroidID());
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Split BEGIN: " NODE_LOG_FMT, "Centroid:%s"
              NODE_PTR_LOG(node, true), node_centroid.to_string().c_str());
 
         rs = _core.Cluster<_K_MIN, _K_MAX>(candidates, node_idx, _split_leaf, centroids, _bufmgr);
         node_centroid = centroids[0];
-        FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "Clustering failed");
-        FatalAssert(node_centroid.Is_Valid(), LOG_TAG_VectorIndex, "new centroid vector of base node is invalid");
-        FatalAssert(candidates.size() > last_size, LOG_TAG_VectorIndex, "No new nodes were created.");
-        FatalAssert(candidates.size() - last_size == centroids.size() - 1, LOG_TAG_VectorIndex, "Missmatch between number of created nodes and number of centroids. Number of created nodes:%lu, number of centroids:%lu",
+        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Clustering failed");
+        FatalAssert(node_centroid.Is_Valid(), LOG_TAG_VECTOR_INDEX, "new centroid vector of base node is invalid");
+        FatalAssert(candidates.size() > last_size, LOG_TAG_VECTOR_INDEX, "No new nodes were created.");
+        FatalAssert(candidates.size() - last_size == centroids.size() - 1, LOG_TAG_VECTOR_INDEX, "Missmatch between number of created nodes and number of centroids. Number of created nodes:%lu, number of centroids:%lu",
             candidates.size() - last_size, centroids.size());
 
         if (node->CentroidID() == _root) {
@@ -652,17 +609,17 @@ protected:
 
         // we can skip node as at this point we only have one parent and we place it there for now
         for (size_t node_it = 1; node_it < centroids.size(); ++node_it) {
-            FatalAssert(centroids[node_it].Is_Valid(), LOG_TAG_VectorIndex, "Centroid vector is invalid.");
+            FatalAssert(centroids[node_it].Is_Valid(), LOG_TAG_VECTOR_INDEX, "Centroid vector is invalid.");
             // find the best parent
             size_t closest = Find_Closest_Cluster<_K_MIN, _K_MAX>(parents, centroids[node_it]);
 
             if (parents[closest]->Is_Full()) {
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_VectorIndex, "Node %lu is Full.", parents[closest]->_data._centroid_id);
+                CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX, "Node %lu is Full.", parents[closest]->_data._centroid_id);
             }
 
             Record_Into<_K_MIN, _K_MAX>(centroids[node_it], parents[closest], candidates[node_it + last_size - 1]);
 
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
                  "Split: Put Node " NODE_LOG_FMT, " Centroid:%s, into Parent " NODE_LOG_FMT,
                  " Parent_Centroid:%s", NODE_PTR_LOG(candidates[node_it + last_size - 1], true),
                  centroids[node_it].to_string().c_str(), Node_PTR_LOG(parents[closest], true),
@@ -671,11 +628,11 @@ protected:
             // todo assert ok
             if (parents[closest]->Is_Full()) {
                 rs = Split(parents, closest); // todo background job?
-                FatalAssert(rs.Is_OK(), LOG_TAG_VectorIndex, "");
+                FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "");
             }
         }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VectorIndex,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Split END: " NODE_LOG_FMT, "Centroid:%s"
              NODE_PTR_LOG(node, true), node_centroid.to_string().c_str());
         return rs;

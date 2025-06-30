@@ -30,7 +30,7 @@ struct RetStatus {
         return RetStatus{FAIL, msg};
     }
 
-    inline bool Is_OK() const {
+    inline bool IsOK() const {
         return stat == SUCCESS;
     }
 
@@ -119,21 +119,21 @@ class BufferManagerInterface;
 // class VectorSet;
 
 enum ClusteringType : int8_t {
-    Invalid = -1,
+    Invalid,
     Simple_Divide,
     NumTypes
 };
-inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypes] = {"Simple_Divide"};
+inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypes + 1] = {"Invalid", "Simple_Divide", "NumTypes"};
 inline constexpr bool IsValid(ClusteringType type) {
     return ((type != ClusteringType::Invalid) && (type != ClusteringType::NumTypes));
 }
 
 enum DistanceType : int8_t {
-    Invalid = -1,
+    Invalid,
     L2,
     NumTypes
 };
-inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypes] = {"L2"};
+inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypes + 1] = {"Invalid", "L2", "NumTypes"};
 inline constexpr bool IsValid(DistanceType type) {
     return ((type != DistanceType::Invalid) && (type != DistanceType::NumTypes));
 }

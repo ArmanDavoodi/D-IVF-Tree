@@ -152,7 +152,7 @@ public:
     // RetStatus Update(VectorID id, Address vector_address, Address cluster_address) {
     //     RetStatus rs = RetStatus::Success();
     //     rs = UpdateVectorAddress(id, vector_address);
-    //     if (!rs.Is_OK()) {
+    //     if (!rs.IsOK()) {
     //         return rs;
     //     }
     //     rs = UpdateClusterAddress(id, cluster_address); // todo: revert change of vector address if rs fails here
