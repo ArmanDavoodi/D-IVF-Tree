@@ -251,6 +251,7 @@ public:
         return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _data._bucket.Dimension() * _data._bucket.Capacity();
     }
 
+    /* todo: instead have a createNode function in the vectorindex itself so we can also create a root node if needed */
     inline CopperNodeInterface* CreateSibling(VectorID id) const override {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
         FatalAssert(id._level == _data._centroid_id._level, LOG_TAG_COPPER_NODE, "Mismatch level. selfID="
