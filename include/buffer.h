@@ -29,7 +29,7 @@ public:
         for (size_t level = directory.size() - 1; level > 0; --level) {
             for (VectorInfo& vec : directory[level]) {
                 if (vec.cluster_address != INVALID_ADDRESS) {
-                    static_cast<CopperNodeInterface*>(vec.cluster_address)->Destroy();
+                    static_cast<CopperNodeInterface*>(vec.cluster_address)->~CopperNodeInterface();
                     free(vec.cluster_address);
                     vec.cluster_address = INVALID_ADDRESS;
                 }

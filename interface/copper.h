@@ -33,12 +33,6 @@ struct CopperAttributes {
     FatalAssert(IsValid((attr).core.clusteringAlg), (tag), "Clustering algorithm is invalid."); \
     FatalAssert(IsValid((attr).core.distanceAlg), (tag), "Distance algorithm is invalid.")
 
-#define CHECK_MIN_MAX_SIZE(min_size, max_size, tag) \
-    FatalAssert((min_size) > 0, (tag), "Min size must be greater than 0."); \
-    FatalAssert(((max_size) / 2) >= (min_size), (tag), \
-                "Max size must be at least twice the min size. Min size: %hu, Max size: %hu", \
-                (min_size), (max_size))
-
 #define CHECK_NODE_ATTRIBUTES(attr, tag) \
     CHECK_CORE_ATTRIBUTES(attr, tag); \
     CHECK_MIN_MAX_SIZE(attr.min_size, attr.max_size, tag)
@@ -50,13 +44,11 @@ struct CopperAttributes {
 
 class CopperNodeInterface {
 public:
-    virtual RetStatus Init(VectorID id, CopperNodeAttributes attr) = 0;
-    virtual RetStatus Destroy() = 0;
-
+    CopperNodeInterface() = default;
+    virtual ~CopperNodeInterface() = default;
     virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
     virtual Address Insert(const Vector& vec, VectorID vec_id) = 0;
-    // virtual RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector& swapped_vec) = 0;
     virtual VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) = 0;
 
     virtual RetStatus Search(const Vector& query, size_t k,
@@ -80,11 +72,11 @@ public:
     virtual uint16_t VectorDimention() const = 0;
 
     /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-    virtual DIST_ID_PAIR_SIMILARITY_INTERFACE* GetSimilarityComparator(bool reverese = false) const = 0;
+    virtual const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const = 0;
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
     virtual size_t Bytes() const = 0; /* return sizeof(Node) - sizeof(char[1]) + sizeof(VTYPE) * cap * dim -> todo: what about allignment?*/
-    virtual CopperNodeInterface* CreateSibling(VectorID id) const = 0;
+    // virtual CopperNodeInterface* CreateSibling(VectorID id) const = 0;
 
     virtual String BucketToString() const = 0;
 };
@@ -103,7 +95,6 @@ public:
                                                     bool sort = true, bool sort_from_more_similar_to_less = true) = 0;
 
     virtual size_t Size() const = 0;
-
 protected:
     virtual RetStatus SearchNodes(const Vector& query,
                                   const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
@@ -119,6 +110,11 @@ protected:
 
     virtual RetStatus Split(std::vector<CopperNodeInterface*>& candidates, size_t node_idx) = 0;
     virtual RetStatus Split(CopperNodeInterface* leaf) = 0;
+
+    virtual CopperNodeInterface* CreateNewNode(VectorID id) = 0;
+
+    virtual RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
+                              std::vector<Vector>& centroids, uint16_t split_into) = 0;
 };
 
 };

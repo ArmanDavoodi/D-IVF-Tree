@@ -65,59 +65,59 @@ struct DIST_ID_PAIR_REVERSE_SIMILARITY : public DIST_ID_PAIR_SIMILARITY_INTERFAC
 
 };
 
-namespace SimpleDivide { /* better naming */
+// namespace SimpleDivide { /* better naming */
 
-inline RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
-                         std::vector<Vector>& centroids, uint16_t split_into,
-                         BufferManagerInterface& _bufmgr) {
+// inline RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
+//                          std::vector<Vector>& centroids, uint16_t split_into,
+//                          BufferManagerInterface& _bufmgr) {
 
-    FatalAssert(nodes.size() > target_node_index, LOG_TAG_CORE, "nodes should contain node.");
-    CopperNodeInterface* target = nodes[target_node_index];
-    FatalAssert(target != nullptr, LOG_TAG_CORE, "node should not be nullptr.");
-    FatalAssert(target->IsFull(), LOG_TAG_CORE, "node should be full.");
-    FatalAssert(split_into > 0, LOG_TAG_CORE, "split_into should be greater than 0.");
+//     FatalAssert(nodes.size() > target_node_index, LOG_TAG_CORE, "nodes should contain node.");
+//     CopperNodeInterface* target = nodes[target_node_index];
+//     FatalAssert(target != nullptr, LOG_TAG_CORE, "node should not be nullptr.");
+//     FatalAssert(target->IsFull(), LOG_TAG_CORE, "node should be full.");
+//     FatalAssert(split_into > 0, LOG_TAG_CORE, "split_into should be greater than 0.");
 
-    RetStatus rs = RetStatus::Success();
+//     RetStatus rs = RetStatus::Success();
 
-    split_into = (target->MaxSize() / split_into < target->MinSize() ? target->MaxSize() / target->MinSize() :
-                                                                       split_into);
-    if (split_into < 2) {
-        split_into = 2;
-    }
+//     split_into = (target->MaxSize() / split_into < target->MinSize() ? target->MaxSize() / target->MinSize() :
+//                                                                        split_into);
+//     if (split_into < 2) {
+//         split_into = 2;
+//     }
 
-    uint16_t num_vec_per_node = target->MaxSize() / split_into;
-    uint16_t num_vec_rem = target->MaxSize() % split_into;
-    nodes.reserve(nodes.size() + split_into - 1);
-    centroids.reserve(split_into);
-    centroids.emplace_back(nullptr);
-    for (uint16_t i = num_vec_per_node + num_vec_rem; i < target->MaxSize(); ++i) {
-        if ((i - num_vec_rem) % num_vec_per_node == 0) {
-            VectorID vector_id = _bufmgr.RecordVector(target->Level());
-            FatalAssert(vector_id.IsValid(), LOG_TAG_CORE, "Failed to record vector.");
-            CopperNodeInterface* new_node = target->CreateSibling(vector_id);
-            FatalAssert(new_node != nullptr, LOG_TAG_CORE, "Failed to create sibling node.");
-            nodes.emplace_back(new_node);
-            _bufmgr.UpdateClusterAddress(vector_id, nodes.back());
-        }
-        VectorUpdate update = target->MigrateLastVectorTo(nodes.back());
-        // todo check update is ok and everything is successfull
+//     uint16_t num_vec_per_node = target->MaxSize() / split_into;
+//     uint16_t num_vec_rem = target->MaxSize() % split_into;
+//     nodes.reserve(nodes.size() + split_into - 1);
+//     centroids.reserve(split_into);
+//     centroids.emplace_back(nullptr);
+//     for (uint16_t i = num_vec_per_node + num_vec_rem; i < target->MaxSize(); ++i) {
+//         if ((i - num_vec_rem) % num_vec_per_node == 0) {
+//             VectorID vector_id = _bufmgr.RecordVector(target->Level());
+//             FatalAssert(vector_id.IsValid(), LOG_TAG_CORE, "Failed to record vector.");
+//             CopperNodeInterface* new_node = target->CreateSibling(vector_id);
+//             FatalAssert(new_node != nullptr, LOG_TAG_CORE, "Failed to create sibling node.");
+//             nodes.emplace_back(new_node);
+//             _bufmgr.UpdateClusterAddress(vector_id, nodes.back());
+//         }
+//         VectorUpdate update = target->MigrateLastVectorTo(nodes.back());
+//         // todo check update is ok and everything is successfull
 
-        _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
-        _bufmgr.GetNode(update.vector_id)->AssignParent(nodes.back()->CentroidID());
+//         _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
+//         _bufmgr.GetNode(update.vector_id)->AssignParent(nodes.back()->CentroidID());
 
-        if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
-            centroids.emplace_back(nodes.back()->ComputeCurrentCentroid());
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CORE,
-                "Simple Cluster: Created Node " NODE_LOG_FMT, " Centroid:%s",
-                NODE_PTR_LOG(nodes.back()), centroids.back().ToString(target->VectorDimention()).ToCStr());
-        }
-    }
-    centroids[0] = target->ComputeCurrentCentroid();
+//         if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
+//             centroids.emplace_back(nodes.back()->ComputeCurrentCentroid());
+//             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CORE,
+//                 "Simple Cluster: Created Node " NODE_LOG_FMT, " Centroid:%s",
+//                 NODE_PTR_LOG(nodes.back()), centroids.back().ToString(target->VectorDimention()).ToCStr());
+//         }
+//     }
+//     centroids[0] = target->ComputeCurrentCentroid();
 
-    return rs;
-}
+//     return rs;
+// }
 
-};
+// };
 
 };
 

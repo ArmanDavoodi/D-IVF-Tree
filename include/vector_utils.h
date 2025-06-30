@@ -10,6 +10,10 @@ namespace copper {
 struct VectorUpdate {
     VectorID vector_id;
     Address vector_data;
+
+    inline bool IsValid() const {
+        return vector_id.IsValid() && (vector_data != INVALID_ADDRESS);
+    }
 };
 
 class Vector {
@@ -212,24 +216,20 @@ struct ConstVectorPair {
 
 struct VectorSetHeader {
     uint16_t _size;
-    uint16_t _cap;
-    uint16_t _dim;
+    const uint16_t _cap;
+    const uint16_t _dim;
     // DataType _vtype;
 };
 
 class VectorSet {
 public:
-    VectorSet(uint16_t dimention, uint16_t capacity) = delete;
     VectorSet(const VectorSet& other) = delete;
     VectorSet(VectorSet&& other) = delete;
     ~VectorSet() = default;
 
-    inline void Init(uint16_t dimention, uint16_t capacity) {
-        FatalAssert(dimention > 0, LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with dimentiom of 0.");
-        FatalAssert(capacity > 0, LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with capacity of 0.");
-        _header._size = 0;
-        _header._cap = capacity;
-        _header._dim = dimention;
+    VectorSet(uint16_t dimention, uint16_t capacity) : _header({0, capacity, dimention}) {
+        FatalAssert(_header._dim > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with dimentiom of 0.");
+        FatalAssert(_header._cap > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with capacity of 0.");
         memset(_data, 0, ((sizeof(VTYPE) * _header._dim) + sizeof(VectorID)) * _header._cap);
     }
 
@@ -400,7 +400,7 @@ public:
         return _header._dim;
     }
 
-    String ToString() {
+    String ToString() const {
         String str = "<Vectors: [";
         for (uint16_t i = 0; i < _header._size; ++i) {
             str += GetVector(i).ToString(_header._dim);
