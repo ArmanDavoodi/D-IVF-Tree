@@ -15,7 +15,7 @@ struct CopperCoreAttributes {
 };
 
 struct CopperNodeAttributes {
-    CopperCoreAttributes& core;
+    CopperCoreAttributes core;
     uint16_t min_size;
     uint16_t max_size;
 };
@@ -83,7 +83,7 @@ public:
     virtual DIST_ID_PAIR_SIMILARITY_INTERFACE* GetSimilarityComparator(bool reverese = false) const = 0;
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
-    virtual size_t Bytes() const = 0;
+    virtual size_t Bytes() const = 0; /* return sizeof(Node) - sizeof(char[1]) + sizeof(VTYPE) * cap * dim -> todo: what about allignment?*/
     virtual CopperNodeInterface* CreateSibling(VectorID id) const = 0;
 
     virtual String BucketToString() const = 0;

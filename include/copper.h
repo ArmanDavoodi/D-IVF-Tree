@@ -38,9 +38,30 @@
 
 namespace copper {
 
+struct CopperNodeHeaderData {
+    VectorID _centroid_id;
+    VectorID _parent_id;
+    ClusteringType _clusteringAlg;
+    DistanceType _distanceAlg;
+    uint16_t _min_size;
+    VectorSetHeader _bucket;
+};
+
+struct CopperNodeData {
+    VectorID _centroid_id;
+    VectorID _parent_id;
+    ClusteringType _clusteringAlg;
+    DistanceType _distanceAlg;
+    uint16_t _min_size;
+    VectorSet _bucket;
+};
+
+static_assert((sizeof(CopperNodeHeaderData) == sizeof(CopperNodeData)) ||
+              ((sizeof(CopperNodeHeaderData) + sizeof(char[1])) == sizeof(CopperNodeData)));
+
 class CopperNode : public CopperNodeInterface {
 public:
-    CopperNode() = delete;
+    CopperNode(VectorID id, CopperNodeAttributes attr) {}
     ~CopperNode() = default;
 
     RetStatus Init(VectorID id, CopperNodeAttributes attr) {
@@ -226,19 +247,37 @@ public:
         return _bucket.to_string();
     }
 
-protected:
-    VectorID _centroid_id;
-    VectorID _parent_id;
-    ClusteringType _clusteringAlg;
-    DistanceType _distanceAlg;
-    uint16_t _min_size;
-    VectorSet _bucket;
+    inline size_t Bytes() const override {
+        return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _data._bucket.Dimension() * _data._bucket.Capacity();
+    }
 
+    inline CopperNodeInterface* CreateSibling(VectorID id) const override {
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
+        FatalAssert(id._level == _data._centroid_id._level, LOG_TAG_COPPER_NODE, "Mismatch level. selfID="
+                    VECTORID_LOG_FMT ", newSiblingID=" VECTORID_LOG_FMT, VECTORID_LOG(_data._centroid_id),
+                    VECTORID_LOG(id));
+
+        CopperNode* sibling = static_cast<CopperNode*>(malloc(Bytes()));
+        CHECK_NOT_NULLPTR(sibling, LOG_TAG_COPPER_NODE);
+
+        CopperNodeAttributes attr;
+        attr.core.clusteringAlg = _data._clusteringAlg;
+        attr.core.distanceAlg = _data._distanceAlg;
+        attr.core.dimention = _data._bucket.Dimension();
+        attr.max_size = _data._bucket.Capacity();
+        attr.min_size = _data._min_size;
+
+        new (sibling) CopperNode(id, attr);
+        return sibling;
+    }
+
+protected:
+    CopperNodeData _data;
 // friend class VectorIndex;
 TESTABLE;
 };
 
-class VectorIndex {
+class VectorIndex : public VectorIndexInterface {
 public:
 
     RetStatus Init() {
