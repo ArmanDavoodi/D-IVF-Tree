@@ -7,9 +7,9 @@
 namespace copper {
 
 struct CopperCoreAttributes {
-    DataType vtype;
+    // DataType vtype;
     uint16_t dimention;
-    DataType dtype;
+    // DataType dtype;
     ClusteringType clusteringAlg;
     DistanceType distanceAlg;
 };
@@ -20,55 +20,81 @@ struct CopperNodeAttributes {
     uint16_t max_size;
 };
 
+struct CopperAttributes {
+    CopperCoreAttributes core;
+    uint16_t leaf_min_size;
+    uint16_t leaf_max_size;
+    uint16_t internal_min_size;
+    uint16_t internal_max_size;
+};
+
+#define CHECK_CORE_ATTRIBUTES(attr, tag) \
+    FatalAssert((attr).core.dimention > 0, (tag), "Dimention must be greater than 0."); \
+    FatalAssert(IsValid((attr).core.clusteringAlg), (tag), "Clustering algorithm is invalid."); \
+    FatalAssert(IsValid((attr).core.distanceAlg), (tag), "Distance algorithm is invalid.")
+
+#define CHECK_MIN_MAX_SIZE(min_size, max_size, tag) \
+    FatalAssert((min_size) > 0, (tag), "Min size must be greater than 0."); \
+    FatalAssert(((max_size) / 2) >= (min_size), (tag), \
+                "Max size must be at least twice the min size. Min size: %hu, Max size: %hu", \
+                (min_size), (max_size))
+
+#define CHECK_NODE_ATTRIBUTES(attr, tag) \
+    CHECK_CORE_ATTRIBUTES(attr, tag); \
+    CHECK_MIN_MAX_SIZE(attr.min_size, attr.max_size, tag)
+
+#define CHECK_COPPER_ATTRIBUTES(attr, tag) \
+    CHECK_CORE_ATTRIBUTES(attr.core, tag); \
+    CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
+    CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
+
 class CopperNodeInterface {
 public:
-
     virtual RetStatus Init(VectorID id, CopperNodeAttributes attr) = 0;
     virtual RetStatus Destroy() = 0;
 
     virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
     virtual Address Insert(const Vector& vec, VectorID vec_id) = 0;
-
     // virtual RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector& swapped_vec) = 0;
-
     virtual VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) = 0;
 
     virtual RetStatus Search(const Vector& query, size_t k,
-                             std::vector<std::pair<VectorID, void>>& neighbours) = 0;
-
-    // virtual VectorID Find_Nearest(const Vector& query) = 0;
-
-    virtual uint16_t Size() const = 0;
+                             std::vector<std::pair<VectorID, DTYPE>>& neighbours) = 0;
 
     virtual VectorID CentroidID() const = 0;
-
     virtual VectorID ParentID() const = 0;
-
-    virtual bool IsLeaf() const = 0;
+    virtual uint16_t Size() const = 0;
 
     virtual bool IsFull() const = 0;
-
     virtual bool IsAlmostEmpty() const = 0;
-
-    virtual uint8_t Level() const = 0;
-
     virtual bool Contains(VectorID id) const = 0;
 
+    virtual bool IsLeaf() const = 0;
+    virtual uint8_t Level() const = 0;
+
     virtual Vector ComputeCurrentCentroid() const = 0;
+
+    virtual uint16_t MinSize() const = 0;
+    virtual uint16_t MaxSize() const = 0;
+    virtual uint16_t VectorDimention() const = 0;
+
+    /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
+    virtual DIST_ID_PAIR_SIMILARITY_INTERFACE* GetSimilarityComparator(bool reverese = false) const = 0;
+    virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
+
+    virtual size_t Bytes() const = 0;
+    virtual CopperNodeInterface* CreateSibling(VectorID id) const = 0;
 
     virtual String BucketToString() const = 0;
 };
 
 class VectorIndexInterface {
 public:
-
     virtual RetStatus Init(CopperCoreAttributes attr) = 0;
-
     virtual RetStatus Shutdown() = 0;
 
     virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) = 0;
-
     virtual RetStatus Delete(VectorID vec_id) = 0;
 
     virtual RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
@@ -79,9 +105,6 @@ public:
     virtual size_t Size() const = 0;
 
 protected:
-
-    // virtual Leaf_Node* Find_Leaf(const Vector& query) = 0;
-
     virtual RetStatus SearchNodes(const Vector& query,
                                   const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
                                   std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) = 0;
@@ -95,7 +118,6 @@ protected:
                                        const Vector& vec) = 0;
 
     virtual RetStatus Split(std::vector<CopperNodeInterface*>& candidates, size_t node_idx) = 0;
-
     virtual RetStatus Split(CopperNodeInterface* leaf) = 0;
 };
 

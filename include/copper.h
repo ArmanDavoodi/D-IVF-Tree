@@ -6,6 +6,8 @@
 #include "buffer.h"
 #include "core.h"
 
+#include "interface/copper.h"
+
 #include <algorithm>
 
 // Todo: better logs and asserts -> style: <Function name>(self data(a=?), input data): msg, additonal variables if needed
@@ -36,69 +38,34 @@
 
 namespace copper {
 
-template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
-class CopperNode {
-static_assert(_MIN_SIZE > 0);
-static_assert(_MAX_SIZE > _MIN_SIZE);
-static_assert(_MAX_SIZE / 2 >= _MIN_SIZE);
-static_assert(_DIM > 0);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const std::pair<VectorID, DIST_TYPE>& a,
-             const std::pair<VectorID, DIST_TYPE>& b) {
-        { core.More_Similar_Comp()(a, b) } -> std::same_as<bool>;
-        { core.Less_Similar_Comp()(a, b) } -> std::same_as<bool>;
-    },
-    "_CORE must have a More_Similar_Comp() and Less_Similar_Comp() method returning a callable object accepting"
-        "(const std::pair<VectorID, DIST_TYPE>&, const std::pair<VectorID, DIST_TYPE>&) and returning bool"
-);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) {
-        { core.Distance(a, b) } -> std::same_as<DIST_TYPE>;
-    },
-    "_CORE must have a Distance(const Vector<T, _DIM>&, const Vector<T, _DIM>&) method returning DIST_TYPE"
-);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const DIST_TYPE& a, const DIST_TYPE& b) {
-        { core.More_Similar(a, b) } -> std::same_as<bool>;
-    },
-    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
-        " is less than the second one."
-);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const T* vectors, size_t size) {
-        { core.Compute_Centroid(vectors, size) } -> std::same_as<Vector<T, _DIM>>;
-    },
-    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
-        " is less than the second one."
-);
-
+class CopperNode : public CopperNodeInterface {
 public:
-    static constexpr uint16_t _DIM_ = _DIM;
-    static constexpr uint16_t _MIN_SIZE_ = _MIN_SIZE;
-    static constexpr uint16_t _MAX_SIZE_ = _MAX_SIZE;
+    CopperNode() = delete;
+    ~CopperNode() = default;
 
-    CopperNode(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
-        FatalAssert(id.Is_Valid(), LOG_TAG_CopperNode, "CopperNode(id = " VECTORID_LOG_FMT "): "
-                    "cannot create node with invalid id", VECTORID_LOG(id));
-        FatalAssert(id.Is_Centroid(), LOG_TAG_CopperNode, "CopperNode(" VECTORID_LOG_FMT "): non-centroid input id",
-                    VECTORID_LOG(id));
+    RetStatus Init(VectorID id, CopperNodeAttributes attr) {
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
+        CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_COPPER_NODE);
+        CHECK_NODE_ATTRIBUTES(attr, LOG_TAG_COPPER_NODE);
+
+        _centroid_id = id;
+        _parent_id = INVALID_VECTOR_ID;
+        _clusteringAlg = attr.core.clusteringAlg;
+        _distanceAlg = attr.core.distanceAlg;
+        _min_size = attr.min_size;
+        _bucket.Init(attr.core.dimention, attr.max_size);
     }
 
-    ~CopperNode() {
-    }
+    RetStatus Destroy() {
+        _centroid_id = INVALID_VECTOR_ID;
+        _parent_id = INVALID_VECTOR_ID;
+    };
 
-    inline RetStatus Assign_Parent(VectorID parent_id) {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Assign_Parent(self = " NODE_LOG_FMT
-                    ", parent_id = " VECTORID_LOG_FMT "): Node does not have a valid centroid.", NODE_PTR_LOG(this, false),
-                    VECTORID_LOG(parent_id));
-        FatalAssert(_centroid_id.Is_Centroid(), LOG_TAG_CopperNode, "Assign_Parent(self = " NODE_LOG_FMT
-                    ", parent_id = " VECTORID_LOG_FMT "): Node is not a centroid.", NODE_PTR_LOG(this, false),
-                    VECTORID_LOG(parent_id));
-        FatalAssert(parent_id.Is_Valid(), LOG_TAG_CopperNode, "Assign_Parent(self = " NODE_LOG_FMT
-                    ", parent_id = " VECTORID_LOG_FMT "): Cannot assign an invalid id to parent.", NODE_PTR_LOG(this, false),
-                    VECTORID_LOG(parent_id));
-        FatalAssert(parent_id._level == _centroid_id._level + 1, LOG_TAG_CopperNode, "Assign_Parent(self = " NODE_LOG_FMT
+    RetStatus AssignParent(VectorID parent_id) {
+        CHECK_VECTORID_IS_VALID(_centroid_id, LOG_TAG_COPPER_NODE);
+        CHECK_VECTORID_IS_CENTROID(_centroid_id, LOG_TAG_COPPER_NODE);
+        CHECK_VECTORID_IS_VALID(parent_id, LOG_TAG_COPPER_NODE);
+        FatalAssert(parent_id._level == _centroid_id._level + 1, LOG_TAG_COPPER_NODE, "Assign_Parent(self = " NODE_LOG_FMT
             ", parent_id = " VECTORID_LOG_FMT "): Level mismatch between parent and self.", NODE_PTR_LOG(this, false),
             VECTORID_LOG(parent_id));
 
@@ -106,71 +73,71 @@ public:
         return RetStatus::Success();
     }
 
-    inline Address Insert(const Vector<T, _DIM>& vec, VectorID vec_id) {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
-        FatalAssert(_centroid_id.Is_Centroid(), LOG_TAG_CopperNode, "Node with id %lu is not a centroid.", _centroid_id._id);
-        FatalAssert(_bucket.Size() < _MAX_SIZE, LOG_TAG_CopperNode,
+    Address Insert(const Vector<T, _DIM>& vec, VectorID vec_id) {
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+        FatalAssert(_centroid_id.Is_Centroid(), LOG_TAG_COPPER_NODE, "Node with id %lu is not a centroid.", _centroid_id._id);
+        FatalAssert(_bucket.Size() < _MAX_SIZE, LOG_TAG_COPPER_NODE,
                     "Node is full: size=%hu, _MAX_SIZE=%hu", _bucket.Size(), _MAX_SIZE);
-        FatalAssert(vec_id.Is_Valid(), LOG_TAG_CopperNode, "Cannot insert vector with invalid id into "
+        FatalAssert(vec_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Cannot insert vector with invalid id into "
                     "the bucket with id %lu.", _centroid_id._id);
-        FatalAssert(vec_id._level == _centroid_id._level - 1, LOG_TAG_CopperNode, "Level mismatch! "
+        FatalAssert(vec_id._level == _centroid_id._level - 1, LOG_TAG_COPPER_NODE, "Level mismatch! "
             "input vector: (id: %lu, level: %lu), centroid vector: (id: %lu, level: %lu)"
             , vec_id._id, vec_id._level, _centroid_id._id, _centroid_id._level);
-        FatalAssert(vec.Is_Valid(), LOG_TAG_CopperNode, "Cannot insert invalid vector %lu into the bucket with id %lu.",
+        FatalAssert(vec.Is_Valid(), LOG_TAG_COPPER_NODE, "Cannot insert invalid vector %lu into the bucket with id %lu.",
                     vec_id._id, _centroid_id._id);
         Address addr = _bucket.Insert(vec, vec_id);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CopperNode,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE,
                  "Insert: Node-Bucket=%s, Inserted VectorID=" VECTORID_LOG_FMT ", Vector=%s",
                  _bucket.to_string().c_str(), VECTORID_LOG(vec_id), vec.to_string().c_str());
         return addr;
     }
 
-    // inline RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector<T, _DIM>& swapped_vec) {
-    //     FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
-    //     FatalAssert(_bucket.Size() > _MIN_SIZE, LOG_TAG_CopperNode,
+    // RetStatus Delete(VectorID vec_id, VectorID& swapped_vec_id, Vector<T, _DIM>& swapped_vec) {
+    //     FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+    //     FatalAssert(_bucket.Size() > _MIN_SIZE, LOG_TAG_COPPER_NODE,
     //                 "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
 
     //     _bucket.Delete(vec_id, swapped_vec_id, swapped_vec); // delete now returns an update instead
     //     return RetStatus::Success();
     // }
 
-    inline VectorUpdate MigrateLastVectorTo(CopperNode<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
-        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_CopperNode,
+    VectorUpdate MigrateLastVectorTo(CopperNode<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
             "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
-        FatalAssert(_dest != nullptr, LOG_TAG_CopperNode, "destination node cannot be null");
-        FatalAssert(_dest->_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "destination node cannot have invalid id");
-        FatalAssert(_dest->Level() == _centroid_id._level, LOG_TAG_CopperNode, "Level mismatch! "
+        FatalAssert(_dest != nullptr, LOG_TAG_COPPER_NODE, "destination node cannot be null");
+        FatalAssert(_dest->_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "destination node cannot have invalid id");
+        FatalAssert(_dest->Level() == _centroid_id._level, LOG_TAG_COPPER_NODE, "Level mismatch! "
                    "_dest = (id: %lu, level: %lu), self = (id: %lu, level: %lu)",
                    _dest->_centroid_id._id, _dest->_centroid_id._level, _centroid_id._id, _centroid_id._level);
 
         VectorUpdate update;
         update.vector_id = _bucket.Get_Last_VectorID();
-        FatalAssert(update.vector_id.Is_Valid(), LOG_TAG_CopperNode, "invalid vector id in bucket with id %lu.",
+        FatalAssert(update.vector_id.Is_Valid(), LOG_TAG_COPPER_NODE, "invalid vector id in bucket with id %lu.",
                     _centroid_id._id);
         const Vector<T, _DIM> &v = _bucket.Get_Last_Vector();
-        FatalAssert(v.Is_Valid(), LOG_TAG_CopperNode, "bucket's last vector is invalid. id=%lu", _centroid_id._id);
+        FatalAssert(v.Is_Valid(), LOG_TAG_COPPER_NODE, "bucket's last vector is invalid. id=%lu", _centroid_id._id);
         update.vector_data = _dest->Insert(std::move(v), update.vector_id);
-        FatalAssert(update.vector_data != INVALID_ADDRESS, LOG_TAG_CopperNode,
+        FatalAssert(update.vector_data != INVALID_ADDRESS, LOG_TAG_COPPER_NODE,
                     "bucket's last vector is invalid. id=%lu", _centroid_id._id);
         _bucket.Delete_Last();
         return update;
     }
 
     /* Do not make the function const or we have to use copy constructor each time we use operator[] on bucket */
-    inline RetStatus Search(const Vector<T, _DIM>& query, size_t k,
+    RetStatus Search(const Vector<T, _DIM>& query, size_t k,
                             std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours) {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
-        FatalAssert(k > 0, LOG_TAG_CopperNode, "Number of neighbours should not be 0");
-        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_CopperNode,
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+        FatalAssert(k > 0, LOG_TAG_COPPER_NODE, "Number of neighbours should not be 0");
+        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
             "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
-        FatalAssert(_bucket.Size() <= _MAX_SIZE, LOG_TAG_CopperNode,
+        FatalAssert(_bucket.Size() <= _MAX_SIZE, LOG_TAG_COPPER_NODE,
             "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
 
-        FatalAssert(neighbours.size() <= k, LOG_TAG_CopperNode,
+        FatalAssert(neighbours.size() <= k, LOG_TAG_COPPER_NODE,
             "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CopperNode,
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE,
                  "Search: Node-Bucket=%s", _bucket.to_string().c_str());
         PRINT_VECTOR_PAIR_BATCH(neighbours, "Search: Neighbours before search");
 
@@ -186,17 +153,17 @@ public:
         }
         PRINT_VECTOR_PAIR_BATCH(neighbours, "Search: Neighbours after search");
 
-        FatalAssert(neighbours.size() <= k, LOG_TAG_CopperNode,
+        FatalAssert(neighbours.size() <= k, LOG_TAG_COPPER_NODE,
             "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
         return RetStatus::Success();
     }
 
-    // inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
-    //     FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
-    //     FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_CopperNode,
+    // VectorID Find_Nearest(const Vector<T, _DIM>& query) {
+    //     FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+    //     FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE,
     //         "Node does not have enough elements: size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
-    //     FatalAssert(_bucket.Size() <= _MAX_SIZE, LOG_TAG_CopperNode,
+    //     FatalAssert(_bucket.Size() <= _MAX_SIZE, LOG_TAG_COPPER_NODE,
     //         "Node has too many elements: size=%hu, _MAX_SIZE=%hu.", _bucket.Size(), _MAX_SIZE);
 
     //     VectorPair<T, _DIM> best_vec = _bucket[0];
@@ -214,119 +181,67 @@ public:
     //     return best_vec.id;
     // }
 
-    inline uint16_t Size() const {
+    uint16_t Size() const {
         return _bucket.Size();
     }
 
-    inline VectorID CentroidID() const {
+    VectorID CentroidID() const {
         return _centroid_id;
     }
 
-    inline VectorID ParentID() const {
+    VectorID ParentID() const {
         return _parent_id;
     }
 
-    inline bool Is_Leaf() const {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
+    bool Is_Leaf() const {
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
         return _centroid_id.Is_Leaf();
     }
 
-    inline bool Is_Full() const {
+    bool Is_Full() const {
         return _bucket.Size() >= _MAX_SIZE;
     }
 
-    inline bool Is_Almost_Empty() const {
+    bool Is_Almost_Empty() const {
         return _bucket.Size() <= _MIN_SIZE;
     }
 
-    inline uint8_t Level() const {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
+    uint8_t Level() const {
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
         return _centroid_id._level;
     }
 
-    inline bool Contains(VectorID id) const {
+    bool Contains(VectorID id) const {
         return _bucket.Contains(id);
     }
 
-    inline Vector<T, _DIM> Compute_Current_Centroid() const {
-        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_CopperNode, "Node does not have a valid centroid.");
-        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_CopperNode, "Node does not have enough elements. "
+    Vector<T, _DIM> Compute_Current_Centroid() const {
+        FatalAssert(_centroid_id.Is_Valid(), LOG_TAG_COPPER_NODE, "Node does not have a valid centroid.");
+        FatalAssert(_bucket.Size() >= _MIN_SIZE, LOG_TAG_COPPER_NODE, "Node does not have enough elements. "
                     "size=%hu, _MIN_SIZE=%hu.", _bucket.Size(), _MIN_SIZE);
         return _core.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
     }
 
-    inline String bucket_to_string() const {
+    String bucket_to_string() const {
         return _bucket.to_string();
     }
 
 protected:
-    _CORE<T, _DIM, DIST_TYPE> _core;
-
-    const VectorID _centroid_id;
+    VectorID _centroid_id;
     VectorID _parent_id;
-    VectorSet<T, _DIM, _MAX_SIZE> _bucket;
+    ClusteringType _clusteringAlg;
+    DistanceType _distanceAlg;
+    uint16_t _min_size;
+    VectorSet _bucket;
 
 // friend class VectorIndex;
 TESTABLE;
 };
 
-template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
 class VectorIndex {
-static_assert(KI_MIN > 0);
-static_assert(KI_MAX > KI_MIN);
-static_assert(KI_MAX / 2 >= KI_MIN);
-static_assert(KL_MIN > 0);
-static_assert(KL_MAX > KL_MIN);
-static_assert(KL_MAX / 2 >= KL_MIN);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const std::pair<VectorID, DIST_TYPE>& a,
-             const std::pair<VectorID, DIST_TYPE>& b) {
-        { core.More_Similar_Comp()(a, b) } -> std::same_as<bool>;
-        { core.Less_Similar_Comp()(a, b) } -> std::same_as<bool>;
-    },
-    "_CORE must have a More_Similar_Comp() and Less_Similar_Comp() method returning a callable object accepting"
-        "(const std::pair<VectorID, DIST_TYPE>&, const std::pair<VectorID, DIST_TYPE>&) and returning bool"
-);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const Vector<T, _DIM>& a, const Vector<T, _DIM>& b) {
-        { core.Distance(a, b) } -> std::same_as<DIST_TYPE>;
-    },
-    "_CORE must have a Distance(const Vector<T, _DIM>&, const Vector<T, _DIM>&) method returning DIST_TYPE"
-);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const DIST_TYPE& a, const DIST_TYPE& b) {
-        { core.More_Similar(a, b) } -> std::same_as<bool>;
-    },
-    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
-        " is less than the second one."
-);
-static_assert(
-    requires(const _CORE<T, _DIM, DIST_TYPE>& core, const T* vectors, size_t size) {
-        { core.Compute_Centroid(vectors, size) } -> std::same_as<Vector<T, _DIM>>;
-    },
-    "_CORE must have a More_Similar(const DIST_TYPE&, const DIST_TYPE&) method returning true if the first distance"
-        " is less than the second one."
-);
-static_assert(
-    requires(
-        const _CORE<T, _DIM, DIST_TYPE>& core,
-        std::vector<CopperNode<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE>*>& inodes,
-        std::vector<CopperNode<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE>*>& lnodes,
-        size_t node_idx, uint16_t _split_leaf,
-        std::vector<Vector<T, _DIM>>& centroids,
-        BufferManager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE>& bufmgr
-    ) {
-        { core.Cluster<KI_MIN, KI_MAX>(inodes, node_idx, _split_leaf, centroids, bufmgr) } -> std::same_as<RetStatus>;
-        { core.Cluster<KL_MIN, KL_MAX>(lnodes, node_idx, _split_leaf, centroids, bufmgr) } -> std::same_as<RetStatus>;
-    },
-    "_CORE must have a template function Cluster with two uint16_t template arguments (_K_MIN, _K_MAX) and signature: "
-    "RetStatus Cluster(std::vector<Node<_K_MIN, _K_MAX>*>&, size_t, std::vector<Vector<T, _DIM>>&, BufferManager<T, _DIM, _K_MIN, _K_MAX, _K_MIN, _K_MAX, _CORE<T, _DIM, DIST_TYPE>>&) const"
-);
-
 public:
 
-    inline RetStatus Init() {
+    RetStatus Init() {
         RetStatus rs = RetStatus::Success();
         _bufmgr.Init();
         _root = _bufmgr.Record_Root();
@@ -342,14 +257,14 @@ public:
         return rs;
     }
 
-    inline RetStatus Shutdown() {
+    RetStatus Shutdown() {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
         CLOG(LOG_LEVEL_LOG, LOG_TAG_VectorIndex, "Shutdown Copper Index End: rs=%s", rs.Msg());
         return rs;
     }
 
-    inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id, uint16_t node_per_layer) {
+    RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id, uint16_t node_per_layer) {
         FatalAssert(_root.Is_Valid(), LOG_TAG_VectorIndex, "Invalid root ID.");
         FatalAssert(_root.Is_Centroid(), LOG_TAG_VectorIndex, "Invalid root ID -> root should be a centroid.");
         FatalAssert(vec.Is_Valid(), LOG_TAG_VectorIndex, "Invalid query vector.");
@@ -417,14 +332,14 @@ public:
         return rs;
     }
 
-    inline RetStatus Delete(VectorID vec_id) {
+    RetStatus Delete(VectorID vec_id) {
         FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Delete not implemented");
 
         RetStatus rs = RetStatus::Success();
         return rs;
     }
 
-    inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k,
+    RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k,
                                         uint16_t _internal_k, uint16_t _leaf_k,
                                         std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours,
                                         bool sort = true, bool sort_from_more_similar_to_less = true) {
@@ -481,7 +396,7 @@ public:
         return rs;
     }
 
-    inline size_t Size() const {
+    size_t Size() const {
         return _size;
     }
 
@@ -502,7 +417,7 @@ protected:
     uint16_t _split_leaf;
     uint64_t _levels;
 
-    // inline Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
+    // Leaf_Node* Find_Leaf(const Vector<T, _DIM>& query) {
     //     FatalAssert(_root.Is_Valid(), LOG_TAG_VectorIndex, "Invalid root ID.");
     //     FatalAssert(_root.Is_Centroid(), LOG_TAG_VectorIndex, "Invalid root ID -> root should be a centroid.");
 
@@ -524,7 +439,7 @@ protected:
     // }
 
     template<typename NodeType>
-    inline RetStatus Search_Nodes(const Vector<T, _DIM>& query,
+    RetStatus Search_Nodes(const Vector<T, _DIM>& query,
                                   const std::vector<std::pair<VectorID, DIST_TYPE>>& upper_layer,
                                   std::vector<std::pair<VectorID, DIST_TYPE>>& lower_layer, size_t n) {
         static_assert(std::is_same<NodeType, Internal_Node>::value || std::is_same<NodeType, Leaf_Node>::value,
@@ -575,7 +490,7 @@ protected:
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline VectorID Record_Into(const Vector<T, _DIM>& vec, Node<_K_MIN, _K_MAX>* container_node,
+    VectorID Record_Into(const Vector<T, _DIM>& vec, Node<_K_MIN, _K_MAX>* container_node,
                                 Node<_K_MIN, _K_MAX>* node = nullptr) {
         FatalAssert(container_node != nullptr, LOG_TAG_VectorIndex, "No container node provided.");
         FatalAssert(container_node->CentroidID().Is_Valid(), LOG_TAG_VectorIndex, "container does not have a valid id.");
@@ -606,7 +521,7 @@ protected:
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Expand_Tree(Node<_K_MIN, _K_MAX>* root, const Vector<T, _DIM>& centroid) {
+    RetStatus Expand_Tree(Node<_K_MIN, _K_MAX>* root, const Vector<T, _DIM>& centroid) {
         // todo assert root is not nul and is indeed root and centroid is valid
         RetStatus rs = RetStatus::Success();
         VectorID new_root_id = _bufmgr.Record_Root();
@@ -624,7 +539,7 @@ protected:
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline size_t Find_Closest_Cluster(const std::vector<Node<_K_MIN, _K_MAX>*>& candidates,
+    size_t Find_Closest_Cluster(const std::vector<Node<_K_MIN, _K_MAX>*>& candidates,
                                        const Vector<T, _DIM>& vec) {
         size_t best_idx = 0;
         DIST_TYPE best_dist = _core.Distance(vec, _bufmgr.Get_Vector_By_ID(candidates[0]->_centroid_id));
@@ -643,7 +558,7 @@ protected:
     }
 
     template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Split(std::vector<Node<_K_MIN, _K_MAX>*>& candidates, size_t node_idx) {
+    RetStatus Split(std::vector<Node<_K_MIN, _K_MAX>*>& candidates, size_t node_idx) {
         FatalAssert(candidates.size() > node_idx, LOG_TAG_VectorIndex, "candidates should contain node.");
         Node<_K_MIN, _K_MAX>* node = candidates[node_idx];
         FatalAssert(node != nullptr, LOG_TAG_VectorIndex, "node should not be nullptr.");
@@ -706,7 +621,7 @@ protected:
         return rs;
     }
 
-    inline RetStatus Split(Leaf_Node* leaf) {
+    RetStatus Split(Leaf_Node* leaf) {
         std::vector<Leaf_Node*> candids;
         candids.push_back(leaf);
         return Split<KL_MIN, KL_MAX>(candids, 0);

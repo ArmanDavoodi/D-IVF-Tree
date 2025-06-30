@@ -22,26 +22,22 @@ public:
     Vector() : _data(nullptr), _delete_on_destroy(false) {}
 
     /* Copy Constructors */
-    Vector(const Vector& other, DataType vtype, uint16_t dim) : _data(other.IsValid() ?
-                                                                      malloc(dim * SIZE_OF_TYPE[vtype]) : nullptr),
-                                                                _delete_on_destroy(other.IsValid()) {
-        FatalAssert(copper::IsValid(vtype), LOG_TAG_VECTOR, "Cannot create vector with invalid type. vtype=%d", vtype);
+    Vector(const Vector& other, uint16_t dim) : _data(other.IsValid() ? malloc(dim * sizeof(VTYPE)) : nullptr),
+                                                _delete_on_destroy(other.IsValid()) {
         FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
         FatalAssert(!other.IsValid() || IsValid(), LOG_TAG_VECTOR, "Malloc failed");
         if (IsValid()) {
-            memcpy(_data, other._data, dim * SIZE_OF_TYPE[vtype]);
+            memcpy(_data, other._data, dim * sizeof(VTYPE));
         }
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: other=%p, this=%p, address=%p", &other, this, _data);
     }
 
-    Vector(const void* other, DataType vtype, uint16_t dim) : _data(other != nullptr ?
-                                                                    malloc(dim * SIZE_OF_TYPE[vtype]) : nullptr),
-                                                                _delete_on_destroy(other != nullptr) {
-        FatalAssert(copper::IsValid(vtype), LOG_TAG_VECTOR, "Cannot create vector with invalid type. vtype=%d", vtype);
+    Vector(const void* other, uint16_t dim) : _data(other != nullptr ? malloc(dim * sizeof(VTYPE)) : nullptr),
+                                              _delete_on_destroy(other != nullptr) {
         FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
         FatalAssert((other == nullptr) || IsValid(), LOG_TAG_VECTOR, "Malloc failed");
         if (IsValid()) {
-            memcpy(_data, other, dim * SIZE_OF_TYPE[vtype]);
+            memcpy(_data, other, dim * sizeof(VTYPE));
         }
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: this=%p, address=%p", &other, this, _data);
     }
@@ -92,16 +88,14 @@ public:
         return (_data != nullptr);
     }
 
-    inline void Create(DataType vtype, uint16_t dim) {
+    inline void Create(uint16_t dim) {
         FatalAssert(!(IsValid()), LOG_TAG_VECTOR, "Vector is not invalid.");
         FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
-        FatalAssert(copper::IsValid(vtype), LOG_TAG_VECTOR, "Cannot create vector with invalid type. vtype=%d", vtype);
-        _data = malloc(dim * SIZE_OF_TYPE[vtype]);
+        _data = malloc(dim * sizeof(VTYPE));
         _delete_on_destroy = true;
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Malloc failed");
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimention=%hu, type=%s",
-                                              this, _data, dim, DATA_TYPE_NAME[vtype]);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimention=%hu", this, _data, dim);
     }
 
     inline void Destroy() {
@@ -137,11 +131,11 @@ public:
         _delete_on_destroy = false;
     }
 
-    inline void Copy(const Vector& src, DataType vtype, uint16_t dim) {
+    inline void Copy(const Vector& src, uint16_t dim) {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
         FatalAssert(src.IsValid(), LOG_TAG_VECTOR, "Source Vector is not invalid.");
 
-        memcpy(_data, src._data, dim * SIZE_OF_TYPE[vtype]);
+        memcpy(_data, src._data, dim * sizeof(VTYPE));
     }
 
     inline Address GetData() {
@@ -160,7 +154,7 @@ public:
         return (_data != other._data);
     }
 
-    inline bool Similar(const Vector& other, DataType vtype, uint16_t dim) const {
+    inline bool Similar(const Vector& other, uint16_t dim) const {
         if (*this == other) {
             return true;
         }
@@ -169,28 +163,26 @@ public:
             return false;
         }
 
-        return !(memcmp(_data, other._data, dim * SIZE_OF_TYPE[vtype]));
+        return !(memcmp(_data, other._data, dim * sizeof(VTYPE)));
     }
 
-    template<typename T>
-    inline T& operator[](size_t idx) {
+    inline VTYPE& operator[](size_t idx) {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
-        return (static_cast<T*>(_data))[idx];
+        return (static_cast<VTYPE*>(_data))[idx];
     }
 
-    template<typename T>
-    inline const T& operator[](size_t idx) const {
+    inline const VTYPE& operator[](size_t idx) const {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
-        return (static_cast<const T*>(_data))[idx];
+        return (static_cast<const VTYPE*>(_data))[idx];
     }
 
-    inline String ToString(uint16_t dim, DataType type) const {
+    inline String ToString(uint16_t dim) const {
         if (!(IsValid())) {
             return String("INV");
         }
         String str("(address=%p, linked=%s)<", _data, _delete_on_destroy ? "T" : "F");
         for (uint16_t i = 0; i < dim; ++i) {
-            str += DataToString(_data + i * SIZE_OF_TYPE[type], type) + String((i < (dim - 1)) ? ", " : ">");
+            str += String(VTYPE_FMT, (*this)[i]) + String((i < (dim - 1)) ? ", " : ">");
         }
 
         return str;
@@ -210,18 +202,29 @@ struct VectorPair {
     VectorPair(VectorID vector_id, Vector&& vector_data) : id(vector_id), vec(std::move(vector_data)) {}
 };
 
+struct ConstVectorPair {
+    const VectorID id;
+    const Vector vec;
+
+    ConstVectorPair(VectorID vector_id, const Vector& vector_data) : id(vector_id),
+                                                                     vec(std::move(const_cast<Vector&>(vector_data))) {}
+};
+
 class VectorSet {
 public:
-    VectorSet(DataType vtype, uint16_t dimention, uint16_t capacity) : _size(0), _cap(capacity),
-                                                                       _dim(dimention), _vtype(vtype) {
-        FatalAssert(IsValid(_vtype), LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with invalid vector type."
-                    " vtype=%d", _vtype);
-        FatalAssert(_dim > 0, LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with dimentiom of 0.");
-        FatalAssert(_cap > 0, LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with capacity of 0.");
-        memset(_data, 0, ((SIZE_OF_TYPE[_vtype] * _dim) + sizeof(VectorID)) * _cap);
-    }
+    VectorSet(uint16_t dimention, uint16_t capacity) = delete;
+    VectorSet(const VectorSet& other) = delete;
+    VectorSet(VectorSet&& other) = delete;
+    ~VectorSet() = default;
 
-    ~VectorSet() {}
+    inline void Init(uint16_t dimention, uint16_t capacity) {
+        FatalAssert(dimention > 0, LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with dimentiom of 0.");
+        FatalAssert(capacity > 0, LOG_TAG_VECTOR_SET, "Cannot initialize a VectorSet with capacity of 0.");
+        _size = 0;
+        _cap = capacity;
+        _dim = dimention;
+        memset(_data, 0, ((sizeof(VTYPE) * _dim) + sizeof(VectorID)) * _cap);
+    }
 
     inline Address GetVectors() {
         return _data;
@@ -232,19 +235,19 @@ public:
     }
 
     inline VectorID* GetIDs() {
-        return static_cast<VectorID*>(static_cast<void*>(_data) + SIZE_OF_TYPE[_vtype] * _dim * _cap);
+        return static_cast<VectorID*>(static_cast<void*>(_data) + sizeof(VTYPE) * _dim * _cap);
     }
 
     inline const VectorID* GetIDs() const {
-        return static_cast<const VectorID*>(static_cast<const void*>(_data) + SIZE_OF_TYPE[_vtype] * _dim * _cap);
+        return static_cast<const VectorID*>(static_cast<const void*>(_data) + sizeof(VTYPE) * _dim * _cap);
     }
 
     inline Address Insert(const Vector& new_vector, VectorID id) {
         FatalAssert(new_vector.IsValid(), LOG_TAG_VECTOR_SET, "Cannot insert invalid vector.");
         FatalAssert(_size < _cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
-        Address loc = _data + (_size * _dim * SIZE_OF_TYPE[_vtype]);
-        memcpy(loc, new_vector.GetData(), _dim * SIZE_OF_TYPE[_vtype]);
+        Address loc = _data + (_size * _dim * sizeof(VTYPE));
+        memcpy(loc, new_vector.GetData(), _dim * sizeof(VTYPE));
         GetIDs()[_size] = id;
         ++_size;
         return loc;
@@ -254,8 +257,8 @@ public:
         FatalAssert(_src != nullptr, LOG_TAG_VECTOR_SET, "Cannot insert null vector.");
         FatalAssert(_size < _cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
-        Address loc = _data + (_size * _dim * SIZE_OF_TYPE[_vtype]);
-        memcpy(loc, _src, _dim * SIZE_OF_TYPE[_vtype]);
+        Address loc = _data + (_size * _dim * sizeof(VTYPE));
+        memcpy(loc, _src, _dim * sizeof(VTYPE));
         GetIDs()[_size] = id;
         ++_size;
         return loc;
@@ -296,16 +299,27 @@ public:
         return index;
     }
 
-    /* we cannot use the link constructor for the constant version so we do not declare it. */
     inline Vector GetLastVector() {
         FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        Address loc = _data + ((_size - 1) * _dim * SIZE_OF_TYPE[_vtype]);
+        Address loc = _data + ((_size - 1) * _dim * sizeof(VTYPE));
+        return Vector(loc);
+    }
+
+    inline const Vector GetLastVector() const {
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
+        Address loc = const_cast<Address>(static_cast<ConstAddress>(_data) + ((_size - 1) * _dim * sizeof(VTYPE)));
         return Vector(loc);
     }
 
     inline Vector GetVector(uint16_t idx) {
         FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        Address loc = _data + (idx * _dim * SIZE_OF_TYPE[_vtype]);
+        Address loc = _data + (idx * _dim * sizeof(VTYPE));
+        return Vector(loc);
+    }
+
+    inline const Vector GetVector(uint16_t idx) const {
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
+        Address loc = const_cast<Address>(static_cast<ConstAddress>(_data) + (idx * _dim * sizeof(VTYPE)));
         return Vector(loc);
     }
 
@@ -313,24 +327,17 @@ public:
         return GetVector(GetIndex(id));
     }
 
-    /* we cannot use the link constructor for the constant version so we do not declare it. */
-    // inline const Vector GetVector(uint16_t idx) const {
-    //     FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-    //     return Vector<const T, _dim>((_beg + (idx * _dim)), false);
-    // }
-
-    // inline const Vector<T, _dim> Get_Vector_By_ID(VectorID id) const {
-    //     return Get_Vector(Get_Index(id));
-    // }
+    inline const Vector GetVectorByID(VectorID id) const {
+        return GetVector(GetIndex(id));
+    }
 
     inline VectorPair operator[](uint16_t idx) {
         return VectorPair(GetVectorID(idx), GetVector(idx));
     }
 
-    // inline const VectorPair operator[](uint16_t idx) const {
-    //     return VectorPair(Get_VectorID(idx), _beg + (idx * _dim), false);
-    // }
-
+    inline ConstVectorPair operator[](uint16_t idx) const {
+        return ConstVectorPair(GetVectorID(idx), GetVector(idx));
+    }
 
     /* Not Tested */
     // inline Vector<T, _dim> Get_Vector_Copy(uint16_t idx) const {
@@ -378,10 +385,18 @@ public:
         return _size;
     }
 
+    inline uint16_t Capacity() const {
+        return _cap;
+    }
+
+    inline uint16_t Dimension() const {
+        return _dim;
+    }
+
     String ToString() {
         String str = "<Vectors: [";
         for (uint16_t i = 0; i < _size; ++i) {
-            str += GetVector(i).ToString(_dim, _vtype);
+            str += GetVector(i).ToString(_dim);
             if (i != _size - 1)
                 str += ", ";
         }
@@ -399,7 +414,7 @@ protected:
     uint16_t _size;
     uint16_t _cap;
     uint16_t _dim;
-    DataType _vtype;
+    // DataType _vtype;
     char _data[1];
 
 TESTABLE;

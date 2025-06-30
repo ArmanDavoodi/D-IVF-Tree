@@ -113,7 +113,10 @@ constexpr Address INVALID_ADDRESS = nullptr;
 class CopperNodeInterface;
 class VectorIndexInterface;
 class BufferManagerInterface;
-class VectorSet;
+// class CopperNode;
+// class VectorIndex;
+// class BufferManager;
+// class VectorSet;
 
 enum ClusteringType : int8_t {
     Invalid = -1,
@@ -135,66 +138,100 @@ inline constexpr bool IsValid(DistanceType type) {
     return ((type != DistanceType::Invalid) && (type != DistanceType::NumTypes));
 }
 
-enum DataType : int8_t {
-    Invalid = -1,
-    UInt16,
-    Float,
-    Double,
-    NumTypes
-};
-inline constexpr char* DATA_TYPE_NAME[DataType::NumTypes] = {"uint16", "float", "double"};
-inline constexpr size_t SIZE_OF_TYPE[DataType::NumTypes] = {sizeof(uint16_t), sizeof(float), sizeof(double)};
-inline constexpr bool IsValid(DataType type) {
-    return ((type != DataType::Invalid) && (type != DataType::NumTypes));
-}
+#ifndef VECTOR_TYPE
+#define VECTOR_TYPE uint16_t
+#define VTYPE_FMT "%hu"
+#endif
+#ifndef DISTANCE_TYPE
+#define DISTANCE_TYPE float
+#define DTYPE_FMT "%f"
+#endif
 
-String DataToString(const void* data, DataType type) {
-    if (data == nullptr) {
-        return String("NULL");
-    }
-    switch (type) {
-        case DataType::UInt16: {
-            return String("%hu", *(reinterpret_cast<const uint16_t*>(data)));
-        }
-        case DataType::Float: {
-            return String("%f", *(reinterpret_cast<const float*>(data)));
-        }
-        case DataType::Double: {
-            return String("%lf", *(reinterpret_cast<const double*>(data)));
-        }
-        default:
-            return String("Invalid DataType");
-    }
-}
+typedef VECTOR_TYPE VTYPE;
+typedef DISTANCE_TYPE DTYPE;
+
+// enum DataType : int8_t {
+//     Invalid = -1,
+//     UInt16,
+//     Float,
+//     Double,
+//     NumTypes
+// };
+// inline constexpr char* DATA_TYPE_NAME[DataType::NumTypes] = {"uint16", "float", "double"};
+// inline constexpr size_t SIZE_OF_TYPE[DataType::NumTypes] = {sizeof(uint16_t), sizeof(float), sizeof(double)};
+// inline constexpr bool IsValid(DataType type) {
+//     return ((type != DataType::Invalid) && (type != DataType::NumTypes));
+// }
+
+// String DataToString(const void* data, DataType type) {
+//     if (data == nullptr) {
+//         return String("NULL");
+//     }
+//     switch (type) {
+//         case DataType::UInt16: {
+//             return String("%hu", *(reinterpret_cast<const uint16_t*>(data)));
+//         }
+//         case DataType::Float: {
+//             return String("%f", *(reinterpret_cast<const float*>(data)));
+//         }
+//         case DataType::Double: {
+//             return String("%lf", *(reinterpret_cast<const double*>(data)));
+//         }
+//         default:
+//             return String("Invalid DataType");
+//     }
+// }
 // Todo: Log VectorIndex: VectorIndex(RootID:%s(%lu, %lu, %lu), # levels:lu, # nodes:lu, # vectors:lu, size:lu)
 
+#ifndef PRINT_BUCKET
+#define PRINT_BUCKET false
+#endif
+
 #define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
-#define VECTORID_LOG(vid) (!((vid).Is_Valid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
+#define VECTORID_LOG(vid) (!((vid).IsValid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
 
 #define NODE_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
-// todo remove
-#define NODE_PTR_LOG(node, print_bucket)\
+#define NODE_PTR_LOG(node)\
     (((node) == nullptr) ? "NULL" :\
         (!((node)->CentroidID().IsValid()) ? "INV" : ((node)->CentroidID().IsVector() ? "Non-Centroid" : \
             ((node)->CentroidID().IsLeaf() ? "Leaf" : ((node)->CentroidID().IsInternalNode() ? "Internal" \
                 : "UNDEF"))))),\
-    (((node) == nullptr) ? 0 : std::remove_reference_t<decltype(*(node))>::_MIN_SIZE_),\
-    (((node) == nullptr) ? 0 : std::remove_reference_t<decltype(*(node))>::_MAX_SIZE_),\
+    (((node) == nullptr) ? 0 : (node)->MinSize()),\
+    (((node) == nullptr) ? 0 : (node)->MaxSize()),\
     VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->CentroidID())),\
     (((node) == nullptr) ? 0 : (node)->Size()),\
     VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->ParentID())),\
-    ((print_bucket) ? ((((node) == nullptr)) ? "NULL" : ((node)->BucketToString()).ToCStr()) : "OMITTED")
+    ((PRINT_BUCKET) ? ((((node) == nullptr)) ? "NULL" : ((node)->BucketToString()).ToCStr()) : "OMITTED")
 
 #define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
+#define CHECK_VECTORID_IS_VALID(vid, tag) \
+    FatalAssert((vid).IsValid(), (tag), "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG((vid)))
+#define CHECK_VECTORID_IS_CENTROID(vid, tag) \
+    FatalAssert((vid).IsCentroid(), (tag), "VectorID " VECTORID_LOG_FMT " is not a centroid", VECTORID_LOG((vid)))
+#define CHECK_VECTORID_IS_VECTOR(vid, tag) \
+    FatalAssert((vid).IsVector(), (tag), "VectorID " VECTORID_LOG_FMT " is not a vector", VECTORID_LOG((vid)))
+#define CHECK_VECTORID_IS_LEAF(vid, tag) \
+    FatalAssert((vid).IsLeaf(), (tag), "VectorID " VECTORID_LOG_FMT " is not a leaf", VECTORID_LOG((vid)))
+
+#define CHECK_NODE_IS_LEAF(node, tag) \
+    FatalAssert(((node) != nullptr) && (node)->IsLeaf(), (tag), \
+                "Node is not a leaf: " NODE_LOG_FMT, NODE_PTR_LOG((node)))
+#define CHECK_NODE_IS_INTERNAL(node, tag) \
+    FatalAssert(((node) != nullptr) && !((node)->IsLeaf()), (tag), \
+                "Node is not an internal node: " NODE_LOG_FMT, NODE_PTR_LOG((node)))
+
+#define CHECK_NOT_NULLPTR(ptr, tag) \
+    FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
+
 #ifdef ENABLE_TEST_LOGGING
-#define PRINT_VECTOR_PAIR_BATCH(vector, type, msg) \
+#define PRINT_VECTOR_PAIR_BATCH(vector, msg) \
     do { \
         copper::String str = ""; \
         for (const auto& pair : (vector)) { \
-            str += String(VECTORID_LOG_FMT ", Distance:%lu; ", \
-                          VECTORID_LOG(pair.first), DataToString(&(pair.second), (type))); \
+            str += String(VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "; ", \
+                          VECTORID_LOG(pair.first), pair.second); \
         } \
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "%s: Batch Size: %lu, Vector Pair Batch: %s", \
             (msg), (vector).size(), str.ToCStr()); \
