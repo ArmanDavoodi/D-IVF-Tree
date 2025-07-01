@@ -135,7 +135,7 @@ public:
         _delete_on_destroy = false;
     }
 
-    inline void Copy(const Vector& src, uint16_t dim) {
+    inline void CopyFrom(const Vector& src, uint16_t dim) {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
         FatalAssert(src.IsValid(), LOG_TAG_VECTOR, "Source Vector is not invalid.");
 

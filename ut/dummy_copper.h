@@ -4,7 +4,7 @@
 #include "common.h"
 #include "vector_utils.h"
 
-/* Needs core.h and buffer.h */
+/* Needs distance.h and buffer.h */
 
 namespace copper {
 

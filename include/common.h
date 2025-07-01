@@ -120,10 +120,10 @@ class BufferManagerInterface;
 
 enum ClusteringType : int8_t {
     Invalid,
-    Simple_Divide,
+    SimpleDivide,
     NumTypes
 };
-inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypes + 1] = {"Invalid", "Simple_Divide", "NumTypes"};
+inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypes + 1] = {"Invalid", "SimpleDivide", "NumTypes"};
 inline constexpr bool IsValid(ClusteringType type) {
     return ((type != ClusteringType::Invalid) && (type != ClusteringType::NumTypes));
 }

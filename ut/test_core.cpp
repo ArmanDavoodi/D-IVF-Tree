@@ -1,6 +1,6 @@
 #include "test.h"
 
-#include "core.h"
+#include "distance.h"
 #include "buffer.h"
 #include "dummy_copper.h"
 

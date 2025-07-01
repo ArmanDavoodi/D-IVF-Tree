@@ -84,7 +84,6 @@ public:
 
     Vector GetVector(VectorID id) {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_VECTOR(id, LOG_TAG_BUFFER);
         FatalAssert(directory.size() > id._level, LOG_TAG_BUFFER, "Level is out of bounds. " VECTORID_LOG_FMT
                     ", max_level=%lu", VECTORID_LOG(id), directory.size());
         FatalAssert(directory[id._level].size() > id._val, LOG_TAG_BUFFER, "Val is out of bounds. " VECTORID_LOG_FMT

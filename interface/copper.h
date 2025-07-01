@@ -108,6 +108,9 @@ public:
                                                     bool sort = true, bool sort_from_more_similar_to_less = true) = 0;
 
     virtual size_t Size() const = 0;
+
+    virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
+    virtual size_t Bytes(bool is_internal_node) const = 0;
 protected:
     inline static DIST_ID_PAIR_SIMILARITY_INTERFACE* GetDistancePairSimilarityComparator(DistanceType distanceAlg,
                                                                                          bool reverse) {
