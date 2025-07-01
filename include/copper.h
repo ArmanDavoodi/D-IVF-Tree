@@ -706,10 +706,10 @@ protected:
 
     inline RetStatus SimpleDvideClustering(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
                                            std::vector<Vector>& centroids, uint16_t split_into) {
-        FatalAssert(nodes.size() > target_node_index, LOG_TAG_CORE, "nodes should contain node.");
+        FatalAssert(nodes.size() > target_node_index, LOG_TAG_CLUSTERING, "nodes should contain node.");
         CopperNodeInterface* target = nodes[target_node_index];
-        CHECK_NODE_IS_VALID(target, LOG_TAG_CORE, true);
-        FatalAssert(split_into > 0, LOG_TAG_CORE, "split_into should be greater than 0.");
+        CHECK_NODE_IS_VALID(target, LOG_TAG_CLUSTERING, true);
+        FatalAssert(split_into > 0, LOG_TAG_CLUSTERING, "split_into should be greater than 0.");
 
         RetStatus rs = RetStatus::Success();
 
@@ -727,9 +727,9 @@ protected:
         for (uint16_t i = num_vec_per_node + num_vec_rem; i < target->MaxSize(); ++i) {
             if ((i - num_vec_rem) % num_vec_per_node == 0) {
                 VectorID vector_id = _bufmgr.RecordVector(target->Level());
-                FatalAssert(vector_id.IsValid(), LOG_TAG_CORE, "Failed to record vector.");
+                FatalAssert(vector_id.IsValid(), LOG_TAG_CLUSTERING, "Failed to record vector.");
                 CopperNodeInterface* new_node = CreateNewNode(vector_id);
-                FatalAssert(new_node != nullptr, LOG_TAG_CORE, "Failed to create sibling node.");
+                FatalAssert(new_node != nullptr, LOG_TAG_CLUSTERING, "Failed to create sibling node.");
                 nodes.emplace_back(new_node);
                 _bufmgr.UpdateClusterAddress(vector_id, nodes.back());
             }
@@ -741,7 +741,7 @@ protected:
 
             if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
                 centroids.emplace_back(nodes.back()->ComputeCurrentCentroid());
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CORE,
+                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CLUSTERING,
                     "Simple Cluster: Created Node " NODE_LOG_FMT, " Centroid:%s",
                     NODE_PTR_LOG(nodes.back()), centroids.back().ToString(target->VectorDimention()).ToCStr());
             }
