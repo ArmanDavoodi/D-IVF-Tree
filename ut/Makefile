@@ -13,7 +13,7 @@ BIN_DIR := $(BUILD_DIR)/bin
 SRC_DIR = $(ROOT)/ut
 
 CXX = g++
-CXXFLAGS = -std=c++20 -I$(COPPER_PATH) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic
+CXXFLAGS = -std=c++20 -I$(COPPER_PATH) -I$(ROOT) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic
 
 # Add custom defines if they are provided
 ifneq ($(filter -D%,$(DEFINES)),)

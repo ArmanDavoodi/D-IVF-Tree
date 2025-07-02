@@ -55,6 +55,46 @@ struct CopperAttributes {
     CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
     CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
 
+
+struct CopperNodeHeaderData {
+    VectorID _centroid_id;
+    VectorID _parent_id;
+    ClusteringType _clusteringAlg;
+    DistanceType _distanceAlg;
+    uint16_t _min_size;
+    DIST_ID_PAIR_SIMILARITY_INTERFACE* _similarityComparator;
+    DIST_ID_PAIR_SIMILARITY_INTERFACE* _reverseSimilarityComparator;
+    VectorSetHeader _bucket;
+};
+
+struct CopperNodeData {
+    CopperNodeData(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
+        _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
+        _bucket(attr.core.dimention, attr.max_size),
+        _similarityComparator(attr.similarityComparator),
+        _reverseSimilarityComparator(attr.reverseSimilarityComparator) {
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
+        CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_COPPER_NODE);
+        CHECK_NODE_ATTRIBUTES(attr, LOG_TAG_COPPER_NODE);
+    }
+
+    inline size_t Bytes() const {
+        return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _bucket.Dimension() * _bucket.Capacity();
+    }
+
+    const VectorID _centroid_id;
+    VectorID _parent_id;
+    const ClusteringType _clusteringAlg;
+    const DistanceType _distanceAlg;
+    const uint16_t _min_size;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    VectorSet _bucket;
+};
+
+static_assert((sizeof(CopperNodeHeaderData) == sizeof(CopperNodeData)) ||
+              ((sizeof(CopperNodeHeaderData) + sizeof(char[1])) == sizeof(CopperNodeData)));
+
 class CopperNodeInterface {
 public:
     CopperNodeInterface() = default;

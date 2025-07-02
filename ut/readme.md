@@ -16,7 +16,7 @@ To rebuild the tests without cleaning the build and out directories, use fbuild_
     * LOG_TAG_NOT_IMPLEMENTED     0b00010
     * LOG_TAG_TEST                0b00100
     * LOG_TAG_BASIC               0b01000
-    * LOG_TAG_CopperNode         0b10000
+    * LOG_TAG_COPPER_NODE         0b10000
     * LOG_TAG_ANY                 0b11111
 
 ## Test Arguments:

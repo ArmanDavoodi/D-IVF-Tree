@@ -1,6 +1,6 @@
 #include "test.h"
 
-// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_CopperNode
+// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
 
 namespace UT {
 
@@ -91,7 +91,7 @@ public:
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_CopperNode, "Hello World! This is a copper tag."
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "Hello World! This is a copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG(LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -115,13 +115,13 @@ public:
         CLOG(LOG_LEVEL_ERROR, LOG_TAG_BASIC, "Hello World! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "Hello World! This is a DEBUG with copper tag."
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE, "Hello World! This is a DEBUG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_CopperNode, "Hello World! This is a LOG with copper tag."
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "Hello World! This is a LOG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_WARNING, LOG_TAG_CopperNode, "Hello World! This is a WARNING with copper tag."
+        CLOG(LOG_LEVEL_WARNING, LOG_TAG_COPPER_NODE, "Hello World! This is a WARNING with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_ERROR, LOG_TAG_CopperNode, "Hello World! This is a ERROR with copper tag."
+        CLOG(LOG_LEVEL_ERROR, LOG_TAG_COPPER_NODE, "Hello World! This is a ERROR with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a DEBUG with not implemented tag."
@@ -196,7 +196,7 @@ public:
 
         CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(true)! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if true(true)! This is a copper tag."
+        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if true(true)! This is a copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -205,7 +205,7 @@ public:
 
         CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(false)! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if true(false)! This is a copper tag."
+        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if true(false)! This is a copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -214,7 +214,7 @@ public:
 
         CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(true)! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if false(true)! This is a copper tag."
+        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if false(true)! This is a copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -223,7 +223,7 @@ public:
 
         CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(false)! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if false(false)! This is a copper tag."
+        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if false(false)! This is a copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -247,13 +247,13 @@ public:
         CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if true(true)! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "logged if true(true)! This is a DEBUG with copper tag."
+        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE, "logged if true(true)! This is a DEBUG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if true(true)! This is a LOG with copper tag."
+        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if true(true)! This is a LOG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_CopperNode, "logged if true(true)! This is a WARNING with copper tag."
+        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_COPPER_NODE, "logged if true(true)! This is a WARNING with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_CopperNode, "logged if true(true)! This is a ERROR with copper tag."
+        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_COPPER_NODE, "logged if true(true)! This is a ERROR with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
         CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a DEBUG with not implemented tag."
@@ -283,13 +283,13 @@ public:
         CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if true(false)! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "logged if true(false)! This is a DEBUG with copper tag."
+        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE, "logged if true(false)! This is a DEBUG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if true(false)! This is a LOG with copper tag."
+        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if true(false)! This is a LOG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_CopperNode, "logged if true(false)! This is a WARNING with copper tag."
+        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_COPPER_NODE, "logged if true(false)! This is a WARNING with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_CopperNode, "logged if true(false)! This is a ERROR with copper tag."
+        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_COPPER_NODE, "logged if true(false)! This is a ERROR with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
         CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a DEBUG with not implemented tag."
@@ -320,13 +320,13 @@ public:
         CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if false(true)! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "logged if false(true)! This is a DEBUG with copper tag."
+        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE, "logged if false(true)! This is a DEBUG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if false(true)! This is a LOG with copper tag."
+        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if false(true)! This is a LOG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_CopperNode, "logged if false(true)! This is a WARNING with copper tag."
+        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_COPPER_NODE, "logged if false(true)! This is a WARNING with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_CopperNode, "logged if false(true)! This is a ERROR with copper tag."
+        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_COPPER_NODE, "logged if false(true)! This is a ERROR with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
         CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a DEBUG with not implemented tag."
@@ -356,13 +356,13 @@ public:
         CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if false(false)! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_CopperNode, "logged if false(false)! This is a DEBUG with copper tag."
+        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE, "logged if false(false)! This is a DEBUG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_CopperNode, "logged if false(false)! This is a LOG with copper tag."
+        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_COPPER_NODE, "logged if false(false)! This is a LOG with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_CopperNode, "logged if false(false)! This is a WARNING with copper tag."
+        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_COPPER_NODE, "logged if false(false)! This is a WARNING with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_CopperNode, "logged if false(false)! This is a ERROR with copper tag."
+        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_COPPER_NODE, "logged if false(false)! This is a ERROR with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
         CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a DEBUG with not implemented tag."
@@ -406,7 +406,7 @@ public:
 
         ErrorAssert(true, LOG_TAG_BASIC, "This is a true assert error with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        ErrorAssert(true, LOG_TAG_CopperNode, "This is a true assert error with copper tag."
+        ErrorAssert(true, LOG_TAG_COPPER_NODE, "This is a true assert error with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(true, LOG_TAG_NOT_IMPLEMENTED, "This is a true assert error with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -415,7 +415,7 @@ public:
 
         ErrorAssert(false, LOG_TAG_BASIC, "This is a false assert error with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        ErrorAssert(false, LOG_TAG_CopperNode, "This is a false assert error with copper tag."
+        ErrorAssert(false, LOG_TAG_COPPER_NODE, "This is a false assert error with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(false, LOG_TAG_NOT_IMPLEMENTED, "This is a false assert error with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -432,7 +432,7 @@ public:
 
         FatalAssert(true, LOG_TAG_BASIC, "This is a true fatal assert with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        FatalAssert(true, LOG_TAG_CopperNode, "This is a true fatal assert with copper tag."
+        FatalAssert(true, LOG_TAG_COPPER_NODE, "This is a true fatal assert with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(true, LOG_TAG_NOT_IMPLEMENTED, "This is a true fatal assert with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -441,7 +441,7 @@ public:
 
         FatalAssert(false, LOG_TAG_BASIC, "This is a false fatal assert with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        FatalAssert(false, LOG_TAG_CopperNode, "This is a false fatal assert with copper tag."
+        FatalAssert(false, LOG_TAG_COPPER_NODE, "This is a false fatal assert with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "This is a false fatal assert with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -471,7 +471,7 @@ public:
 
         CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if true(false)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_CopperNode, "logged if true(false)! This is a PANIC with copper tag."
+        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE, "logged if true(false)! This is a PANIC with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -480,7 +480,7 @@ public:
 
         CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if false(true)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_CopperNode, "logged if false(true)! This is a PANIC with copper tag."
+        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE, "logged if false(true)! This is a PANIC with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -497,7 +497,7 @@ public:
 
         CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if true(true)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_CopperNode, "logged if true(true)! This is a PANIC with copper tag."
+        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE, "logged if true(true)! This is a PANIC with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -514,7 +514,7 @@ public:
 
         CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if false(false)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_CopperNode, "logged if false(false)! This is a PANIC with copper tag."
+        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE, "logged if false(false)! This is a PANIC with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -566,7 +566,7 @@ public:
 
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC, "Hello World! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_CopperNode, "Hello World! This is a PANIC with copper tag."
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE, "Hello World! This is a PANIC with copper tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);

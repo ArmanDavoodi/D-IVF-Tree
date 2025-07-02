@@ -27,7 +27,11 @@ public:
 
     /* Copy Constructors */
     Vector(const Vector& other, uint16_t dim) : _data(other.IsValid() ? malloc(dim * sizeof(VTYPE)) : nullptr),
-                                                _delete_on_destroy(other.IsValid()) {
+                                                _delete_on_destroy(other.IsValid())
+#ifdef MEMORY_DEBUG
+        , linkCnt(new std::atomic<uint64_t>(1))
+#endif
+    {
         FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
         FatalAssert(!other.IsValid() || IsValid(), LOG_TAG_VECTOR, "Malloc failed");
         if (IsValid()) {
@@ -36,8 +40,12 @@ public:
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: other=%p, this=%p, address=%p", &other, this, _data);
     }
 
-    Vector(const void* other, uint16_t dim) : _data(other != nullptr ? malloc(dim * sizeof(VTYPE)) : nullptr),
-                                              _delete_on_destroy(other != nullptr) {
+    Vector(ConstAddress other, uint16_t dim) : _data(other != nullptr ? malloc(dim * sizeof(VTYPE)) : nullptr),
+                                               _delete_on_destroy(other != nullptr)
+#ifdef MEMORY_DEBUG
+        , linkCnt(new std::atomic<uint64_t>(1))
+#endif
+    {
         FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
         FatalAssert((other == nullptr) || IsValid(), LOG_TAG_VECTOR, "Malloc failed");
         if (IsValid()) {
@@ -47,14 +55,25 @@ public:
     }
 
     /* Link Constructors */
-    Vector(Vector&& other) : _data(other._data), _delete_on_destroy(other._delete_on_destroy) {
+    Vector(Vector&& other) : _data(other._data), _delete_on_destroy(other._delete_on_destroy)
+#ifdef MEMORY_DEBUG
+        , linkCnt(other.linkCnt)
+#endif
+    {
         other._data = nullptr;
         other._delete_on_destroy = false;
+#ifdef MEMORY_DEBUG
+        other.linkCnt = nullptr;
+#endif
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Move vector: other=%p to this=%p, address=%p, delete_on_destroy=%s",
              &other, this, _data, (_delete_on_destroy ? "T" : "F"));
     }
 
-    /* should not use ConstAddress as we would be able to change the data of that address. */
+    /*
+     * should not use ConstAddress as we would be able to change the data of that address.
+     * The user should ensure that if the address is valid, it is not freed or deleted while
+     * this vector(or other vectors) is linked to it.
+     */
     Vector(Address data) : _data(data), _delete_on_destroy(false) {
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "link constructor: this=%p, address=%p",
              this, _data);
@@ -69,6 +88,15 @@ public:
 
         if (_delete_on_destroy) {
             CLOG(LOG_LEVEL_LOG, LOG_TAG_MEMORY, "Destroy vector: this=%p, address=%p", this, _data);
+#ifdef MEMORY_DEBUG
+            FatalAssert((linkCnt == nullptr) || (linkCnt->load() == 1), LOG_TAG_VECTOR,
+                        "Vector is linked to other vectors. Cannot delete it. this=%p, address=%p, linkCnt=%lu",
+                        this, _data, linkCnt->load());
+            if (linkCnt != nullptr) {
+                delete linkCnt;
+                linkCnt = nullptr;
+            }
+#endif
             free(_data);
         } else {
             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Unlink vector: this=%p, address=%p", this, _data);
@@ -83,6 +111,10 @@ public:
              &other, this, other._data, (other._delete_on_destroy ? "T" : "F"));
         _data = other._data;
         _delete_on_destroy = other._delete_on_destroy;
+#ifdef MEMORY_DEBUG
+        linkCnt = other.linkCnt;
+        other.linkCnt = nullptr;
+#endif
         other._data = nullptr;
         other._delete_on_destroy = false;
         return *this;
@@ -98,27 +130,53 @@ public:
         _data = malloc(dim * sizeof(VTYPE));
         _delete_on_destroy = true;
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Malloc failed");
-
+#ifdef MEMORY_DEBUG
+        linkCnt = new std::atomic<uint64_t>(1);
+#endif
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimention=%hu", this, _data, dim);
     }
 
+    /*
+     * Will result in undefined behavior if another vector is linked to this vector.
+     */
     inline void Destroy() {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
         FatalAssert(_delete_on_destroy, LOG_TAG_MEMORY,
                     "Cannot destroy a linked vector. _delete_on_destroy is false. this=%p, address=%p", this, _data);
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Destroy vector: this=%p, address=%p", this, _data);
+#ifdef MEMORY_DEBUG
+        FatalAssert((linkCnt == nullptr) || (linkCnt->load() == 1), LOG_TAG_VECTOR,
+                    "Vector is linked to other vectors. Cannot delete it. this=%p, address=%p, linkCnt=%lu",
+                    this, _data, linkCnt->load());
+        if (linkCnt != nullptr) {
+            delete linkCnt;
+            linkCnt = nullptr;
+        }
+#endif
         free(_data);
         _data = nullptr;
         _delete_on_destroy = false;
     }
 
+    /*
+     * If the src vector is a linked vector, the user should ensure that the associated data is not freed or deleted
+     * while this vector is linked to it.
+     */
     inline void Link(Vector& src) {
         FatalAssert(!(IsValid()), LOG_TAG_VECTOR, "Vector is valid");
         _data = src._data;
         _delete_on_destroy = false;
+#ifdef MEMORY_DEBUG
+        linkCnt = src.linkCnt;
+        (void)linkCnt->fetch_add(1);
+#endif
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Link vector: this=%p, address=%p", this, _data);
     }
 
+    /*
+     * If the is not null, the user should ensure that it is not freed or deleted
+     * while this vector or other vectors are linked to it.
+     */
     inline void Link(void* src) {
         FatalAssert(!(IsValid()), LOG_TAG_VECTOR, "Vector is valid");
         _data = src;
@@ -133,6 +191,14 @@ public:
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Unlink vector: this=%p, address=%p", this, _data);
         _data = nullptr;
         _delete_on_destroy = false;
+#ifdef MEMORY_DEBUG
+        if (linkCnt != nullptr) {
+            FatalAssert((linkCnt->load() > 1), LOG_TAG_VECTOR,
+                        "This is the last linked vector and should not be unlinked. this=%p, address=%p, linkCnt=%lu",
+                        this, _data, linkCnt->load());
+            (void)linkCnt->fetch_sub(1);
+        }
+#endif
     }
 
     inline void CopyFrom(const Vector& src, uint16_t dim) {
@@ -140,6 +206,13 @@ public:
         FatalAssert(src.IsValid(), LOG_TAG_VECTOR, "Source Vector is not invalid.");
 
         memcpy(_data, src._data, dim * sizeof(VTYPE));
+    }
+
+    inline void CopyFrom(ConstAddress src, uint16_t dim) {
+        FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
+        FatalAssert(src != INVALID_ADDRESS, LOG_TAG_VECTOR, "Source should not be invalid.");
+
+        memcpy(_data, src, dim * sizeof(VTYPE));
     }
 
     inline Address GetData() {
@@ -193,8 +266,11 @@ public:
     }
 
 protected:
-    bool _delete_on_destroy; // If true, the vector will be deleted when destroyed.
     void* _data;
+    bool _delete_on_destroy; // If true, the vector will be deleted when destroyed.
+#ifdef MEMORY_DEBUG
+    std::atomic<uint64_t>* linkCnt = nullptr;
+#endif
 
 TESTABLE;
 };
@@ -345,35 +421,6 @@ public:
     inline ConstVectorPair operator[](uint16_t idx) const {
         return ConstVectorPair(GetVectorID(idx), GetVector(idx));
     }
-
-    /* Not Tested */
-    // inline Vector<T, _header._dim> Get_Vector_Copy(uint16_t idx) const {
-    //     FatalAssert(idx < _header._size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _header._size(%hu)", idx, _header._size);
-
-    //     return Vector<T, _header._dim>(_beg + (idx * _header._dim));
-    // }
-
-    // inline Vector<T, _header._dim> Get_Vector_Copy_By_ID(VectorID id) const {
-    //     return Get_Vector_Copy(Get_Index(id));
-    // }
-
-    // inline VectorUpdate Delete(VectorID id) {
-    //     FatalAssert(id.Is_Valid(), LOG_TAG_VECTOR_SET, "cannot delete invalide vector id.");
-
-    //     uint16_t idx = Get_Index(id);
-    //     VectorUpdate swapped{INVALID_VECTOR_ID, INVALID_ADDRESS};
-
-    //     if (idx != _header._size - 1) {
-    //         swapped.vector_id = Get_Last_VectorID(); // ID of the last vector
-    //         swapped.vector_data = _beg + (idx * _header._dim); // new address of the last vector
-    //         memcpy(_beg + (idx * _header._dim), _beg + ((_header._size - 1) * _header._dim), _header._dim * sizeof(T));
-    //         GetIDs()[idx] = swapped.vector_id;
-    //     }
-
-    //     --_header._size;
-
-    //     return swapped;
-    // }
 
     inline void DeleteLast() {
         FatalAssert(_header._size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");

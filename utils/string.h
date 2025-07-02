@@ -38,18 +38,17 @@ public:
 
         va_list argptr;
         va_start(argptr, fmt);
-
-        size = vsnprintf(NULL, 0, fmt, argptr);
-        if (size < 0) {
+        int _size = vsnprintf(NULL, 0, fmt, argptr);
+        if (_size < 0) {
             size = 0;
             return;
         }
-
+        size = _size;
         _data = new char[size + 1];
 
         int num_writen = vsnprintf(_data, size + 1, fmt, argptr);
         va_end(argptr);
-        if (num_writen != size) {
+        if ((num_writen < 0) || ((size_t)(num_writen) != size)) {
             delete _data;
             _data = nullptr;
             size = 0;

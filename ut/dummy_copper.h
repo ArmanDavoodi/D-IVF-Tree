@@ -4,194 +4,236 @@
 #include "common.h"
 #include "vector_utils.h"
 
+#include "interface/copper.h"
+
 /* Needs distance.h and buffer.h */
 
 namespace copper {
 
-template <typename T, uint16_t _DIM, uint16_t _MIN_SIZE, uint16_t _MAX_SIZE,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
-class CopperNode {
+class CopperNode : public CopperNodeInterface {
 public:
-    static constexpr uint16_t _DIM_ = _DIM;
-    static constexpr uint16_t _MIN_SIZE_ = _MIN_SIZE;
-    static constexpr uint16_t _MAX_SIZE_ = _MAX_SIZE;
-
-    CopperNode(VectorID id) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID) {
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
-            "CopperNode<%hu, %hu>(id = " VECTORID_LOG_FMT "): Created node. this=%p", _MIN_SIZE, _MAX_SIZE,
-            VECTORID_LOG(id), this);
+    CopperNode(VectorID id, CopperNodeAttributes attr) : _data(id, attr) {}
+    ~CopperNode() = default;
+    RetStatus AssignParent(VectorID parent_id) override {
+        _data._parent_id = parent_id;
     }
 
-    ~CopperNode() {
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST,
-            "CopperNode<%hu, %hu>(id = " VECTORID_LOG_FMT "): Destroyed node. this=%p", _MIN_SIZE, _MAX_SIZE,
-            VECTORID_LOG(_centroid_id), this);
+    Address Insert(const Vector& vec, VectorID vec_id) override {
+        return _data._bucket.Insert(vec, vec_id);
     }
 
-    inline RetStatus Assign_Parent(VectorID parent_id) {
-        _parent_id = parent_id;
-        return RetStatus::Success();
+    VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) override {
+        return VectorUpdate{INVALID_VECTOR_ID, INVALID_ADDRESS}; // Placeholder for actual implementation
     }
 
-    inline Address Insert(const Vector<T, _DIM>& vec, VectorID vec_id) {
-        Address addr = _bucket.Insert(vec, vec_id);
-        return addr;
+    RetStatus Search(const Vector& query, size_t k,
+                     std::vector<std::pair<VectorID, DTYPE>>& neighbours) override {
+        return RetStatus::Success(); // Placeholder for actual implementation
     }
 
-    inline VectorUpdate MigrateLastVectorTo(CopperNode<T, _DIM, _MIN_SIZE, _MAX_SIZE, DIST_TYPE, _CORE>* _dest) {
-        VectorUpdate update;
-        update.vector_id = _bucket.Get_Last_VectorID();
-        const Vector<T, _DIM> &v = _bucket.Get_Last_Vector();
-        update.vector_data = _dest->Insert(std::move(v), update.vector_id);
-        _bucket.Delete_Last();
-        return update;
+    VectorID CentroidID() const override {
+        return _data._centroid_id;
     }
 
-    inline RetStatus Search(const Vector<T, _DIM>& query, size_t k,
-                            std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours) {
-        return RetStatus::Success();
+    VectorID ParentID() const override {
+        return _data._parent_id;
     }
 
-    // inline VectorID Find_Nearest(const Vector<T, _DIM>& query) {
-    //     return INVALID_VECTOR_ID;
-    // }
-
-    inline uint16_t Size() const {
-        return _bucket.Size();
+    uint16_t Size() const override {
+        return _data._bucket.Size();
     }
 
-    inline VectorID CentroidID() const {
-        return _centroid_id;
+    bool IsFull() const override {
+        return _data._bucket.Size() >= _data._bucket.Capacity();
     }
 
-    inline VectorID ParentID() const {
-        return _parent_id;
+    bool IsAlmostEmpty() const override {
+        return _data._bucket.Size() <= _data._min_size;
     }
 
-    inline bool Is_Leaf() const {
-        return _centroid_id.Is_Leaf();
+    bool Contains(VectorID id) const override {
+        return _data._bucket.Contains(id);
     }
 
-    inline bool Is_Full() const {
-        return _bucket.Size() >= _MAX_SIZE;
+    bool IsLeaf() const override {
+        return _data._centroid_id.IsLeaf();
     }
 
-    inline bool Is_Almost_Empty() const {
-        return _bucket.Size() <= _MIN_SIZE;
+    uint8_t Level() const override {
+        return _data._centroid_id._level;
     }
 
-    inline uint8_t Level() const {
-        return _centroid_id._level;
+    Vector ComputeCurrentCentroid() const override {
+        return Vector(); // Placeholder for actual centroid computation
     }
 
-    inline bool Contains(VectorID id) const {
-        return _bucket.Contains(id);
+    uint16_t MinSize() const override {
+        return _data._min_size;
     }
 
-    inline Vector<T, _DIM> Compute_Current_Centroid() const {
-        return _core.Compute_Centroid(_bucket.Get_Typed_Address(), _bucket.Size());
+    uint16_t MaxSize() const override {
+        return _data._bucket.Capacity();
     }
 
-    inline std::string bucket_to_string() const {
-        return _bucket.to_string();
+    uint16_t VectorDimention() const override {
+        return _data._bucket.Dimension();
+    }
+
+    /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const override {
+        if (reverese) {
+            return *_data._reverseSimilarityComparator;
+        }
+        return *_data._similarityComparator;
+    }
+
+    DTYPE Distance(const Vector& a, const Vector& b) const override {
+        return 0.0; // Placeholder for actual distance computation
+    }
+
+    size_t Bytes() const override {
+        _data.Bytes(); // Return the size of the node in bytes
+    }
+
+    String BucketToString() const override {
+        return _data._bucket.ToString(); // Return a string representation of the bucket
     }
 
 protected:
-    _CORE<T, _DIM, DIST_TYPE> _core;
-
-    VectorID _centroid_id;
-    VectorID _parent_id;
-    VectorSet<T, _DIM, _MAX_SIZE> _bucket;
+    CopperNodeData _data;
 
 TESTABLE;
 };
 
-template <typename T, uint16_t _DIM, uint16_t KI_MIN, uint16_t KI_MAX, uint16_t KL_MIN, uint16_t KL_MAX,
-          typename DIST_TYPE, template<typename, uint16_t, typename> class _CORE>
-class VectorIndex {
+class VectorIndex : public VectorIndexInterface {
 public:
 
-    inline RetStatus Init() {
+    VectorIndex(CopperAttributes attr) : _attr(attr),
+                                         _similarityComparator(
+                                            GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
+                                         _reverseSimilarityComparator(
+                                            GetDistancePairSimilarityComparator(attr.core.distanceAlg, true)),
+                                         _size(0), _root(INVALID_VECTOR_ID), _levels(2) {
         RetStatus rs = RetStatus::Success();
-        return rs;
+        rs = _bufmgr.Init();
+        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to init buffer manager.");
+        _root = _bufmgr.RecordRoot();
+        FatalAssert(_root.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        FatalAssert(_root.IsCentroid(), LOG_TAG_VECTOR_INDEX, "root should be a centroid: "
+                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        FatalAssert(_root.IsLeaf(), LOG_TAG_VECTOR_INDEX, "first root should be a leaf: "
+                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
+
+        rs = _bufmgr.UpdateClusterAddress(_root, CreateNewNode(_root));
+        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root: "
+                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        _levels = 2;
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX,
+             "Init Copper Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
+             VECTORID_LOG(_root), _levels, _attr.ToString().ToCStr());
     }
 
-    inline RetStatus Shutdown() {
+    ~VectorIndex() override {
         RetStatus rs = RetStatus::Success();
-        return rs;
+        rs = _bufmgr.Shutdown();
+        delete _similarityComparator;
+        delete _reverseSimilarityComparator;
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown Copper Index End: rs=%s", rs.Msg());
     }
 
-    inline RetStatus Insert(const Vector<T, _DIM>& vec, VectorID& vec_id, uint16_t node_per_layer) {
-        RetStatus rc = RetStatus::Success();
-        return rc;
+    RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) override {
+        return RetStatus::Success(); // Placeholder for actual insertion logic
     }
 
-    inline RetStatus Delete(VectorID vec_id) {
-
-        RetStatus rc = RetStatus::Success();
-        return rc;
+    RetStatus Delete(VectorID vec_id) override {
+        return RetStatus::Success(); // Placeholder for actual deletion logic
     }
 
-    inline RetStatus ApproximateKNearestNeighbours(const Vector<T, _DIM>& query, size_t k,
-                                        uint16_t _internal_k, uint16_t _leaf_k,
-                                        std::vector<std::pair<VectorID, DIST_TYPE>>& neighbours,
-                                        bool sort = true, bool sort_from_more_similar_to_less = true) {
-        return RetStatus::Success();
+    RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
+                                                    uint16_t _internal_k, uint16_t _leaf_k,
+                                                    std::vector<std::pair<VectorID, DTYPE>>& neighbours,
+                                                    bool sort = true, bool sort_from_more_similar_to_less = true) override {
+        return RetStatus::Success(); // Placeholder for actual search logic
     }
 
-    inline size_t Size() const {
-        return _size;
+    size_t Size() const override {
+        return _size; // Return the size of the index
     }
 
+    DTYPE Distance(const Vector& a, const Vector& b) const override {
+        return 0.0;
+    }
+
+    size_t Bytes(bool is_internal_node) const override {
+        if (is_internal_node) {
+            return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _attr.core.dimention * _attr.internal_max_size;
+        } else {
+            return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _attr.core.dimention * _attr.leaf_max_size;
+        }
+    }
 protected:
-
-    typedef CopperNode<T, _DIM, KI_MIN, KI_MAX, DIST_TYPE, _CORE> Internal_Node;
-    typedef CopperNode<T, _DIM, KL_MIN, KL_MAX, DIST_TYPE, _CORE> Leaf_Node;
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-        requires((_K_MIN == KI_MIN && _K_MAX == KI_MAX) || (_K_MIN == KL_MIN && _K_MAX == KL_MAX))
-    using Node = CopperNode<T, _DIM, _K_MIN, _K_MAX, DIST_TYPE, _CORE>;
-
-    _CORE<T, _DIM, DIST_TYPE> _core; /* Todo: avoid copying _core */
-
+    const CopperAttributes _attr;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
     size_t _size;
-    BufferManager<T, _DIM, KI_MIN, KI_MAX, KL_MIN, KL_MAX, DIST_TYPE, _CORE> _bufmgr;
+    BufferManager _bufmgr;
     VectorID _root;
-    uint16_t _split_internal;
-    uint16_t _split_leaf;
     uint64_t _levels;
 
-    template<typename NodeType>
-    inline RetStatus Search_Nodes(const Vector<T, _DIM>& query,
-                                  const std::vector<std::pair<VectorID, DIST_TYPE>>& upper_layer,
-                                  std::vector<std::pair<VectorID, DIST_TYPE>>& lower_layer, size_t n) {
-        return RetStatus::Success();
+    RetStatus SearchNodes(const Vector& query,
+                          const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
+                          std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) override {
+        return RetStatus::Success(); // Placeholder for actual search logic
     }
 
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline VectorID Record_Into(const Vector<T, _DIM>& vec, Node<_K_MIN, _K_MAX>* container_node,
-                                Node<_K_MIN, _K_MAX>* node = nullptr) {
-        return INVALID_VECTOR_ID;
+    VectorID RecordInto(const Vector& vec, CopperNodeInterface* container_node,
+                        CopperNodeInterface* node = nullptr) override {
+        return INVALID_VECTOR_ID; // Placeholder for actual record logic
     }
 
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Expand_Tree(Node<_K_MIN, _K_MAX>* root, const Vector<T, _DIM>& centroid) {
-        RetStatus rs = RetStatus::Success();
-        return rs;
+    RetStatus ExpandTree(CopperNodeInterface* root, const Vector& centroid) override {
+        return RetStatus::Success(); // Placeholder for actual tree expansion logic
     }
 
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline size_t Find_Closest_Cluster(const std::vector<Node<_K_MIN, _K_MAX>*>& candidates,
-                                       const Vector<T, _DIM>& vec) {
-        return 0;
+    size_t FindClosestCluster(const std::vector<CopperNodeInterface*>& candidates,
+                              const Vector& vec) override {
+        return 0; // Placeholder for actual cluster finding logic
     }
 
-    template<uint16_t _K_MIN, uint16_t _K_MAX>
-    inline RetStatus Split(std::vector<Node<_K_MIN, _K_MAX>*>& candidates, size_t node_idx) {
-        return RetStatus::Success();
+    RetStatus Split(std::vector<CopperNodeInterface*>& candidates, size_t node_idx) override {
+        return RetStatus::Success(); // Placeholder for actual split logic
     }
 
-    inline RetStatus Split(Leaf_Node* leaf) {
-        return RetStatus::Success();
+    RetStatus Split(CopperNodeInterface* leaf) override {
+        return RetStatus::Success(); // Placeholder for actual split logic
+    }
+
+    CopperNodeInterface* CreateNewNode(VectorID id) override {
+        const bool is_internal_node = id.IsInternalNode();
+        CopperNode* new_node = static_cast<CopperNode*>(malloc(Bytes(is_internal_node)));
+        CHECK_NOT_NULLPTR(new_node, LOG_TAG_COPPER_NODE);
+
+        CopperNodeAttributes attr;
+        attr.core = _attr.core;
+        attr.similarityComparator = _similarityComparator;
+        attr.reverseSimilarityComparator = _reverseSimilarityComparator;
+        if (is_internal_node) {
+            attr.max_size = _attr.internal_max_size;
+            attr.min_size = _attr.internal_min_size;
+        }
+        else {
+            attr.max_size = _attr.leaf_max_size;
+            attr.min_size = _attr.leaf_min_size;
+        }
+
+        new (new_node) CopperNode(id, attr);
+        CHECK_NODE_IS_VALID(new_node, LOG_TAG_COPPER_NODE, false);
+        return new_node;
+    }
+
+    RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
+                      std::vector<Vector>& centroids, uint16_t split_into) override {
+        return RetStatus::Success(); // Placeholder for actual clustering logic
     }
 
 TESTABLE;

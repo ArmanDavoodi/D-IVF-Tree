@@ -105,9 +105,6 @@ union VectorID {
 typedef void* Address;
 typedef const void* ConstAddress;
 
-typedef void* DTYPE;
-typedef void* VTYPE;
-
 constexpr Address INVALID_ADDRESS = nullptr;
 
 class CopperNodeInterface;
@@ -119,23 +116,23 @@ class BufferManagerInterface;
 // class VectorSet;
 
 enum ClusteringType : int8_t {
-    Invalid,
+    InvalidC,
     SimpleDivide,
-    NumTypes
+    NumTypesC
 };
-inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypes + 1] = {"Invalid", "SimpleDivide", "NumTypes"};
+inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypesC + 1] = {"Invalid", "SimpleDivide", "NumTypes"};
 inline constexpr bool IsValid(ClusteringType type) {
-    return ((type != ClusteringType::Invalid) && (type != ClusteringType::NumTypes));
+    return ((type != ClusteringType::InvalidC) && (type != ClusteringType::NumTypesC));
 }
 
 enum DistanceType : int8_t {
-    Invalid,
+    InvalidD,
     L2,
-    NumTypes
+    NumTypesD
 };
-inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypes + 1] = {"Invalid", "L2", "NumTypes"};
+inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypesD + 1] = {"Invalid", "L2", "NumTypes"};
 inline constexpr bool IsValid(DistanceType type) {
-    return ((type != DistanceType::Invalid) && (type != DistanceType::NumTypes));
+    return ((type != DistanceType::InvalidD) && (type != DistanceType::NumTypesD));
 }
 
 #ifndef VECTOR_TYPE
@@ -143,8 +140,8 @@ inline constexpr bool IsValid(DistanceType type) {
 #define VTYPE_FMT "%hu"
 #endif
 #ifndef DISTANCE_TYPE
-#define DISTANCE_TYPE float
-#define DTYPE_FMT "%f"
+#define DISTANCE_TYPE double
+#define DTYPE_FMT "%lf"
 #endif
 
 typedef VECTOR_TYPE VTYPE;

@@ -21,6 +21,7 @@
 #if BUILD==DEBUG
 #define ENABLE_TEST_LOGGING
 #define ENABLE_ASSERTS
+#define MEMORY_DEBUG
 #elif BUILD==RELEASE
 #define ENABLE_ASSERTS
 #endif
@@ -243,19 +244,17 @@ struct Log_Msg {
         va_start(argptr, msg);
         int num_writen = vsnprintf(NULL, 0, msg, argptr);
         if (num_writen < 0) {
-            goto ERROR;
+            sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
+            va_end(argptr);
+            return;
         }
         _msg = new char[num_writen + 1];
         num_writen = vsnprintf(_msg, num_writen + 1, msg, argptr);
         va_end(argptr);
 
-        if (num_writen >= 0) {
-            goto END;
+        if (num_writen < 0) {
+            sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
         }
-
-ERROR:
-        sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
-END:
     }
 
     Log_Msg(const Log_Msg& other) {
@@ -373,12 +372,26 @@ inline bool Pass_CallStack_Level(LOG_LEVELS level) {
     return ((uint8_t)(level) <= (uint8_t)(PRINT_CALLSTACK_LEVEL));
 }
 
+/* todo: Make it threadlocal */
+namespace debug {
+inline bool* fault_checking = nullptr;
+
+class FaultCheckingExc : public std::exception  {};
+};
+
 inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
                 const char* file_name, const char* func_name, size_t line,
                 thread_id thread_id) {
-
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed
+    if (debug::fault_checking != nullptr) {
+        *(debug::fault_checking) = (level == LOG_LEVEL_PANIC);
+        fprintf(OUT, "FAULT_CHECK(%s) | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
+        fflush(OUT);
+        throw debug::FaultCheckingExc{};
+    }
+
     if (Pass_CallStack_Level(level)) {
         std::string callstack = print_callstack();
         fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
@@ -392,7 +405,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
     fflush(OUT);
     if (level == LOG_LEVEL_PANIC) {
         copper::sleep(1); // wait to make sure everything is flushed
-        assert(false);
+        abort();
     }
 }
 
@@ -463,9 +476,37 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
     } while(0)
 #endif
 
+#define FaultAssert(statement, condtion, tag, msg, ...) \
+    do {\
+        bool _FAULTY = false; \
+        copper::debug::fault_checking = &_FAULTY;\
+        try { \
+            (statement);\
+        } \
+        catch (const copper::debug::FaultCheckingExc& e) {} \
+        catch (const std::exception& e) {\
+            _FAULTY = true;\
+            CLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
+                 "\' got exception: %s", e.what());\
+        }\
+        catch (...) {\
+            _FAULTY = true;\
+            CLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
+                 "\' got unkown exception.");\
+        }\
+        copper::debug::fault_checking = nullptr;\
+        if (!(_FAULTY)) {\
+            condtion = false;\
+            char _ASSERT_TMP_DEBUG[sizeof((#statement))+sizeof((msg))+23] = "\'" #statement "\' No Errors Occured. ";\
+            strcat(_ASSERT_TMP_DEBUG+sizeof((#statement)+22), (msg));\
+            ErrorAssert(false, (tag), (_ASSERT_TMP_DEBUG) __VA_OPT__(,) __VA_ARGS__);\
+        }\
+    } while(0)
+
 #else
 #define FatalAssert(cond, tag, msg, ...)
 #define ErrorAssert(cond, tag, msg, ...)
+#define FaultAssert(statement, tag, msg, ...)
 #endif
 #else
 
