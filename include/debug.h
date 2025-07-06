@@ -261,7 +261,7 @@ struct Log_Msg {
             return;
         }
 
-        int num_writen = vsnprintf(_msg, num_required, msg, argptr);
+        int num_writen = vsnprintf(_msg, num_required + 1, msg, argptr);
         va_end(argptr);
 
         if (num_writen < 0) {
