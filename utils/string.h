@@ -12,7 +12,9 @@ class String {
 public:
     String() : _data(nullptr), size(0) {}
 
-    String(const String& other) : _data(((other.size == 0) ? nullptr : new char[other.size + 1])), size(other.size) {
+    String(const String& other) : _data(((other.size == 0) ?
+                                  nullptr : static_cast<char*>(malloc((other.size + 1) * sizeof(char*))))),
+                                  size(other.size) {
         if (other.size > 0) {
             memcpy(_data, other._data, sizeof(char) * (size + 1));
         }
@@ -23,7 +25,8 @@ public:
         other.size = 0;
     }
 
-    String(const std::string& other) :  _data(((other.size() == 0) ? nullptr : new char[other.size() + 1])),
+    String(const std::string& other) :  _data(((other.size() == 0) ?
+                                        nullptr : static_cast<char*>(malloc((other.size() + 1) * sizeof(char*))))),
                                         size(other.size()) {
         if (size > 0) {
             memcpy(_data, &(other[0]), sizeof(char) * (size));
@@ -38,18 +41,22 @@ public:
 
         va_list argptr;
         va_start(argptr, fmt);
-        int _size = vsnprintf(NULL, 0, fmt, argptr);
+
+        va_list arg_copy;
+        va_copy(arg_copy, argptr);
+        int _size = vsnprintf(NULL, 0, fmt, arg_copy);
+        va_end(arg_copy);
         if (_size < 0) {
             size = 0;
             return;
         }
         size = _size;
-        _data = new char[size + 1];
+        _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
 
         int num_writen = vsnprintf(_data, size + 1, fmt, argptr);
         va_end(argptr);
         if ((num_writen < 0) || ((size_t)(num_writen) != size)) {
-            delete _data;
+            free(_data);
             _data = nullptr;
             size = 0;
             return;
@@ -58,14 +65,14 @@ public:
 
     String& operator=(const String& other) {
         if (_data != nullptr) {
-            delete[] _data;
+            free(_data);
             _data = nullptr;
             size = 0;
         }
 
         if (other.size > 0) {
             size = other.size;
-            _data = new char[size + 1];
+            _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
             memcpy(_data, other._data, sizeof(char) * (size + 1));
         }
 
@@ -74,7 +81,7 @@ public:
 
     String& operator=(String&& other) {
         if (_data != nullptr) {
-            delete[] _data;
+            free(_data);
             _data = nullptr;
             size = 0;
         }
@@ -91,13 +98,13 @@ public:
 
     String& operator=(const char* other) {
         if (_data != nullptr) {
-            delete[] _data;
+            free(_data);
             _data = nullptr;
             size = strlen(other);
         }
 
         if (size > 0) {
-            _data = new char[size + 1];
+            _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
             memcpy(_data, other, sizeof(char) * (size + 1));
         }
 
@@ -106,13 +113,13 @@ public:
 
     String& operator=(const std::string& other) {
         if (_data != nullptr) {
-            delete[] _data;
+            free(_data);
             _data = nullptr;
             size = other.size();
         }
 
         if (size > 0) {
-            _data = new char[size + 1];
+            _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
             memcpy(_data, &(other[0]), sizeof(char) * (size));
             _data[size] = 0;
         }
@@ -122,7 +129,7 @@ public:
 
     ~String() {
         if (_data != nullptr) {
-            delete _data;
+            free(_data);
             _data = nullptr;
             size = 0;
         }
@@ -143,7 +150,7 @@ public:
             return res;
         }
 
-        res._data = new char[res.size + 1];
+        res._data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
         size_t offset = 0;
         if (size > 0) {
             memcpy(res._data, _data, sizeof(char) * size);

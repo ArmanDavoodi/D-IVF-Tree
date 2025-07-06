@@ -163,7 +163,7 @@ public:
         switch (_data._distanceAlg)
         {
         case DistanceType::L2:
-            return L2::ComputeCentroid(static_cast<const VTYPE*>(_data._bucket.GetAddress()),
+            return L2::ComputeCentroid(static_cast<const VTYPE*>(_data._bucket.GetVectors()),
                                        _data._bucket.Size(), _data._bucket.Dimension());
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,

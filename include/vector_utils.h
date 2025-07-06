@@ -168,7 +168,9 @@ public:
         _delete_on_destroy = false;
 #ifdef MEMORY_DEBUG
         linkCnt = src.linkCnt;
-        (void)linkCnt->fetch_add(1);
+        if (linkCnt != nullptr) {
+            (void)linkCnt->fetch_add(1);
+        }
 #endif
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Link vector: this=%p, address=%p", this, _data);
     }
@@ -290,76 +292,69 @@ struct ConstVectorPair {
                                                                      vec(std::move(const_cast<Vector&>(vector_data))) {}
 };
 
-struct VectorSetHeader {
-    uint16_t _size;
-    const uint16_t _cap;
-    const uint16_t _dim;
-    // DataType _vtype;
-};
-
 class VectorSet {
 public:
     VectorSet(const VectorSet& other) = delete;
     VectorSet(VectorSet&& other) = delete;
     ~VectorSet() = default;
 
-    VectorSet(uint16_t dimention, uint16_t capacity) : _header({0, capacity, dimention}) {
-        FatalAssert(_header._dim > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with dimentiom of 0.");
-        FatalAssert(_header._cap > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with capacity of 0.");
-        memset(_data, 0, ((sizeof(VTYPE) * _header._dim) + sizeof(VectorID)) * _header._cap);
+    VectorSet(uint16_t dimention, uint16_t capacity) : _size(0), _cap(capacity), _dim(dimention) {
+        FatalAssert(_dim > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with dimentiom of 0.");
+        FatalAssert(_cap > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with capacity of 0.");
+        memset(GetVectors(), 0, ((sizeof(VTYPE) * _dim) + sizeof(VectorID)) * _cap);
     }
 
-    inline Address GetVectors() {
-        return _data;
+    constexpr Address GetVectors() {
+        return static_cast<Address>(this) + sizeof(VectorSet);
     }
 
-    inline ConstAddress GetVectors() const {
-        return _data;
+    constexpr ConstAddress GetVectors() const {
+        return static_cast<ConstAddress>(this) + sizeof(VectorSet);
     }
 
     inline VectorID* GetIDs() {
-        return static_cast<VectorID*>(static_cast<void*>(_data) + sizeof(VTYPE) * _header._dim * _header._cap);
+        return static_cast<VectorID*>(GetVectors() + sizeof(VTYPE) * _dim * _cap);
     }
 
     inline const VectorID* GetIDs() const {
-        return static_cast<const VectorID*>(static_cast<const void*>(_data) + sizeof(VTYPE) * _header._dim * _header._cap);
+        return static_cast<const VectorID*>(GetVectors() + sizeof(VTYPE) * _dim * _cap);
     }
 
     inline Address Insert(const Vector& new_vector, VectorID id) {
         FatalAssert(new_vector.IsValid(), LOG_TAG_VECTOR_SET, "Cannot insert invalid vector.");
-        FatalAssert(_header._size < _header._cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
+        FatalAssert(_size < _cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
-        Address loc = _data + (_header._size * _header._dim * sizeof(VTYPE));
-        memcpy(loc, new_vector.GetData(), _header._dim * sizeof(VTYPE));
-        GetIDs()[_header._size] = id;
-        ++_header._size;
+        Address loc = GetVectors() + (_size * _dim * sizeof(VTYPE));
+        memcpy(loc, new_vector.GetData(), _dim * sizeof(VTYPE));
+        GetIDs()[_size] = id;
+        ++_size;
         return loc;
     }
 
     inline Address Insert(const void* _src, VectorID id) {
         FatalAssert(_src != nullptr, LOG_TAG_VECTOR_SET, "Cannot insert null vector.");
-        FatalAssert(_header._size < _header._cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
+        FatalAssert(_size < _cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
 
-        Address loc = _data + (_header._size * _header._dim * sizeof(VTYPE));
-        memcpy(loc, _src, _header._dim * sizeof(VTYPE));
-        GetIDs()[_header._size] = id;
-        ++_header._size;
+        Address loc = GetVectors() + (_size * _dim * sizeof(VTYPE));
+        memcpy(loc, _src, _dim * sizeof(VTYPE));
+        GetIDs()[_size] = id;
+        ++_size;
         return loc;
     }
 
     inline VectorID GetVectorID(uint16_t idx) const {
-        FatalAssert(idx < _header._size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _header._size(%hu)", idx, _header._size);
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
         return GetIDs()[idx];
     }
 
     inline VectorID GetLastVectorID() const {
-        FatalAssert(_header._size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        return GetIDs()[_header._size - 1];
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
+        return GetIDs()[_size - 1];
     }
 
     inline bool Contains(VectorID id) const {
         const VectorID* ids = GetIDs();
-        for (uint16_t index = 0; index < _header._size; ++index) {
+        for (uint16_t index = 0; index < _size; ++index) {
             if (ids[index] == id) {
                 return true;
             }
@@ -369,40 +364,40 @@ public:
     }
 
     inline uint16_t GetIndex(VectorID id) const {
-        FatalAssert(_header._size > 0, LOG_TAG_VECTOR_SET, "Bucket is Empty");
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Bucket is Empty");
         const VectorID* ids = GetIDs();
         uint16_t index = 0;
-        for (; index < _header._size; ++index) {
+        for (; index < _size; ++index) {
             if (ids[index] == id) {
                 break;
             }
         }
 
-        FatalAssert(index < _header._size, LOG_TAG_VECTOR_SET, "vector id:" VECTORID_LOG_FMT " not found", VECTORID_LOG(id));
+        FatalAssert(index < _size, LOG_TAG_VECTOR_SET, "vector id:" VECTORID_LOG_FMT " not found", VECTORID_LOG(id));
         return index;
     }
 
     inline Vector GetLastVector() {
-        FatalAssert(_header._size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        Address loc = _data + ((_header._size - 1) * _header._dim * sizeof(VTYPE));
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
+        Address loc = GetVectors() + ((_size - 1) * _dim * sizeof(VTYPE));
         return Vector(loc);
     }
 
     inline const Vector GetLastVector() const {
-        FatalAssert(_header._size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        Address loc = const_cast<Address>(static_cast<ConstAddress>(_data) + ((_header._size - 1) * _header._dim * sizeof(VTYPE)));
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
+        Address loc = const_cast<Address>(GetVectors() + ((_size - 1) * _dim * sizeof(VTYPE)));
         return Vector(loc);
     }
 
     inline Vector GetVector(uint16_t idx) {
-        FatalAssert(idx < _header._size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _header._size(%hu)", idx, _header._size);
-        Address loc = _data + (idx * _header._dim * sizeof(VTYPE));
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
+        Address loc = GetVectors() + (idx * _dim * sizeof(VTYPE));
         return Vector(loc);
     }
 
     inline const Vector GetVector(uint16_t idx) const {
-        FatalAssert(idx < _header._size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _header._size(%hu)", idx, _header._size);
-        Address loc = const_cast<Address>(static_cast<ConstAddress>(_data) + (idx * _header._dim * sizeof(VTYPE)));
+        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
+        Address loc = const_cast<Address>(GetVectors() + (idx * _dim * sizeof(VTYPE)));
         return Vector(loc);
     }
 
@@ -423,41 +418,33 @@ public:
     }
 
     inline void DeleteLast() {
-        FatalAssert(_header._size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        --_header._size;
-    }
-
-    inline Address GetAddress() {
-        return _data;
-    }
-
-    inline ConstAddress GetAddress() const {
-        return _data;
+        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
+        --_size;
     }
 
     inline uint16_t Size() const {
-        return _header._size;
+        return _size;
     }
 
     inline uint16_t Capacity() const {
-        return _header._cap;
+        return _cap;
     }
 
     inline uint16_t Dimension() const {
-        return _header._dim;
+        return _dim;
     }
 
     String ToString() const {
         String str = "<Vectors: [";
-        for (uint16_t i = 0; i < _header._size; ++i) {
-            str += GetVector(i).ToString(_header._dim);
-            if (i != _header._size - 1)
+        for (uint16_t i = 0; i < _size; ++i) {
+            str += GetVector(i).ToString(_dim);
+            if (i != _size - 1)
                 str += ", ";
         }
         str += "], IDs: [";
-        for (uint16_t i = 0; i < _header._size; ++i) {
+        for (uint16_t i = 0; i < _size; ++i) {
             str += String(VECTORID_LOG_FMT, VECTORID_LOG(GetIDs()[i]));
-            if (i != _header._size - 1)
+            if (i != _size - 1)
                 str += ", ";
         }
         str += "]>";
@@ -465,8 +452,10 @@ public:
     }
 
 protected:
-    VectorSetHeader _header;
-    char _data[1];
+    uint16_t _size;
+    const uint16_t _cap;
+    const uint16_t _dim;
+    // DataType _vtype;
 
 TESTABLE;
 };

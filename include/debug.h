@@ -242,13 +242,17 @@ struct Log_Msg {
     Log_Msg(const char* msg, ...) {
         va_list argptr;
         va_start(argptr, msg);
-        int num_writen = vsnprintf(NULL, 0, msg, argptr);
+        va_list arg_copy;
+        va_copy(arg_copy, argptr);
+        int num_writen = vsnprintf(NULL, 0, msg, arg_copy);
+        va_end(arg_copy);
         if (num_writen < 0) {
             sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
             va_end(argptr);
             return;
         }
-        _msg = new char[num_writen + 1];
+        // _msg = new char[num_writen + 1];
+        _msg = static_cast<char*>(malloc((num_writen + 1) * sizeof(char)));
         num_writen = vsnprintf(_msg, num_writen + 1, msg, argptr);
         va_end(argptr);
 
@@ -267,7 +271,8 @@ struct Log_Msg {
             _msg = nullptr;
             return;
         }
-        _msg = new char[size + 1];
+        // _msg = new char[size + 1];
+        _msg = static_cast<char*>(malloc((size + 1) * sizeof(char)));
         _msg[0] = 0;
         strcpy(_msg, other._msg);
     }
@@ -278,7 +283,7 @@ struct Log_Msg {
 
     ~Log_Msg() {
         if (_msg != nullptr) {
-            delete[] _msg;
+            free(_msg);
             _msg = nullptr;
         }
     }
@@ -374,7 +379,7 @@ inline bool Pass_CallStack_Level(LOG_LEVELS level) {
 
 /* todo: Make it threadlocal */
 namespace debug {
-inline bool* fault_checking = nullptr;
+inline bool * fault_checking = nullptr;
 
 class FaultCheckingExc : public std::exception  {};
 };
@@ -389,7 +394,11 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
         fprintf(OUT, "FAULT_CHECK(%s) | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
         fflush(OUT);
-        throw debug::FaultCheckingExc{};
+        if (level == LOG_LEVEL_PANIC) {
+            throw debug::FaultCheckingExc{};
+        } else {
+            return; // do not log the message again
+        }
     }
 
     if (Pass_CallStack_Level(level)) {

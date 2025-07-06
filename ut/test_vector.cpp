@@ -24,6 +24,24 @@ public:
 
     ~Test() {}
 
+    copper::VectorSet* CreateVectorSet(uint16_t dim, uint16_t capacity) {
+        copper::VectorSet* vec_set = static_cast<copper::VectorSet*>(
+            malloc(sizeof(copper::VectorSet) + (sizeof(copper::VTYPE) * dim *capacity)));
+        FatalAssert(vec_set != nullptr, LOG_TAG_TEST, "Failed to allocate memory for VectorSet.");
+        new (vec_set) copper::VectorSet(dim, capacity);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created VectorSet: this=%p, dim=%hu, capacity=%hu",
+             vec_set, dim, capacity);
+        return vec_set;
+    }
+
+    void DestroyVectorSet(copper::VectorSet*& vec_set) {
+        FatalAssert(vec_set != nullptr, LOG_TAG_TEST, "Cannot destroy a null VectorSet.");
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Destroying VectorSet: this=%p", vec_set);
+        vec_set->~VectorSet();
+        free(vec_set);
+        vec_set = nullptr;
+    }
+
     bool vector_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_test for %luth time...", try_count);
         bool status = true;
@@ -92,17 +110,17 @@ public:
             FaultAssert(vec1.Link(static_cast<copper::Address>(_data[1])), status, LOG_TAG_TEST,
                         "Valid vector should not be linked.");
             FaultAssert(vec1 = std::move(vec2), status, LOG_TAG_TEST, "Valid vector should not be assigned.");
-            status = status && (vec2.GetData() == pre_address);
-            ErrorAssert(vec2.GetData() == pre_address, LOG_TAG_TEST,
+            status = status && (vec2.GetData() == static_cast<copper::Address>(_data[0]));
+            ErrorAssert(vec2.GetData() == static_cast<copper::Address>(_data[0]), LOG_TAG_TEST,
                         "Vector should not change address after faulty move assignment.");
-            status = status && (vec2._delete_on_destroy == pre_delete_on_destroy);
-            ErrorAssert(vec2._delete_on_destroy == pre_delete_on_destroy, LOG_TAG_TEST,
+            status = status && !(vec2._delete_on_destroy);
+            ErrorAssert(!(vec2._delete_on_destroy), LOG_TAG_TEST,
                         "Vector should not change delete_on_destroy after faulty move assignment.");
-            status = status && (vec1.GetData() == static_cast<copper::Address>(_data[0]));
-            ErrorAssert(vec1.GetData() == static_cast<copper::Address>(_data[0]), LOG_TAG_TEST,
+            status = status && (vec1.GetData() == pre_address);
+            ErrorAssert(vec1.GetData() == pre_address, LOG_TAG_TEST,
                         "Vector should not change address after faulty operations.");
-            status = status && (!vec1._delete_on_destroy);
-            ErrorAssert(!vec1._delete_on_destroy, LOG_TAG_TEST,
+            status = status && (vec1._delete_on_destroy == pre_delete_on_destroy);
+            ErrorAssert(vec1._delete_on_destroy == pre_delete_on_destroy, LOG_TAG_TEST,
                         "Vector should not change delete_on_destroy after faulty operations.");
 
             copper::Vector vec3(vec1, dim);
@@ -188,7 +206,7 @@ public:
             status = status && (vec4.Similar(vec1, dim));
             ErrorAssert(vec4.Similar(vec1, dim), LOG_TAG_TEST,
                         "Vectors should be similar after link.");
-            status = status && (vec4 != vec1);
+            status = status && (vec4 == vec1);
             ErrorAssert(vec4 == vec1, LOG_TAG_TEST,
                         "Vectors should be the same after link.");
 #ifdef MEMORY_DEBUG
@@ -223,21 +241,23 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_set for %luth time...", try_count);
         bool status = true;
 
-        copper::VectorSet set1(dim, size);
-        copper::VectorSet set2(dim, size+5);
+        copper::VectorSet* set1p = CreateVectorSet(dim, size);
+        copper::VectorSet* set2p = CreateVectorSet(dim, size+5);
+        copper::VectorSet& set1 = *set1p;
+        copper::VectorSet& set2 = *set2p;
 
         for (uint16_t i = 0; i < size; ++i) {
             copper::Address va1 = set1.Insert(_data[i], _ids[i]);
             copper::Address va2 = set2.Insert(copper::Vector(_data[i]), _ids[i]);
 
-            status = status && (va1 == set1.GetAddress() + (i * dim));
-            ErrorAssert(va1 == set1.GetAddress() + (i * dim), LOG_TAG_TEST,
+            status = status && (va1 == set1.GetVectors() + (i * dim));
+            ErrorAssert(va1 == set1.GetVectors() + (i * dim), LOG_TAG_TEST,
                         "vector set returned wrong address. Expected=%p, Actual=%p",
-                        va1, set1.GetAddress() + (i * dim));
-            status = status && (va2 == set2.GetAddress() + (i * dim));
-            ErrorAssert(va2 == set2.GetAddress() + (i * dim), LOG_TAG_TEST,
+                        va1, set1.GetVectors() + (i * dim));
+            status = status && (va2 == set2.GetVectors() + (i * dim));
+            ErrorAssert(va2 == set2.GetVectors() + (i * dim), LOG_TAG_TEST,
                         "vector set returned wrong address. Expected=%p, Actual=%p",
-                        va2, set1.GetAddress() + (i * dim));
+                        va2, set1.GetVectors() + (i * dim));
 
             status = status && (set1[i].id == _ids[i]);
             ErrorAssert(set1[i].id == _ids[i], LOG_TAG_TEST,
@@ -318,6 +338,9 @@ public:
                     "uint16 vector set should not contain vector id %lu", _ids[size - 1]);
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "VectorSet1 after deletion: %s", set1.ToString().ToCStr());
+
+        DestroyVectorSet(set1p);
+        DestroyVectorSet(set2p);
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_set.");
         return status;
