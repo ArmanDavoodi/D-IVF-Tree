@@ -234,35 +234,61 @@ namespace copper {
 using thread_id = unsigned long;
 #define THREAD_ID ((copper::thread_id)(OS_THREAD_ID))
 struct Log_Msg {
-    constexpr static int MAX_MSG_SIZE = 2500;
     char *_msg = nullptr;
 
     Log_Msg(const char* msg, ...) {
-        _msg = new char[MAX_MSG_SIZE];
         // Sanity check: try to parse the format string using vsnprintf with a copy of the va_list.
+        if (_msg != nullptr) {
+            sprintf(_msg, "Error in logging: _msg is not null");
+            return;
+        }
+
         va_list argptr;
         va_start(argptr, msg);
+        va_list arg_copy;
+        va_copy(arg_copy, argptr);
+        int num_required = vsnprintf(NULL, 0, msg, arg_copy);
+        va_end(arg_copy);
+        if (num_required < 0) {
+            va_end(argptr);
+            sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
+            return;
+        }
+        _msg = new char[num_required + 1]; // +1 for null terminator
+        if (_msg == nullptr) {
+            sprintf(_msg, "Error %d in logging: memory allocation failed - %s", errno, strerror(errno));
+            va_end(argptr);
+            return;
+        }
 
-#if defined(__GNUC__) || defined(__clang__)
-        // Use __builtin___vsnprintf_chk to check format string at compile time if possible
-        __builtin___vsnprintf_chk(_msg, MAX_MSG_SIZE-3, 0, __builtin_object_size(_msg, 0), msg, argptr);
-#endif
-
-        int num_writen = vsnprintf(_msg, MAX_MSG_SIZE-3, msg, argptr);
+        int num_writen = vsnprintf(_msg, num_required, msg, argptr);
         va_end(argptr);
 
-        if (num_writen > MAX_MSG_SIZE-3) {
-            _msg[MAX_MSG_SIZE-4] = '.';
-            _msg[MAX_MSG_SIZE-3] = '.';
-            _msg[MAX_MSG_SIZE-2] = '.';
-            _msg[MAX_MSG_SIZE-1] = '\0';
-        }
-        else if (num_writen < 0) {
+        if (num_writen < 0) {
             sprintf(_msg, "Error %d in logging: %s", errno, strerror(errno));
+            return;
         }
-        delete[] _msg; // delete the old message
-        _msg = nullptr;
+        else if (num_writen != num_required) {
+            sprintf(_msg, "Error in logging: mismatch between num_written(%d) and num_required(%d)",
+                    num_writen, num_required);
+            return;
+        }
     }
+
+    Log_Msg(Log_Msg&& other) noexcept
+        : _msg(other._msg) {
+        other._msg = nullptr; // Transfer ownership
+    }
+
+    ~Log_Msg() {
+        if (_msg != nullptr) {
+            delete[] _msg; // Free the allocated memory
+            _msg = nullptr; // Avoid dangling pointer
+        }
+    }
+
+    Log_Msg(const Log_Msg& other) = delete; // Disable copy constructor
+    Log_Msg& operator=(const Log_Msg& other) = delete; // Disable copy assignment
 };
 
 inline void nsleep(uint64_t nsec) {

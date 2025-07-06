@@ -161,9 +161,8 @@ public:
             if ((i + 1 - num_vec_rem) % num_vec_per_node == 0) {
                 centroids.emplace_back(nodes.back()->Compute_Current_Centroid());
                 CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CORE,
-                    "Simple Cluster: Created Node " NODE_LOG_FMT, " Centroid:%s",
-                    NODE_PTR_LOG(nodes.back(), true),
-                    centroids.back().to_string().c_str());
+                    "Simple Cluster: Created Node " NODE_LOG_FMT " with centroid %s",
+                    NODE_PTR_LOG(nodes.back(), true), centroids.back().to_string().c_str());
             }
         }
         centroids[0] = node->Compute_Current_Centroid();
