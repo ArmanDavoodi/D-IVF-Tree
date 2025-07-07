@@ -12,14 +12,19 @@ namespace copper {
 
 class CopperNode : public CopperNodeInterface {
 public:
-    CopperNode(VectorID id, CopperNodeAttributes attr) : _data(id, attr) {}
+    CopperNode(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
+        _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
+        _bucket(attr.core.dimention, attr.max_size),
+        _similarityComparator(attr.similarityComparator),
+        _reverseSimilarityComparator(attr.reverseSimilarityComparator) {}
+
     ~CopperNode() = default;
     RetStatus AssignParent(VectorID parent_id) override {
-        _data._parent_id = parent_id;
+        _parent_id = parent_id;
     }
 
     Address Insert(const Vector& vec, VectorID vec_id) override {
-        return _data._bucket.Insert(vec, vec_id);
+        return _bucket.Insert(vec, vec_id);
     }
 
     VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) override {
@@ -32,35 +37,35 @@ public:
     }
 
     VectorID CentroidID() const override {
-        return _data._centroid_id;
+        return _centroid_id;
     }
 
     VectorID ParentID() const override {
-        return _data._parent_id;
+        return _parent_id;
     }
 
     uint16_t Size() const override {
-        return _data._bucket.Size();
+        return _bucket.Size();
     }
 
     bool IsFull() const override {
-        return _data._bucket.Size() >= _data._bucket.Capacity();
+        return _bucket.Size() >= _bucket.Capacity();
     }
 
     bool IsAlmostEmpty() const override {
-        return _data._bucket.Size() <= _data._min_size;
+        return _bucket.Size() <= _min_size;
     }
 
     bool Contains(VectorID id) const override {
-        return _data._bucket.Contains(id);
+        return _bucket.Contains(id);
     }
 
     bool IsLeaf() const override {
-        return _data._centroid_id.IsLeaf();
+        return _centroid_id.IsLeaf();
     }
 
     uint8_t Level() const override {
-        return _data._centroid_id._level;
+        return _centroid_id._level;
     }
 
     Vector ComputeCurrentCentroid() const override {
@@ -68,39 +73,46 @@ public:
     }
 
     uint16_t MinSize() const override {
-        return _data._min_size;
+        return _min_size;
     }
 
     uint16_t MaxSize() const override {
-        return _data._bucket.Capacity();
+        return _bucket.Capacity();
     }
 
     uint16_t VectorDimention() const override {
-        return _data._bucket.Dimension();
+        return _bucket.Dimension();
     }
 
     /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
     const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const override {
         if (reverese) {
-            return *_data._reverseSimilarityComparator;
+            return *_reverseSimilarityComparator;
         }
-        return *_data._similarityComparator;
+        return *_similarityComparator;
     }
 
     DTYPE Distance(const Vector& a, const Vector& b) const override {
         return 0.0; // Placeholder for actual distance computation
     }
 
-    size_t Bytes() const override {
-        _data.Bytes(); // Return the size of the node in bytes
+    String BucketToString() const override {
+        return _bucket.ToString(); // Return a string representation of the bucket
     }
 
-    String BucketToString() const override {
-        return _data._bucket.ToString(); // Return a string representation of the bucket
+    static size_t Bytes(uint16_t dim, uint16_t capacity) {
+        return sizeof(CopperNode) + VectorSet::DataBytes(dim, capacity);
     }
 
 protected:
-    CopperNodeData _data;
+    const VectorID _centroid_id;
+    VectorID _parent_id;
+    const ClusteringType _clusteringAlg;
+    const DistanceType _distanceAlg;
+    const uint16_t _min_size;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    VectorSet _bucket;
 
 TESTABLE;
 };
@@ -108,7 +120,11 @@ TESTABLE;
 class VectorIndex : public VectorIndexInterface {
 public:
 
-    VectorIndex(CopperAttributes attr) : _attr(attr),
+    VectorIndex(CopperAttributes attr) : core_attr(attr.core), leaf_min_size(attr.leaf_min_size),
+                                         leaf_max_size(attr.leaf_max_size),
+                                         internal_min_size(attr.internal_min_size),
+                                         internal_max_size(attr.internal_max_size),
+                                         split_internal(attr.split_internal), split_leaf(attr.split_leaf),
                                          _similarityComparator(
                                             GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
                                          _reverseSimilarityComparator(
@@ -130,7 +146,7 @@ public:
         _levels = 2;
         CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX,
              "Init Copper Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
-             VECTORID_LOG(_root), _levels, _attr.ToString().ToCStr());
+             VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
     }
 
     ~VectorIndex() override {
@@ -165,14 +181,16 @@ public:
     }
 
     size_t Bytes(bool is_internal_node) const override {
-        if (is_internal_node) {
-            return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _attr.core.dimention * _attr.internal_max_size;
-        } else {
-            return sizeof(CopperNodeHeaderData) + sizeof(VTYPE) * _attr.core.dimention * _attr.leaf_max_size;
-        }
+        return CopperNode::Bytes(core_attr.dimention, is_internal_node ? internal_max_size : leaf_max_size);
     }
 protected:
-    const CopperAttributes _attr;
+    const CopperCoreAttributes core_attr;
+    const uint16_t leaf_min_size;
+    const uint16_t leaf_max_size;
+    const uint16_t internal_min_size;
+    const uint16_t internal_max_size;
+    const uint16_t split_internal;
+    const uint16_t split_leaf;
     const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
     const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
     size_t _size;
@@ -214,16 +232,16 @@ protected:
         CHECK_NOT_NULLPTR(new_node, LOG_TAG_COPPER_NODE);
 
         CopperNodeAttributes attr;
-        attr.core = _attr.core;
+        attr.core = core_attr;
         attr.similarityComparator = _similarityComparator;
         attr.reverseSimilarityComparator = _reverseSimilarityComparator;
         if (is_internal_node) {
-            attr.max_size = _attr.internal_max_size;
-            attr.min_size = _attr.internal_min_size;
+            attr.max_size = internal_max_size;
+            attr.min_size = internal_min_size;
         }
         else {
-            attr.max_size = _attr.leaf_max_size;
-            attr.min_size = _attr.leaf_min_size;
+            attr.max_size = leaf_max_size;
+            attr.min_size = leaf_min_size;
         }
 
         new (new_node) CopperNode(id, attr);

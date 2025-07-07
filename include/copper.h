@@ -40,47 +40,57 @@ namespace copper {
 
 class CopperNode : public CopperNodeInterface {
 public:
-    CopperNode(VectorID id, CopperNodeAttributes attr) : _data(id, attr) {}
+    CopperNode(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
+        _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
+        _bucket(attr.core.dimention, attr.max_size),
+        _similarityComparator(attr.similarityComparator),
+        _reverseSimilarityComparator(attr.reverseSimilarityComparator) {
+
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
+        CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_COPPER_NODE);
+        CHECK_NODE_ATTRIBUTES(attr, LOG_TAG_COPPER_NODE);
+    }
+
     ~CopperNode() override = default; /* No dynamic allocation inside of the Node data -> should be freed by buffermgr */
 
     RetStatus AssignParent(VectorID parent_id) override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        FatalAssert(parent_id._level == _data._centroid_id._level + 1, LOG_TAG_COPPER_NODE,
+        FatalAssert(parent_id._level == _centroid_id._level + 1, LOG_TAG_COPPER_NODE,
                     "Assign_Parent(self = " NODE_LOG_FMT ", parent_id = " VECTORID_LOG_FMT
                     "): Level mismatch between parent and self.", NODE_PTR_LOG(this), VECTORID_LOG(parent_id));
 
-        _data._parent_id = parent_id;
+        _parent_id = parent_id;
         return RetStatus::Success();
     }
 
     Address Insert(const Vector& vec, VectorID vec_id) override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
         CHECK_VECTORID_IS_VALID(vec_id, LOG_TAG_COPPER_NODE);
-        FatalAssert(vec_id._level == _data._centroid_id._level - 1, LOG_TAG_COPPER_NODE, "Level mismatch! "
+        FatalAssert(vec_id._level == _centroid_id._level - 1, LOG_TAG_COPPER_NODE, "Level mismatch! "
             "input vector: (id: %lu, level: %lu), centroid vector: (id: %lu, level: %lu)"
-            , vec_id._id, vec_id._level, _data._centroid_id._id, _data._centroid_id._level);
+            , vec_id._id, vec_id._level, _centroid_id._id, _centroid_id._level);
         FatalAssert(vec.IsValid(), LOG_TAG_COPPER_NODE, "Cannot insert invalid vector %lu into the bucket with id %lu.",
-                    vec_id._id, _data._centroid_id._id);
-        Address addr = _data._bucket.Insert(vec, vec_id);
+                    vec_id._id, _centroid_id._id);
+        Address addr = _bucket.Insert(vec, vec_id);
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE,
                  "Insert: Node-Bucket=%s, Inserted VectorID=" VECTORID_LOG_FMT ", Vector=%s",
-                 _data._bucket.ToString().ToCStr(), VECTORID_LOG(vec_id), vec.ToString(_data._bucket.Dimension()).ToCStr());
+                 _bucket.ToString().ToCStr(), VECTORID_LOG(vec_id), vec.ToString(_bucket.Dimension()).ToCStr());
         return addr;
     }
 
     VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, true);
         CHECK_NODE_IS_VALID(_dest, LOG_TAG_COPPER_NODE, false);
-        FatalAssert(_dest->Level() == _data._centroid_id._level, LOG_TAG_COPPER_NODE, "Level mismatch! "
+        FatalAssert(_dest->Level() == _centroid_id._level, LOG_TAG_COPPER_NODE, "Level mismatch! "
                    "_dest = (id: %lu, level: %lu), self = (id: %lu, level: %lu)",
-                   _dest->CentroidID()._id, _dest->CentroidID()._level, _data._centroid_id._id, _data._centroid_id._level);
+                   _dest->CentroidID()._id, _dest->CentroidID()._level, _centroid_id._id, _centroid_id._level);
 
         VectorUpdate update;
-        update.vector_id = _data._bucket.GetLastVectorID();
-        update.vector_data = _dest->Insert(_data._bucket.GetLastVector(), update.vector_id);
+        update.vector_id = _bucket.GetLastVectorID();
+        update.vector_data = _dest->Insert(_bucket.GetLastVector(), update.vector_id);
         FatalAssert(update.IsValid(), LOG_TAG_COPPER_NODE, "Invalid Update. ID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(_data._centroid_id));
-        _data._bucket.DeleteLast();
+                    VECTORID_LOG_FMT, VECTORID_LOG(_centroid_id));
+        _bucket.DeleteLast();
         return update;
     }
 
@@ -92,20 +102,20 @@ public:
                     "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_COPPER_NODE,
-                 "Search: Node-Bucket=%s", _data._bucket.ToString().ToCStr());
+                 "Search: Node-Bucket=%s", _bucket.ToString().ToCStr());
         PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_COPPER_NODE, "Search: Neighbours before search");
 
-        for (uint16_t i = 0; i < _data._bucket.Size(); ++i) {
-            const VectorPair& vectorPair = _data._bucket[i];
+        for (uint16_t i = 0; i < _bucket.Size(); ++i) {
+            const VectorPair& vectorPair = _bucket[i];
             DTYPE distance = Distance(query, vectorPair.vec);
             neighbours.emplace_back(vectorPair.id, distance);
             std::push_heap<std::vector<std::pair<VectorID, DTYPE>>::iterator,
                            const DIST_ID_PAIR_SIMILARITY_INTERFACE&>(neighbours.begin(), neighbours.end(),
-                                                                     *(_data._similarityComparator));
+                                                                     *(_similarityComparator));
             if (neighbours.size() > k) {
                 std::pop_heap<std::vector<std::pair<VectorID, DTYPE>>::iterator,
                               const DIST_ID_PAIR_SIMILARITY_INTERFACE&>(neighbours.begin(), neighbours.end(),
-                                                                        *(_data._similarityComparator));
+                                                                        *(_similarityComparator));
                 neighbours.pop_back();
             }
         }
@@ -119,108 +129,119 @@ public:
 
     VectorID CentroidID() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._centroid_id;
+        return _centroid_id;
     }
 
     VectorID ParentID() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._parent_id;
+        return _parent_id;
     }
 
     uint16_t Size() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._bucket.Size();
+        return _bucket.Size();
     }
 
     bool IsFull() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._bucket.Size() == _data._bucket.Capacity();
+        return _bucket.Size() == _bucket.Capacity();
     }
 
     bool IsAlmostEmpty() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._bucket.Size() == _data._min_size;
+        return _bucket.Size() == _min_size;
     }
 
     bool Contains(VectorID id) const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._bucket.Contains(id);
+        return _bucket.Contains(id);
     }
 
     bool IsLeaf() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._centroid_id.IsLeaf();
+        return _centroid_id.IsLeaf();
     }
 
     uint8_t Level() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._centroid_id._level;
+        return _centroid_id._level;
     }
 
     Vector ComputeCurrentCentroid() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, true);
 
-        switch (_data._distanceAlg)
+        switch (_distanceAlg)
         {
         case DistanceType::L2:
-            return L2::ComputeCentroid(static_cast<const VTYPE*>(_data._bucket.GetVectors()),
-                                       _data._bucket.Size(), _data._bucket.Dimension());
+            return L2::ComputeCentroid(static_cast<const VTYPE*>(_bucket.GetVectors()),
+                                       _bucket.Size(), _bucket.Dimension());
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-             "ComputeCurrentCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[_data._distanceAlg]);
+             "ComputeCurrentCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
         return Vector(); // Return an empty vector if the distance type is invalid
     }
 
     inline uint16_t MinSize() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._min_size;
+        return _min_size;
     }
     inline uint16_t MaxSize() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._bucket.Capacity();
+        return _bucket.Capacity();
     }
     inline uint16_t VectorDimention() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        return _data._bucket.Dimension();
+        return _bucket.Dimension();
     }
 
     inline const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
         if (reverese) {
-            return *(_data._reverseSimilarityComparator);
+            return *(_reverseSimilarityComparator);
         } else {
-            return *(_data._similarityComparator);
+            return *(_similarityComparator);
         }
     }
 
     inline DTYPE Distance(const Vector& a, const Vector& b) const override {
-        switch (_data._distanceAlg)
+        switch (_distanceAlg)
         {
         case DistanceType::L2:
             return L2::Distance(a, b, VectorDimention());
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_data._distanceAlg]);
+             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
         return 0; // Return 0 if the distance type is invalid
     }
 
-    inline size_t Bytes() const override {
-        return _data.Bytes();
+    String BucketToString() const override {
+        return _bucket.ToString();
     }
 
-    String BucketToString() const override {
-        return _data._bucket.ToString();
+    static inline size_t Bytes(uint16_t dim, uint16_t capacity) {
+        return sizeof(CopperNode) + VectorSet::DataBytes(dim, capacity);
     }
 
 protected:
-    CopperNodeData _data;
+    const VectorID _centroid_id;
+    VectorID _parent_id;
+    const ClusteringType _clusteringAlg;
+    const DistanceType _distanceAlg;
+    const uint16_t _min_size;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
+    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    VectorSet _bucket;
 
 TESTABLE;
 };
 
 class VectorIndex : public VectorIndexInterface {
 public:
-    VectorIndex(CopperAttributes attr) : _attr(attr),
+    VectorIndex(CopperAttributes attr) : core_attr(attr.core), leaf_min_size(attr.leaf_min_size),
+                                         leaf_max_size(attr.leaf_max_size),
+                                         internal_min_size(attr.internal_min_size),
+                                         internal_max_size(attr.internal_max_size),
+                                         split_internal(attr.split_internal), split_leaf(attr.split_leaf),
                                          _similarityComparator(
                                             GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
                                          _reverseSimilarityComparator(
@@ -242,7 +263,7 @@ public:
         _levels = 2;
         CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX,
              "Init Copper Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
-             VECTORID_LOG(_root), _levels, _attr.ToString().ToCStr());
+             VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
     }
 
     ~VectorIndex() override {
@@ -266,7 +287,7 @@ public:
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
-             vec.ToString(_attr.core.dimention).ToCStr(), _size, _levels);
+             vec.ToString(core_attr.dimention).ToCStr(), _size, _levels);
 
         std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
         upper_layer.emplace_back(_root, 0);
@@ -315,7 +336,7 @@ public:
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Insert END: Vector=%s, vec_id=" VECTORID_LOG_FMT ", _size=%lu, _levels=%hhu",
-             vec.ToString(_attr.core.dimention).ToCStr(), VECTORID_LOG(vec_id), _size, _levels);
+             vec.ToString(core_attr.dimention).ToCStr(), VECTORID_LOG(vec_id), _size, _levels);
 
         return rs;
     }
@@ -344,7 +365,7 @@ public:
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
-             "num_levels=%hhu", query.ToString(_attr.core.dimention).ToCStr(), k, _internal_k,
+             "num_levels=%hhu", query.ToString(core_attr.dimention).ToCStr(), k, _internal_k,
              _leaf_k, _size, _levels);
 
         RetStatus rs = RetStatus::Success();
@@ -389,23 +410,28 @@ public:
     }
 
     inline DTYPE Distance(const Vector& a, const Vector& b) const override {
-        switch (_attr.core.distanceAlg)
+        switch (core_attr.distanceAlg)
         {
         case DistanceType::L2:
-            return L2::Distance(a, b, _attr.core.dimention);
+            return L2::Distance(a, b, core_attr.dimention);
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_attr.core.distanceAlg]);
+             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
         return 0; // Return 0 if the distance type is invalid
     }
 
     inline size_t Bytes(bool is_internal_node) const override {
-        return sizeof(CopperNodeHeaderData) + (sizeof(VTYPE) * _attr.core.dimention *
-                                              (is_internal_node ? _attr.internal_max_size : _attr.leaf_max_size));
+        return CopperNode::Bytes(core_attr.dimention, is_internal_node ? internal_max_size : leaf_max_size);
     }
 
 protected:
-    const CopperAttributes _attr;
+    const CopperCoreAttributes core_attr;
+    const uint16_t leaf_min_size;
+    const uint16_t leaf_max_size;
+    const uint16_t internal_min_size;
+    const uint16_t internal_max_size;
+    const uint16_t split_internal;
+    const uint16_t split_leaf;
     const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
     const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
     size_t _size;
@@ -414,12 +440,12 @@ protected:
     uint64_t _levels;
 
     inline bool MoreSimilar(const DTYPE& a, const DTYPE& b) const {
-        switch (_attr.core.distanceAlg) {
+        switch (core_attr.distanceAlg) {
         case DistanceType::L2:
             return L2::MoreSimilar(a, b);
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
-             "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[_attr.core.distanceAlg]);
+             "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
         return false; // Return false if the distance type is invalid
     }
 
@@ -432,7 +458,7 @@ protected:
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Search_Nodes BEGIN: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu",
-             query.ToString(_attr.core.dimention).ToCStr(), n, upper_layer.size(), upper_layer.front().first._level);
+             query.ToString(core_attr.dimention).ToCStr(), n, upper_layer.size(), upper_layer.front().first._level);
 
         RetStatus rs = RetStatus::Success();
         lower_layer.clear();
@@ -451,7 +477,7 @@ protected:
 
             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
                  "Search_Nodes: node_id=" VECTORID_LOG_FMT ", node_centroid=%s, node_type=%s",
-                 VECTORID_LOG(node_id), _bufmgr.GetVector(node_id).ToString(_attr.core.dimention).ToCStr(),
+                 VECTORID_LOG(node_id), _bufmgr.GetVector(node_id).ToString(core_attr.dimention).ToCStr(),
                  ((node->IsLeaf()) ? "Leaf" : "Internal"));
 
             rs = node->Search(query, n, lower_layer);
@@ -462,7 +488,7 @@ protected:
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Search_Nodes END: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu, "
              "lower_layer_size=%lu, lower_level=%hhu",
-             query.ToString(_attr.core.dimention).ToCStr(), n, upper_layer.size(),
+             query.ToString(core_attr.dimention).ToCStr(), n, upper_layer.size(),
              upper_layer.front().first._level, lower_layer.size(),
              lower_layer.front().first._level);
 
@@ -564,9 +590,9 @@ protected:
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Split BEGIN: " NODE_LOG_FMT, "Centroid:%s",
-             NODE_PTR_LOG(node), centroids[0].ToString(_attr.core.dimention).ToCStr());
+             NODE_PTR_LOG(node), centroids[0].ToString(core_attr.dimention).ToCStr());
 
-        rs = Cluster(candidates, node_idx, centroids, _attr.split_leaf);
+        rs = Cluster(candidates, node_idx, centroids, split_leaf);
         FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Clustering failed");
         FatalAssert(centroids[0].IsValid(), LOG_TAG_VECTOR_INDEX, "new centroid vector of base node is invalid");
         FatalAssert(candidates.size() > last_size, LOG_TAG_VECTOR_INDEX, "No new nodes were created.");
@@ -577,7 +603,7 @@ protected:
             ExpandTree(node, centroids[0]);
         }
         else {
-            _bufmgr.GetVector(node->CentroidID()).CopyFrom(centroids[0], _attr.core.dimention);
+            _bufmgr.GetVector(node->CentroidID()).CopyFrom(centroids[0], core_attr.dimention);
         }
 
         std::vector<CopperNodeInterface*> parents;
@@ -599,8 +625,8 @@ protected:
             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
                  "Split: Put Node " NODE_LOG_FMT, " Centroid:%s, into Parent " NODE_LOG_FMT,
                  " Parent_Centroid:%s", NODE_PTR_LOG(candidates[node_it + last_size - 1]),
-                 centroids[node_it].ToString(_attr.core.dimention).ToCStr(), NODE_PTR_LOG(parents[closest]),
-                 _bufmgr.GetVector(parents[closest]->CentroidID()).ToString(_attr.core.dimention).ToCStr());
+                 centroids[node_it].ToString(core_attr.dimention).ToCStr(), NODE_PTR_LOG(parents[closest]),
+                 _bufmgr.GetVector(parents[closest]->CentroidID()).ToString(core_attr.dimention).ToCStr());
 
             // todo assert ok
             if (parents[closest]->IsFull()) {
@@ -611,7 +637,7 @@ protected:
 
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_VECTOR_INDEX,
              "Split END: " NODE_LOG_FMT, "Centroid:%s",
-             NODE_PTR_LOG(node),  _bufmgr.GetVector(node->CentroidID()).ToString(_attr.core.dimention).ToCStr());
+             NODE_PTR_LOG(node),  _bufmgr.GetVector(node->CentroidID()).ToString(core_attr.dimention).ToCStr());
         return rs;
     }
 
@@ -630,16 +656,16 @@ protected:
         CHECK_NOT_NULLPTR(new_node, LOG_TAG_COPPER_NODE);
 
         CopperNodeAttributes attr;
-        attr.core = _attr.core;
+        attr.core = core_attr;
         attr.similarityComparator = _similarityComparator;
         attr.reverseSimilarityComparator = _reverseSimilarityComparator;
         if (is_internal_node) {
-            attr.max_size = _attr.internal_max_size;
-            attr.min_size = _attr.internal_min_size;
+            attr.max_size = internal_max_size;
+            attr.min_size = internal_min_size;
         }
         else {
-            attr.max_size = _attr.leaf_max_size;
-            attr.min_size = _attr.leaf_min_size;
+            attr.max_size = leaf_max_size;
+            attr.min_size = leaf_min_size;
         }
 
         new (new_node) CopperNode(id, attr);
@@ -647,7 +673,7 @@ protected:
         return new_node;
     }
 
-    inline RetStatus SimpleDvideClustering(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
+    inline RetStatus SimpleDivideClustering(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
                                            std::vector<Vector>& centroids, uint16_t split_into) {
         FatalAssert(nodes.size() > target_node_index, LOG_TAG_CLUSTERING, "nodes should contain node.");
         CopperNodeInterface* target = nodes[target_node_index];
@@ -696,13 +722,13 @@ protected:
 
     inline RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
                               std::vector<Vector>& centroids, uint16_t split_into) override {
-        switch (_attr.core.clusteringAlg)
+        switch (core_attr.clusteringAlg)
         {
         case ClusteringType::SimpleDivide:
-            return SimpleDvideClustering(nodes, target_node_index, centroids, split_into);
+            return SimpleDivideClustering(nodes, target_node_index, centroids, split_into);
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
-             "Cluster: Invalid clustering type: %s", CLUSTERING_TYPE_NAME[_attr.core.clusteringAlg]);
+             "Cluster: Invalid clustering type: %s", CLUSTERING_TYPE_NAME[core_attr.clusteringAlg]);
         return RetStatus::Fail("Invalid clustering type");
     }
 

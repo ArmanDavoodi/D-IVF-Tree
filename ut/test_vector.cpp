@@ -26,7 +26,7 @@ public:
 
     copper::VectorSet* CreateVectorSet(uint16_t dim, uint16_t capacity) {
         copper::VectorSet* vec_set = static_cast<copper::VectorSet*>(
-            malloc(sizeof(copper::VectorSet) + (sizeof(copper::VTYPE) * dim *capacity)));
+            malloc(sizeof(copper::VectorSet) + copper::VectorSet::DataBytes(dim, capacity)));
         FatalAssert(vec_set != nullptr, LOG_TAG_TEST, "Failed to allocate memory for VectorSet.");
         new (vec_set) copper::VectorSet(dim, capacity);
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created VectorSet: this=%p, dim=%hu, capacity=%hu",
@@ -198,7 +198,7 @@ public:
             status = status && (vec2.Similar(vec5, dim));
             ErrorAssert(vec2.Similar(vec5, dim), LOG_TAG_TEST,
                         "Vectors should be similar after link constructor.");
-            status = status && (vec2 != vec5);
+            status = status && (vec2 == vec5);
             ErrorAssert(vec2 == vec5, LOG_TAG_TEST,
                         "Vectors should be the same after link constructor.");
 

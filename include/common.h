@@ -244,10 +244,10 @@ typedef DISTANCE_TYPE DTYPE;
 
 #define CHECK_NODE_SELF_IS_VALID(tag, check_min_size) \
     CHECK_NODE_IS_VALID(this, (tag), (check_min_size)); \
-    FatalAssert(IsValid((this->_data)._clusteringAlg), (tag), "Clustering algorithm is invalid."); \
-    FatalAssert(IsValid((this->_data)._distanceAlg), (tag), "Distance algorithm is invalid."); \
-    CHECK_NOT_NULLPTR((this->_data)._similarityComparator, (tag)); \
-    CHECK_NOT_NULLPTR((this->_data)._reverseSimilarityComparator, (tag))
+    FatalAssert(IsValid(this->_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
+    FatalAssert(IsValid(this->_distanceAlg), (tag), "Distance algorithm is invalid."); \
+    CHECK_NOT_NULLPTR(this->_similarityComparator, (tag)); \
+    CHECK_NOT_NULLPTR(this->_reverseSimilarityComparator, (tag))
 
 #ifdef ENABLE_TEST_LOGGING
 #define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg) \

@@ -301,15 +301,16 @@ public:
     VectorSet(uint16_t dimention, uint16_t capacity) : _size(0), _cap(capacity), _dim(dimention) {
         FatalAssert(_dim > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with dimentiom of 0.");
         FatalAssert(_cap > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with capacity of 0.");
-        memset(GetVectors(), 0, ((sizeof(VTYPE) * _dim) + sizeof(VectorID)) * _cap);
+        memset(GetVectors(), 0, sizeof(VTYPE) * _dim * _cap);
+        memset(static_cast<Address>(GetIDs()), -1, sizeof(VectorID) * _cap);
     }
 
-    constexpr Address GetVectors() {
-        return static_cast<Address>(this) + sizeof(VectorSet);
+    inline Address GetVectors() {
+        return static_cast<Address>(_data);
     }
 
-    constexpr ConstAddress GetVectors() const {
-        return static_cast<ConstAddress>(this) + sizeof(VectorSet);
+    inline ConstAddress GetVectors() const {
+        return static_cast<ConstAddress>(_data);
     }
 
     inline VectorID* GetIDs() {
@@ -326,7 +327,7 @@ public:
 
         Address loc = GetVectors() + (_size * _dim * sizeof(VTYPE));
         memcpy(loc, new_vector.GetData(), _dim * sizeof(VTYPE));
-        GetIDs()[_size] = id;
+        (GetIDs())[_size] = id;
         ++_size;
         return loc;
     }
@@ -434,6 +435,10 @@ public:
         return _dim;
     }
 
+    static inline size_t DataBytes(uint16_t dim, uint16_t cap) {
+        return ((sizeof(VTYPE) * (uint64_t)dim) + sizeof(VectorID)) * (uint64_t)cap;
+    }
+
     String ToString() const {
         String str = "<Vectors: [";
         for (uint16_t i = 0; i < _size; ++i) {
@@ -456,6 +461,7 @@ protected:
     const uint16_t _cap;
     const uint16_t _dim;
     // DataType _vtype;
+    char _data[]; // This is a flexible array member, it will be allocated with the size of _cap * (_dim * sizeof(VTYPE) + sizeof(VectorID))
 
 TESTABLE;
 };
