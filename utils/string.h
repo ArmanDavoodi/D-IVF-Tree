@@ -13,10 +13,11 @@ public:
     String() : _data(nullptr), size(0) {}
 
     String(const String& other) : _data(((other.size == 0) ?
-                                  nullptr : static_cast<char*>(malloc((other.size + 1) * sizeof(char*))))),
+                                  nullptr : static_cast<char*>(malloc((other.size + 1) * sizeof(char))))),
                                   size(other.size) {
         if (other.size > 0) {
-            memcpy(_data, other._data, sizeof(char) * (size + 1));
+            memcpy(_data, other._data, sizeof(char) * (size));
+            _data[size] = 0;
         }
     }
 
@@ -26,7 +27,7 @@ public:
     }
 
     String(const std::string& other) :  _data(((other.size() == 0) ?
-                                        nullptr : static_cast<char*>(malloc((other.size() + 1) * sizeof(char*))))),
+                                        nullptr : static_cast<char*>(malloc((other.size() + 1) * sizeof(char))))),
                                         size(other.size()) {
         if (size > 0) {
             memcpy(_data, &(other[0]), sizeof(char) * (size));
@@ -51,7 +52,7 @@ public:
             return;
         }
         size = _size;
-        _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
+        _data = static_cast<char*>(malloc((size + 1) * sizeof(char)));
 
         int num_writen = vsnprintf(_data, size + 1, fmt, argptr);
         va_end(argptr);
@@ -72,8 +73,9 @@ public:
 
         if (other.size > 0) {
             size = other.size;
-            _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
-            memcpy(_data, other._data, sizeof(char) * (size + 1));
+            _data = static_cast<char*>(malloc((size + 1) * sizeof(char)));
+            memcpy(_data, other._data, sizeof(char) * size);
+            _data[size] = 0;
         }
 
         return *this;
@@ -104,8 +106,9 @@ public:
         }
 
         if (size > 0) {
-            _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
-            memcpy(_data, other, sizeof(char) * (size + 1));
+            _data = static_cast<char*>(malloc((size + 1) * sizeof(char)));
+            memcpy(_data, other, sizeof(char) * (size));
+            _data[size] = 0;
         }
 
         return *this;
@@ -119,7 +122,7 @@ public:
         }
 
         if (size > 0) {
-            _data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
+            _data = static_cast<char*>(malloc((size + 1) * sizeof(char)));
             memcpy(_data, &(other[0]), sizeof(char) * (size));
             _data[size] = 0;
         }
@@ -150,7 +153,7 @@ public:
             return res;
         }
 
-        res._data = static_cast<char*>(malloc((size + 1) * sizeof(char*)));
+        res._data = static_cast<char*>(malloc((res.size + 1) * sizeof(char)));
         size_t offset = 0;
         if (size > 0) {
             memcpy(res._data, _data, sizeof(char) * size);

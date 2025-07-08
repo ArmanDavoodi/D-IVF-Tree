@@ -250,14 +250,14 @@ public:
             copper::Address va1 = set1.Insert(_data[i], _ids[i]);
             copper::Address va2 = set2.Insert(copper::Vector(_data[i]), _ids[i]);
 
-            status = status && (va1 == set1.GetVectors() + (i * dim));
-            ErrorAssert(va1 == set1.GetVectors() + (i * dim), LOG_TAG_TEST,
+            status = status && (va1 == set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
+            ErrorAssert(va1 == set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)), LOG_TAG_TEST,
                         "vector set returned wrong address. Expected=%p, Actual=%p",
-                        va1, set1.GetVectors() + (i * dim));
-            status = status && (va2 == set2.GetVectors() + (i * dim));
-            ErrorAssert(va2 == set2.GetVectors() + (i * dim), LOG_TAG_TEST,
+                        va1, set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
+            status = status && (va2 == set2.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
+            ErrorAssert(va2 == set2.GetVectors() + (i * dim * sizeof(copper::VTYPE)), LOG_TAG_TEST,
                         "vector set returned wrong address. Expected=%p, Actual=%p",
-                        va2, set1.GetVectors() + (i * dim));
+                        va2, set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
 
             status = status && (set1[i].id == _ids[i]);
             ErrorAssert(set1[i].id == _ids[i], LOG_TAG_TEST,

@@ -390,11 +390,11 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed
     if (debug::fault_checking != nullptr) {
-        *(debug::fault_checking) = (level == LOG_LEVEL_PANIC);
         fprintf(OUT, "FAULT_CHECK(%s) | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
         fflush(OUT);
         if (level == LOG_LEVEL_PANIC) {
+            *(debug::fault_checking) = true;
             throw debug::FaultCheckingExc{};
         } else {
             return; // do not log the message again
@@ -492,7 +492,9 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
         try { \
             (statement);\
         } \
-        catch (const copper::debug::FaultCheckingExc& e) {} \
+        catch (const copper::debug::FaultCheckingExc& e) {\
+            _FAULTY = true;\
+        } \
         catch (const std::exception& e) {\
             _FAULTY = true;\
             CLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
