@@ -4,9 +4,6 @@
 #include "common.h"
 #include "vector_utils.h"
 
-#include "interface/copper.h"
-#include "interface/buffer.h"
-
 #include <vector>
 
 namespace copper {

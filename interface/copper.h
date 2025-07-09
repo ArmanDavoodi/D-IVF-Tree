@@ -113,7 +113,7 @@ protected:
     inline static DIST_ID_PAIR_SIMILARITY_INTERFACE* GetDistancePairSimilarityComparator(DistanceType distanceAlg,
                                                                                          bool reverse) {
         switch (distanceAlg) {
-            case DistanceType::L2:
+            case DistanceType::L2_Distance:
                 return (reverse ?
                         static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_REVERSE_SIMILARITY()) :
                         static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_SIMILARITY()));

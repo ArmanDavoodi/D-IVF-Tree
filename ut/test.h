@@ -32,11 +32,12 @@ public:
         if (num_runs == 0) {
             return 1;
         }
-
+        bool all_runs_successful = true;
         for (size_t i = 0; i < num_runs; ++i) {
             fprintf(stderr, "Starting round %lu/%lu...\n\n", i+1, num_runs);
             test.Init(i + 1);
             fprintf(stderr, "Inited the tests.\n\n");
+            bool round_run_successful = true;
 
             for (std::string test_name : tests_to_run) {
                 fprintf(stderr, "Searching for Test " _COLORF_CYAN "%s" _COLORF_RESET "...\n", test_name.c_str());
@@ -50,19 +51,35 @@ public:
                     else {
                         fprintf(stderr, _COLORF_RED "Test " _COLORF_RESET _COLORF_CYAN " %s " _COLORF_RESET _COLORF_RED
                                 " failed!" _COLORF_RESET "\n\n", test_name.c_str());
+                        round_run_successful = false;
+                        all_runs_successful = false;
                     }
                 }
                 else {
                     fprintf(stderr, _COLORF_RED "Error: Test " _COLORF_RESET _COLORF_CYAN "%s" _COLORF_RESET _COLORF_RED
                             " not found!\n\n" _COLORF_RESET, test_name.c_str());
+                    all_runs_successful = false;
                 }
             }
 
             test.Destroy();
-            fprintf(stderr, "End of round %lu/%lu\n\n", i+1, num_runs);
+            fprintf(stderr, "End of round %lu/%lu: ", i+1, num_runs);
+            if (round_run_successful) {
+                fprintf(stderr, _COLORF_GREEN "All tests passed!" _COLORF_RESET "\n\n");
+            } else {
+                fprintf(stderr, _COLORF_RED "Some tests failed!" _COLORF_RESET "\n\n");
+            }
         }
 
-        return 0;
+        fprintf(stderr, "Result: ");
+        if (all_runs_successful) {
+            fprintf(stderr, _COLORF_GREEN "All runs were successful!" _COLORF_RESET "\n");
+        } else {
+            fprintf(stderr, _COLORF_RED "Some runs failed!" _COLORF_RESET "\n");
+        }
+
+        fprintf(stderr, "\n================================\n");
+        return (all_runs_successful ? 0 : 1);
     }
 protected:
     UTClass test;
