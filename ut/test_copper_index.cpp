@@ -195,15 +195,15 @@
 //     };
 
 //     struct _DIST_ID_PAIR_SIMILARITY {
-//         copper::L2_Distance<uint16_t, dim, double> _cmp;
+//         copper::L2Distance<uint16_t, dim, double> _cmp;
 
-//         _DIST_ID_PAIR_SIMILARITY(copper::L2_Distance<uint16_t, dim, double> _d) : _cmp(_d) {}
+//         _DIST_ID_PAIR_SIMILARITY(copper::L2Distance<uint16_t, dim, double> _d) : _cmp(_d) {}
 //         inline bool operator()(const std::pair<copper::VectorID, double>& a, const std::pair<copper::VectorID, double>& b) const {
 //             return _cmp(a.second, b.second);
 //         }
 //     };
 
-//     _DIST_ID_PAIR_SIMILARITY _more_similar{copper::L2_Distance<uint16_t, dim, double>()};
+//     _DIST_ID_PAIR_SIMILARITY _more_similar{copper::L2Distance<uint16_t, dim, double>()};
 
 // friend class TestBase<Test>;
 // };

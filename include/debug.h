@@ -26,6 +26,11 @@
 #define ENABLE_ASSERTS
 #endif
 
+// Todo: handle during compile
+#ifdef ENABLE_TEST_LOGGING
+#define ENABLE_FAULT_LOGGING
+#endif
+
 enum LOG_LEVELS : uint8_t {
     LOG_LEVEL_ZERO,
     LOG_LEVEL_PANIC,
@@ -390,9 +395,11 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed
     if (debug::fault_checking != nullptr) {
+#ifdef ENABLE_FAULT_LOGGING
         fprintf(OUT, "FAULT_CHECK(%s) | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
         fflush(OUT);
+#endif
         if (level == LOG_LEVEL_PANIC) {
             *(debug::fault_checking) = true;
             throw debug::FaultCheckingExc{};

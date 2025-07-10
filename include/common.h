@@ -127,7 +127,7 @@ inline constexpr bool IsValid(ClusteringType type) {
 
 enum DistanceType : int8_t {
     InvalidD,
-    L2_Distance,
+    L2Distance,
     NumTypesD
 };
 inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypesD + 1] = {"Invalid", "L2", "NumTypes"};

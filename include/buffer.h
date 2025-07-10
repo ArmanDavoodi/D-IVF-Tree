@@ -16,6 +16,12 @@ struct VectorInfo {
 class BufferManager : public BufferManagerInterface {
 // TODO: reuse deleted IDs
 public:
+    ~BufferManager() override {
+        if (!directory.empty()) {
+            Shutdown();
+        }
+    }
+
     RetStatus Init() override {
         FatalAssert(directory.empty(), LOG_TAG_BUFFER, "Buffer already initialized");
 
@@ -180,7 +186,7 @@ public:
             for (size_t j = 0; j < directory[i].size(); ++j) {
                 str += "{VectorID:(" + std::to_string(i) + ", ?, " + std::to_string(j) + "), Info:";
                 VectorInfo& vec_info = directory[i][j];
-                str += "(" + std::to_string((uint64_t)(vec_info.vector_address)) + ", " + std::to_string((uint64_t)(vec_info.cluster_address)) + ")}";
+                str += String("(%p, %p)}", vec_info.vector_address, vec_info.cluster_address);
                 if (j != directory[i].size() - 1) {
                     str += ", ";
                 }

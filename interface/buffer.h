@@ -9,6 +9,7 @@ namespace copper {
 class BufferManagerInterface {
 // TODO: reuse deleted IDs
 public:
+    virtual ~BufferManagerInterface() = default;
 
     virtual RetStatus Init() = 0;
     virtual RetStatus Shutdown() = 0;

@@ -172,7 +172,7 @@ public:
 
         switch (_distanceAlg)
         {
-        case DistanceType::L2_Distance:
+        case DistanceType::L2Distance:
             return L2::ComputeCentroid(static_cast<const VTYPE*>(_bucket.GetVectors()),
                                        _bucket.Size(), _bucket.Dimension());
         }
@@ -206,7 +206,7 @@ public:
     inline DTYPE Distance(const Vector& a, const Vector& b) const override {
         switch (_distanceAlg)
         {
-        case DistanceType::L2_Distance:
+        case DistanceType::L2Distance:
             return L2::Distance(a, b, VectorDimention());
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
@@ -412,7 +412,7 @@ public:
     inline DTYPE Distance(const Vector& a, const Vector& b) const override {
         switch (core_attr.distanceAlg)
         {
-        case DistanceType::L2_Distance:
+        case DistanceType::L2Distance:
             return L2::Distance(a, b, core_attr.dimention);
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
@@ -441,7 +441,7 @@ protected:
 
     inline bool MoreSimilar(const DTYPE& a, const DTYPE& b) const {
         switch (core_attr.distanceAlg) {
-        case DistanceType::L2_Distance:
+        case DistanceType::L2Distance:
             return L2::MoreSimilar(a, b);
         }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
