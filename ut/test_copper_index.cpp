@@ -24,6 +24,74 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_copper_index::simple_divide_clustering for %luth time...", try_count);
         bool status = true;
 
+        constexpr uint16_t DIM = 3;
+        constexpr uint16_t MIN_SIZE = 2;
+        constexpr uint16_t MAX_SIZE = 8;
+        const uint16_t data[MAX_SIZE][DIM] = {{1, 2, 3},
+                                              {4, 5, 6},
+                                              {7, 8, 9},
+                                              {10, 11, 12},
+                                              {13, 14, 15},
+                                              {16, 17, 18},
+                                              {19, 20, 21},
+                                              {22, 23, 24}};
+        copper::VectorID ids[MAX_SIZE];
+        copper::BufferManager _bufmgr;
+        _bufmgr.Init();
+        copper::VectorID node_id = _bufmgr.RecordRoot();
+        copper::RetStatus rs = _bufmgr.UpdateClusterAddress(node_id, new Node(node_id));
+        status = status && rs.IsOK();
+            ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+        uint16_t level = 2;
+
+        copper::CopperNode<uint16_t, DIM, MIN_SIZE, MAX_SIZE, double, copper::Simple_Divide_L2> *node =
+            _bufmgr.template Get_Node<Node>(node_id);
+
+        status = status && (node != nullptr);
+        ErrorAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "Node should not be nullptr for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+
+        for (uint16_t i = 0; i < MAX_SIZE; ++i) {
+            ids[i] = _bufmgr.Record_Vector(0);
+            copper::Address vec_add = node->Insert(copper::Vector<uint16_t, DIM>(data[i]), ids[i]);
+            status = status && (vec_add != copper::INVALID_ADDRESS);
+            ErrorAssert(vec_add != copper::INVALID_ADDRESS, LOG_TAG_VECTOR_INDEX,
+                        "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
+            rs = _bufmgr.UpdateVectorAddress(ids[i], vec_add);
+            status = status && rs.IsOK();
+            ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
+        }
+
+        copper::VectorID _root_id = _bufmgr.Record_Root();
+        status = status && (_root_id.Is_Valid());
+        ErrorAssert(_root_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Root ID should"
+                    "not be invalid: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+        Node* new_root = new Node(_root_id);
+        status = status && (new_root != nullptr);
+        ErrorAssert(new_root != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to create new root node for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+        rs = _bufmgr.UpdateClusterAddress(_root_id, new_root);
+        status = status && rs.IsOK();
+        ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+        rs = _bufmgr.UpdateVectorAddress(_root_id, new_root->Insert(node->Compute_Current_Centroid(), node_id));
+        status = status && rs.IsOK();
+        ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update vector address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+        rs = node->Assign_Parent(_root_id);
+        status = status && rs.IsOK();
+        ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to assign parent for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+        ++level;
+
+
+        std::vector<Node*> nodes;
+        nodes.push_back(node);
+        std::vector<copper::Vector<uint16_t, DIM>> centroids;
+        copper::Simple_Divide_L2<uint16_t, DIM> _core;
+        rs = _core.template Cluster<Node, MIN_SIZE, MAX_SIZE, MIN_SIZE, MAX_SIZE>(nodes, 0, centroids, 2, _bufmgr);
+        status = status && rs.IsOK();
+        ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Clustering failed with error: %s", rs.Msg());
+
+        for (uint16_t i = 0; i < centroids.size(); ++i) {
+            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Centroid %u: %s", i, centroids[i].to_string().c_str());
+        }
+
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::simple_divide_clustering.");
         return status;
     }
