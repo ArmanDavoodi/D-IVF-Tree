@@ -14,13 +14,14 @@ class CopperNode : public CopperNodeInterface {
 public:
     CopperNode(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
         _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
-        _bucket(attr.core.dimention, attr.max_size),
         _similarityComparator(attr.similarityComparator),
-        _reverseSimilarityComparator(attr.reverseSimilarityComparator) {}
+        _reverseSimilarityComparator(attr.reverseSimilarityComparator),
+        _bucket(attr.core.dimention, attr.max_size) {}
 
     ~CopperNode() = default;
     RetStatus AssignParent(VectorID parent_id) override {
         _parent_id = parent_id;
+        return RetStatus::Success();
     }
 
     Address Insert(const Vector& vec, VectorID vec_id) override {
@@ -28,11 +29,15 @@ public:
     }
 
     VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) override {
+        UNUSED_VARIABLE(_dest);
         return VectorUpdate{INVALID_VECTOR_ID, INVALID_ADDRESS}; // Placeholder for actual implementation
     }
 
     RetStatus Search(const Vector& query, size_t k,
                      std::vector<std::pair<VectorID, DTYPE>>& neighbours) override {
+        UNUSED_VARIABLE(query);
+        UNUSED_VARIABLE(k);
+        UNUSED_VARIABLE(neighbours);
         return RetStatus::Success(); // Placeholder for actual implementation
     }
 
@@ -84,15 +89,15 @@ public:
         return _bucket.Dimension();
     }
 
-    /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const override {
-        if (reverese) {
-            return *_reverseSimilarityComparator;
-        }
-        return *_similarityComparator;
+    /* todo: A better method(compared to function pointer) to allow inlining for optimization */
+    inline VPairComparator GetSimilarityComparator(bool reverese) const override {
+        CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
+        return (reverese ? _reverseSimilarityComparator : _similarityComparator);
     }
 
     DTYPE Distance(const Vector& a, const Vector& b) const override {
+        UNUSED_VARIABLE(a);
+        UNUSED_VARIABLE(b);
         return 0.0; // Placeholder for actual distance computation
     }
 
@@ -110,8 +115,8 @@ protected:
     const ClusteringType _clusteringAlg;
     const DistanceType _distanceAlg;
     const uint16_t _min_size;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    const VPairComparator _similarityComparator;
+    const VPairComparator _reverseSimilarityComparator;
     VectorSet _bucket;
 
 TESTABLE;
@@ -152,23 +157,33 @@ public:
     ~VectorIndex() override {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
-        delete _similarityComparator;
-        delete _reverseSimilarityComparator;
         CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown Copper Index End: rs=%s", rs.Msg());
     }
 
     RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) override {
+        UNUSED_VARIABLE(vec);
+        UNUSED_VARIABLE(vec_id);
+        UNUSED_VARIABLE(node_per_layer);
         return RetStatus::Success(); // Placeholder for actual insertion logic
     }
 
     RetStatus Delete(VectorID vec_id) override {
+        UNUSED_VARIABLE(vec_id);
         return RetStatus::Success(); // Placeholder for actual deletion logic
     }
 
     RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
                                                     uint16_t _internal_k, uint16_t _leaf_k,
                                                     std::vector<std::pair<VectorID, DTYPE>>& neighbours,
-                                                    bool sort = true, bool sort_from_more_similar_to_less = true) override {
+                                                    bool sort = true,
+                                                    bool sort_from_more_similar_to_less = true) override {
+        UNUSED_VARIABLE(query);
+        UNUSED_VARIABLE(k);
+        UNUSED_VARIABLE(_internal_k);
+        UNUSED_VARIABLE(_leaf_k);
+        UNUSED_VARIABLE(neighbours);
+        UNUSED_VARIABLE(sort);
+        UNUSED_VARIABLE(sort_from_more_similar_to_less);
         return RetStatus::Success(); // Placeholder for actual search logic
     }
 
@@ -177,6 +192,8 @@ public:
     }
 
     DTYPE Distance(const Vector& a, const Vector& b) const override {
+        UNUSED_VARIABLE(a);
+        UNUSED_VARIABLE(b);
         return 0.0;
     }
 
@@ -191,8 +208,8 @@ protected:
     const uint16_t internal_max_size;
     const uint16_t split_internal;
     const uint16_t split_leaf;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    const VPairComparator _similarityComparator;
+    const VPairComparator _reverseSimilarityComparator;
     size_t _size;
     BufferManager _bufmgr;
     VectorID _root;
@@ -201,28 +218,42 @@ protected:
     RetStatus SearchNodes(const Vector& query,
                           const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
                           std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) override {
+        UNUSED_VARIABLE(query);
+        UNUSED_VARIABLE(upper_layer);
+        UNUSED_VARIABLE(lower_layer);
+        UNUSED_VARIABLE(n);
         return RetStatus::Success(); // Placeholder for actual search logic
     }
 
     VectorID RecordInto(const Vector& vec, CopperNodeInterface* container_node,
                         CopperNodeInterface* node = nullptr) override {
+        UNUSED_VARIABLE(vec);
+        UNUSED_VARIABLE(container_node);
+        UNUSED_VARIABLE(node);
         return INVALID_VECTOR_ID; // Placeholder for actual record logic
     }
 
     RetStatus ExpandTree(CopperNodeInterface* root, const Vector& centroid) override {
+        UNUSED_VARIABLE(root);
+        UNUSED_VARIABLE(centroid);
         return RetStatus::Success(); // Placeholder for actual tree expansion logic
     }
 
     size_t FindClosestCluster(const std::vector<CopperNodeInterface*>& candidates,
                               const Vector& vec) override {
+        UNUSED_VARIABLE(candidates);
+        UNUSED_VARIABLE(vec);
         return 0; // Placeholder for actual cluster finding logic
     }
 
     RetStatus Split(std::vector<CopperNodeInterface*>& candidates, size_t node_idx) override {
+        UNUSED_VARIABLE(candidates);
+        UNUSED_VARIABLE(node_idx);
         return RetStatus::Success(); // Placeholder for actual split logic
     }
 
     RetStatus Split(CopperNodeInterface* leaf) override {
+        UNUSED_VARIABLE(leaf);
         return RetStatus::Success(); // Placeholder for actual split logic
     }
 
@@ -251,6 +282,10 @@ protected:
 
     RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
                       std::vector<Vector>& centroids, uint16_t split_into) override {
+        UNUSED_VARIABLE(nodes);
+        UNUSED_VARIABLE(target_node_index);
+        UNUSED_VARIABLE(centroids);
+        UNUSED_VARIABLE(split_into);
         return RetStatus::Success(); // Placeholder for actual clustering logic
     }
 

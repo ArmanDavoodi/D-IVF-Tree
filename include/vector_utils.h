@@ -120,7 +120,7 @@ public:
         return *this;
     }
 
-    inline bool IsValid() const {
+    inline constexpr bool IsValid() const {
         return (_data != nullptr);
     }
 

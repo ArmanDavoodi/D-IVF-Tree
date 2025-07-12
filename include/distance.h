@@ -4,18 +4,16 @@
 #include "common.h"
 #include "vector_utils.h"
 
+#include <type_traits>
 #include <vector>
 
 namespace copper {
 
-class DIST_ID_PAIR_SIMILARITY_INTERFACE {
-public:
-    virtual bool operator()(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) const = 0;
-};
+using VPairComparator = bool (*)(const std::pair<VectorID, DTYPE>&, const std::pair<VectorID, DTYPE>&);
 
 namespace L2 {
 
-inline static DTYPE Distance(const Vector& a, const Vector& b, uint16_t dim) {
+inline constexpr DTYPE Distance(const Vector& a, const Vector& b, uint16_t dim) {
     FatalAssert(a.IsValid(), LOG_TAG_BASIC, "a is invalid");
     FatalAssert(b.IsValid(), LOG_TAG_BASIC, "b is invalid");
 
@@ -26,11 +24,20 @@ inline static DTYPE Distance(const Vector& a, const Vector& b, uint16_t dim) {
     return dist;
 }
 
-inline static bool MoreSimilar(const DTYPE& a, const DTYPE& b) {
+/* todo: A better method(compared to passing a pointer) to allow inlining for optimization */
+inline constexpr bool MoreSimilar(const DTYPE& a, const DTYPE& b) {
     return a < b;
 }
 
-inline static Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim) {
+inline constexpr bool MoreSimilarVPair(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) {
+    return MoreSimilar(a.second, b.second);
+}
+
+inline constexpr bool LessSimilarVPair(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) {
+    return MoreSimilar(b.second, a.second);
+}
+
+inline Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim) {
     FatalAssert(size > 0, LOG_TAG_BASIC, "size cannot be 0");
     FatalAssert(vectors != nullptr, LOG_TAG_BASIC, "size cannot be 0");
     Vector centroid(vectors, dim);
@@ -46,19 +53,6 @@ inline static Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t
 
     return centroid;
 }
-
-/* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-struct DIST_ID_PAIR_SIMILARITY : public DIST_ID_PAIR_SIMILARITY_INTERFACE {
-    inline bool operator()(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) const override {
-        return MoreSimilar(a.second, b.second);
-    }
-};
-
-struct DIST_ID_PAIR_REVERSE_SIMILARITY : public DIST_ID_PAIR_SIMILARITY_INTERFACE {
-    inline bool operator()(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) const override {
-        return !(MoreSimilar(a.second, b.second));
-    }
-};
 
 };
 

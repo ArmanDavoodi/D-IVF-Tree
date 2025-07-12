@@ -42,9 +42,9 @@ class CopperNode : public CopperNodeInterface {
 public:
     CopperNode(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
         _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
-        _bucket(attr.core.dimention, attr.max_size),
         _similarityComparator(attr.similarityComparator),
-        _reverseSimilarityComparator(attr.reverseSimilarityComparator) {
+        _reverseSimilarityComparator(attr.reverseSimilarityComparator),
+        _bucket(attr.core.dimention, attr.max_size) {
 
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_COPPER_NODE);
         CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_COPPER_NODE);
@@ -57,7 +57,7 @@ public:
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
         FatalAssert(parent_id._level == _centroid_id._level + 1, LOG_TAG_COPPER_NODE,
                     "Assign_Parent(self = " NODE_LOG_FMT ", parent_id = " VECTORID_LOG_FMT
-                    "): Level mismatch between parent and self.", NODE_PTR_LOG(this), VECTORID_LOG(parent_id));
+                    "): Level mismatch between parent and self.", NODE_SELF_LOG(), VECTORID_LOG(parent_id));
 
         _parent_id = parent_id;
         return RetStatus::Success();
@@ -109,13 +109,9 @@ public:
             const VectorPair& vectorPair = _bucket[i];
             DTYPE distance = Distance(query, vectorPair.vec);
             neighbours.emplace_back(vectorPair.id, distance);
-            std::push_heap<std::vector<std::pair<VectorID, DTYPE>>::iterator,
-                           const DIST_ID_PAIR_SIMILARITY_INTERFACE&>(neighbours.begin(), neighbours.end(),
-                                                                     *(_similarityComparator));
+            std::push_heap(neighbours.begin(), neighbours.end(), _similarityComparator);
             if (neighbours.size() > k) {
-                std::pop_heap<std::vector<std::pair<VectorID, DTYPE>>::iterator,
-                              const DIST_ID_PAIR_SIMILARITY_INTERFACE&>(neighbours.begin(), neighbours.end(),
-                                                                        *(_similarityComparator));
+                std::pop_heap(neighbours.begin(), neighbours.end(), _similarityComparator);
                 neighbours.pop_back();
             }
         }
@@ -175,9 +171,10 @@ public:
         case DistanceType::L2Distance:
             return L2::ComputeCentroid(static_cast<const VTYPE*>(_bucket.GetVectors()),
                                        _bucket.Size(), _bucket.Dimension());
+        default:
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
+                 "ComputeCurrentCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
         }
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-             "ComputeCurrentCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
         return Vector(); // Return an empty vector if the distance type is invalid
     }
 
@@ -194,13 +191,9 @@ public:
         return _bucket.Dimension();
     }
 
-    inline const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const override {
+    inline VPairComparator GetSimilarityComparator(bool reverese) const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
-        if (reverese) {
-            return *(_reverseSimilarityComparator);
-        } else {
-            return *(_similarityComparator);
-        }
+        return (reverese ? _reverseSimilarityComparator : _similarityComparator);
     }
 
     inline DTYPE Distance(const Vector& a, const Vector& b) const override {
@@ -208,9 +201,10 @@ public:
         {
         case DistanceType::L2Distance:
             return L2::Distance(a, b, VectorDimention());
+        default:
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
+                 "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
         }
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
         return 0; // Return 0 if the distance type is invalid
     }
 
@@ -228,8 +222,8 @@ protected:
     const ClusteringType _clusteringAlg;
     const DistanceType _distanceAlg;
     const uint16_t _min_size;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    const VPairComparator _similarityComparator;
+    const VPairComparator _reverseSimilarityComparator;
     VectorSet _bucket;
 
 TESTABLE;
@@ -269,8 +263,6 @@ public:
     ~VectorIndex() override {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
-        delete _similarityComparator;
-        delete _reverseSimilarityComparator;
         CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown Copper Index End: rs=%s", rs.Msg());
     }
 
@@ -343,7 +335,7 @@ public:
 
     RetStatus Delete(VectorID vec_id) override {
         FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Delete not implemented");
-
+        UNUSED_VARIABLE(vec_id);
         RetStatus rs = RetStatus::Success();
         return rs;
     }
@@ -393,11 +385,8 @@ public:
 
         neighbours.swap(upper_layer);
         if (sort) {
-            std::sort_heap<std::vector<std::pair<VectorID, DTYPE>>::iterator,
-                           const DIST_ID_PAIR_SIMILARITY_INTERFACE&>(
-                           neighbours.begin(), neighbours.end(),
-                           sort_from_more_similar_to_less ? *(_similarityComparator) :
-                                                            *(_reverseSimilarityComparator));
+            std::sort_heap(neighbours.begin(), neighbours.end(),
+                           sort_from_more_similar_to_less ? _similarityComparator : _reverseSimilarityComparator);
         }
 
         PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_VECTOR_INDEX, "ApproximateKNearestNeighbours End: neighbours=");
@@ -414,9 +403,10 @@ public:
         {
         case DistanceType::L2Distance:
             return L2::Distance(a, b, core_attr.dimention);
+        default:
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
+                 "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
         }
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
         return 0; // Return 0 if the distance type is invalid
     }
 
@@ -432,8 +422,8 @@ protected:
     const uint16_t internal_max_size;
     const uint16_t split_internal;
     const uint16_t split_leaf;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _similarityComparator;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* const _reverseSimilarityComparator;
+    const VPairComparator _similarityComparator;
+    const VPairComparator _reverseSimilarityComparator;
     size_t _size;
     BufferManager _bufmgr;
     VectorID _root;
@@ -443,9 +433,10 @@ protected:
         switch (core_attr.distanceAlg) {
         case DistanceType::L2Distance:
             return L2::MoreSimilar(a, b);
+        default:
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
+                 "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
         }
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
-             "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
         return false; // Return false if the distance type is invalid
     }
 
@@ -726,9 +717,10 @@ protected:
         {
         case ClusteringType::SimpleDivide:
             return SimpleDivideClustering(nodes, target_node_index, centroids, split_into);
+        default:
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
+                 "Cluster: Invalid clustering type: %s", CLUSTERING_TYPE_NAME[core_attr.clusteringAlg]);
         }
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_VECTOR_INDEX,
-             "Cluster: Invalid clustering type: %s", CLUSTERING_TYPE_NAME[core_attr.clusteringAlg]);
         return RetStatus::Fail("Invalid clustering type");
     }
 

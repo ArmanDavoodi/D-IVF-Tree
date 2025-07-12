@@ -200,6 +200,14 @@ typedef DISTANCE_TYPE DTYPE;
     VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->ParentID())),\
     ((PRINT_BUCKET) ? ((((node) == nullptr)) ? "NULL" : ((node)->BucketToString()).ToCStr()) : "OMITTED")
 
+#define NODE_SELF_LOG()\
+    (!(_centroid_id.IsValid()) ? "INV" : (_centroid_id.IsVector() ? "Non-Centroid" : \
+                                          (_centroid_id.IsLeaf() ? "Leaf" : \
+                                                                   (_centroid_id.IsInternalNode() ? "Internal" :\
+                                                                                                    "UNDEF")))),\
+    _min_size, _bucket.Capacity(), VECTORID_LOG(_centroid_id), _bucket.Size(), VECTORID_LOG(_parent_id),\
+    ((PRINT_BUCKET) ? BucketToString().ToCStr() : "OMITTED")
+
 #define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
@@ -243,11 +251,21 @@ typedef DISTANCE_TYPE DTYPE;
                 (node)->Size(), (node)->MaxSize())
 
 #define CHECK_NODE_SELF_IS_VALID(tag, check_min_size) \
-    CHECK_NODE_IS_VALID(this, (tag), (check_min_size)); \
-    FatalAssert(IsValid(this->_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
-    FatalAssert(IsValid(this->_distanceAlg), (tag), "Distance algorithm is invalid."); \
-    CHECK_NOT_NULLPTR(this->_similarityComparator, (tag)); \
-    CHECK_NOT_NULLPTR(this->_reverseSimilarityComparator, (tag))
+    CHECK_VECTORID_IS_VALID(_centroid_id, (tag)); \
+    CHECK_VECTORID_IS_CENTROID(_centroid_id, (tag)); \
+    FatalAssert(_bucket.Dimension() > 0, (tag), \
+                "Node has invalid vector dimension: " NODE_LOG_FMT, NODE_SELF_LOG()); \
+    CHECK_MIN_MAX_SIZE(_min_size, _bucket.Capacity(), (tag)); \
+    FatalAssert(((!(check_min_size)) || _bucket.Size() >= _min_size), (tag), \
+                "Node does not have enough elements: size=%hu, min_size=%hu.", \
+                _bucket.Size(), _min_size); \
+    FatalAssert(_bucket.Size() <= _bucket.Capacity(), (tag), \
+                "Node has too many elements: size=%hu, max_size=%hu.", \
+                _bucket.Size(), _bucket.Capacity()); \
+    FatalAssert(IsValid(_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
+    FatalAssert(IsValid(_distanceAlg), (tag), "Distance algorithm is invalid."); \
+    CHECK_NOT_NULLPTR(_similarityComparator, (tag)); \
+    CHECK_NOT_NULLPTR(_reverseSimilarityComparator, (tag))
 
 #ifdef ENABLE_TEST_LOGGING
 #define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg) \
@@ -266,5 +284,7 @@ typedef DISTANCE_TYPE DTYPE;
 #else
 #define PRINT_VECTOR_PAIR_BATCH(vector)
 #endif
+
+#define UNUSED_VARIABLE(x) (void)(x)
 
 #endif

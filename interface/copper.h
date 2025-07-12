@@ -19,8 +19,8 @@ struct CopperNodeAttributes {
     CopperCoreAttributes core;
     uint16_t min_size;
     uint16_t max_size;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* similarityComparator;
-    const DIST_ID_PAIR_SIMILARITY_INTERFACE* reverseSimilarityComparator;
+    VPairComparator similarityComparator;
+    VPairComparator reverseSimilarityComparator;
 };
 
 struct CopperAttributes {
@@ -86,7 +86,7 @@ public:
     virtual uint16_t VectorDimention() const = 0;
 
     /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-    virtual const DIST_ID_PAIR_SIMILARITY_INTERFACE& GetSimilarityComparator(bool reverese = false) const = 0;
+    virtual VPairComparator GetSimilarityComparator(bool reverese = false) const = 0;
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
     virtual String BucketToString() const = 0;
@@ -110,15 +110,13 @@ public:
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
     virtual size_t Bytes(bool is_internal_node) const = 0;
 protected:
-    inline static DIST_ID_PAIR_SIMILARITY_INTERFACE* GetDistancePairSimilarityComparator(DistanceType distanceAlg,
-                                                                                         bool reverse) {
+    inline static VPairComparator GetDistancePairSimilarityComparator(DistanceType distanceAlg, bool reverse) {
         switch (distanceAlg) {
             case DistanceType::L2Distance:
-                return (reverse ?
-                        static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_REVERSE_SIMILARITY()) :
-                        static_cast<DIST_ID_PAIR_SIMILARITY_INTERFACE*>(new L2::DIST_ID_PAIR_SIMILARITY()));
+                return (reverse ? L2::MoreSimilarVPair : L2::LessSimilarVPair);
             default:
                 FatalAssert(false, LOG_TAG_COPPER_NODE, "Invalid distance algorithm: %d", (int)distanceAlg);
+                return nullptr;
         }
     }
 
