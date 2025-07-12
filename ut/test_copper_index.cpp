@@ -12,14 +12,17 @@ namespace UT {
 class Test {
 public:
     Test() {
-        tests["test_copper_index::simple_divide_clustering"] = &Test::simple_divide_clustering;
         tests["test_copper_index::copper_node_test"] = &Test::copper_node_test;
+        tests["test_copper_index::copper_index_simple_test"] = &Test::copper_index_simple_test;
+        tests["test_copper_index::simple_divide_clustering"] = &Test::simple_divide_clustering;
 
-        test_priority["test_copper_index::simple_divide_clustering"] = 0;
-        test_priority["test_copper_index::copper_node_test"] = 1;
+        test_priority["test_copper_index::copper_node_test"] = 0;
+        test_priority["test_copper_index::copper_index_simple_test"] = 1;
+        test_priority["test_copper_index::simple_divide_clustering"] = 2;
 
-        all_tests.insert("test_copper_index::simple_divide_clustering");
         all_tests.insert("test_copper_index::copper_node_test");
+        all_tests.insert("test_copper_index::copper_index_simple_test");
+        all_tests.insert("test_copper_index::simple_divide_clustering");
 
     }
 
@@ -227,6 +230,34 @@ public:
         neighbours.clear();
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::copper_node_test.");
+        return status;
+    }
+
+    bool copper_index_simple_test() {
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_copper_index::copper_index_simple_test for %luth time...", try_count);
+        bool status = true;
+        copper::RetStatus rs = copper::RetStatus::Success();
+
+        copper::CopperAttributes attr;
+        attr.core.dimention = dim;
+        attr.core.distanceAlg = copper::DistanceType::L2Distance;
+        attr.core.clusteringAlg = copper::ClusteringType::SimpleDivide;
+        attr.internal_max_size = KI_MAX;
+        attr.internal_min_size = KI_MIN;
+        attr.leaf_max_size = KL_MAX;
+        attr.leaf_min_size = KL_MIN;
+        attr.split_internal = KI_MAX / 2;
+        attr.split_leaf = KL_MAX / 2;
+        copper::VectorIndex _tree(attr);
+
+        /* test SearchNodes with dummy nodes  */
+        /* insert till full -> do not test expand yet */
+        /* ----------- */
+        /* clustering tests */
+        /* test insertion untli expantion */
+        /* test insertion until multiple expantions -> 3 levels */
+
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::copper_index_simple_test.");
         return status;
     }
 
