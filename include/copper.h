@@ -109,11 +109,13 @@ public:
             const VectorPair& vectorPair = _bucket[i];
             DTYPE distance = Distance(query, vectorPair.vec);
             neighbours.emplace_back(vectorPair.id, distance);
-            std::push_heap(neighbours.begin(), neighbours.end(), _similarityComparator);
+            std::push_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
             if (neighbours.size() > k) {
-                std::pop_heap(neighbours.begin(), neighbours.end(), _similarityComparator);
+                std::pop_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
                 neighbours.pop_back();
             }
+            PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_COPPER_NODE, "Search: Neighbours after checking vector "
+                                    VECTORID_LOG_FMT, VECTORID_LOG(vectorPair.id));
         }
         PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_COPPER_NODE, "Search: Neighbours after search");
 
@@ -385,8 +387,10 @@ public:
 
         neighbours.swap(upper_layer);
         if (sort) {
-            std::sort_heap(neighbours.begin(), neighbours.end(),
-                           sort_from_more_similar_to_less ? _similarityComparator : _reverseSimilarityComparator);
+            std::sort_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
+            if (!sort_from_more_similar_to_less) {
+                std::reverse(neighbours.begin(), neighbours.end());
+            }
         }
 
         PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_VECTOR_INDEX, "ApproximateKNearestNeighbours End: neighbours=");

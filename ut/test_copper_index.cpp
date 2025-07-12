@@ -1,5 +1,10 @@
 #include "test.h"
 
+#define VECTOR_TYPE uint16_t
+#define VTYPE_FMT "%hu"
+#define DISTANCE_TYPE double
+#define DTYPE_FMT "%lf"
+
 #include "copper.h"
 
 // build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
@@ -190,71 +195,36 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Node:" NODE_LOG_FMT, NODE_PTR_LOG(other_node));
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Node Bucket: %s", other_node->_bucket.ToString().ToCStr());
 
-        // const uint16_t target[dim] = {18, 19, 23, 14};
-        // copper::Vector target_vec(_data[1], dim);
-        // copper::VectorID nearest = node->Find_Nearest(target_vec);
-        // status = status && (nearest == _ids[1]);
-        // ErrorAssert(nearest == _ids[1], LOG_TAG_TEST,
-        //             "Nearest vector id should be same as the current vector id. nearest=" VECTORID_LOG_FMT
-        //             ", _ids[1]=%lu", VECTORID_LOG(nearest), _ids[1]);
+        std::vector<std::pair<copper::VectorID, copper::DTYPE>> neighbours;
+        copper::Vector query(_data[3], dim);
+        query[0] = 12;
+        rs = node->Search(query, 3, neighbours);
+        status = status && (rs.IsOK());
+        ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
+        status = status && (neighbours.size() == 3);
+        ErrorAssert(neighbours.size() == 3, LOG_TAG_TEST,
+                    "ApproximateKNearestNeighbours should return 3 neighbours. size=%lu", neighbours.size());
+        std::sort_heap(neighbours.begin(), neighbours.end(), node->GetSimilarityComparator(true));
 
-        // nearest = node->Find_Nearest(copper::Vector<uint16_t, dim>(target));
-        // status = status && (nearest == _ids[4]);
-        // ErrorAssert(nearest == _ids[4], LOG_TAG_TEST,
-        //             "Nearest vector id should be same as the current vector id. nearest=" VECTORID_LOG_FMT
-        //             ", _ids[4]=%lu", VECTORID_LOG(nearest), _ids[4]);
+        PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_TEST,
+                                "ApproximateKNearestNeighbours: Batch After sort ");
 
-        // std::vector<std::pair<copper::VectorID, double>> neighbours;
-        // copper::Vector<uint16_t, dim> query(_data[3]);
-        // query[0] = 12;
-        // rs = node->ApproximateKNearestNeighbours(query, 3, 7, neighbours);
-        // status = status && (rs.IsOK());
-        // ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
-        // status = status && (neighbours.size() == 3);
-        // ErrorAssert(neighbours.size() == 3, LOG_TAG_TEST,
-        //             "ApproximateKNearestNeighbours should return 3 neighbours. size=%lu", neighbours.size());
-        // std::sort_heap(neighbours.begin(), neighbours.end(), _more_similar);
+        status = status && (neighbours[0].first == _ids[3]);
+        ErrorAssert(neighbours[0].first == _ids[3], LOG_TAG_TEST,
+                    "First neighbour id should be same as the current vector id. neighbours[0].first=" VECTORID_LOG_FMT
+                    ", _ids[3]=%lu", VECTORID_LOG(neighbours[0].first), _ids[3]);
 
-        // status = status && (neighbours[0].first == _ids[3]);
-        // ErrorAssert(neighbours[0].first == _ids[3], LOG_TAG_TEST,
-        //             "First neighbour id should be same as the current vector id. neighbours[0].first=" VECTORID_LOG_FMT
-        //             ", _ids[3]=%lu", VECTORID_LOG(neighbours[0].first), _ids[3]);
+        status = status && (neighbours[1].first == _ids[2]);
+        ErrorAssert(neighbours[1].first == _ids[2], LOG_TAG_TEST,
+                    "Second neighbour id should be same as the current vector id. neighbours[1].first=" VECTORID_LOG_FMT
+                    ", _ids[2]=%lu", VECTORID_LOG(neighbours[1].first), _ids[2]);
 
-        // status = status && (neighbours[1].first == _ids[2]);
-        // ErrorAssert(neighbours[1].first == _ids[2], LOG_TAG_TEST,
-        //             "Second neighbour id should be same as the current vector id. neighbours[1].first=" VECTORID_LOG_FMT
-        //             ", _ids[2]=%lu", VECTORID_LOG(neighbours[1].first), _ids[2]);
+        status = status && (neighbours[2].first == _ids[4]);
+        ErrorAssert(neighbours[2].first == _ids[4], LOG_TAG_TEST,
+                    "Third neighbour id should be same as the current vector id. neighbours[2].first=" VECTORID_LOG_FMT
+                    ", _ids[4]=%lu", VECTORID_LOG(neighbours[2].first), _ids[4]);
 
-        // status = status && (neighbours[2].first == _ids[4]);
-        // ErrorAssert(neighbours[2].first == _ids[4], LOG_TAG_TEST,
-        //             "Third neighbour id should be same as the current vector id. neighbours[2].first=" VECTORID_LOG_FMT
-        //             ", _ids[4]=%lu", VECTORID_LOG(neighbours[2].first), _ids[4]);
-
-        // neighbours.clear();
-
-        // /* Todo: change when a better sampling alg is used */
-        // rs = node->ApproximateKNearestNeighbours(query, 3, 4, neighbours);
-        // status = status && (rs.IsOK());
-        // ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
-        // status = status && (neighbours.size() == 3);
-        // ErrorAssert(neighbours.size() == 3, LOG_TAG_TEST,
-        //             "ApproximateKNearestNeighbours should return 3 neighbours. size=%lu", neighbours.size());
-        // std::sort_heap(neighbours.begin(), neighbours.end(), _more_similar);
-
-        // status = status && (neighbours[0].first == _ids[3]);
-        // ErrorAssert(neighbours[0].first == _ids[3], LOG_TAG_TEST,
-        //             "First neighbour id should be same as the current vector id. neighbours[0].first=" VECTORID_LOG_FMT
-        //             ", _ids[3]=%lu", VECTORID_LOG(neighbours[0].first), _ids[3]);
-
-        // status = status && (neighbours[1].first == _ids[2]);
-        // ErrorAssert(neighbours[1].first == _ids[2], LOG_TAG_TEST,
-        //             "Second neighbour id should be same as the current vector id. neighbours[1].first=" VECTORID_LOG_FMT
-        //             ", _ids[2]=%lu", VECTORID_LOG(neighbours[1].first), _ids[2]);
-
-        // status = status && (neighbours[2].first == _ids[1]);
-        // ErrorAssert(neighbours[2].first == _ids[1], LOG_TAG_TEST,
-        //             "Third neighbour id should be same as the current vector id. neighbours[2].first=" VECTORID_LOG_FMT
-        //             ", _ids[1]=%lu", VECTORID_LOG(neighbours[2].first), _ids[1]);
+        neighbours.clear();
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::copper_node_test.");
         return status;

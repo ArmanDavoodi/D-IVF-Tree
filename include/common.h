@@ -268,15 +268,15 @@ typedef DISTANCE_TYPE DTYPE;
     CHECK_NOT_NULLPTR(_reverseSimilarityComparator, (tag))
 
 #ifdef ENABLE_TEST_LOGGING
-#define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg) \
+#define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg, ...) \
     do { \
-        copper::String str = ""; \
+        copper::String str(msg ": Batch Size: %lu, Vector Pair Batch: " __VA_OPT__(,) __VA_ARGS__,\
+                           (vector).size()); \
         for (const auto& pair : (vector)) { \
-            str += String(VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "; ", \
-                          VECTORID_LOG(pair.first), pair.second); \
+            str += copper::String("<" VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "> ", \
+                                  VECTORID_LOG(pair.first), pair.second); \
         } \
-        CLOG(LOG_LEVEL_DEBUG, (tag), "%s: Batch Size: %lu, Vector Pair Batch: %s", \
-            (msg), (vector).size(), str.ToCStr()); \
+        CLOG(LOG_LEVEL_DEBUG, (tag), "%s", str.ToCStr()); \
     } while (0)
 
 };

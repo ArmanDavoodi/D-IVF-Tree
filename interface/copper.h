@@ -86,7 +86,7 @@ public:
     virtual uint16_t VectorDimention() const = 0;
 
     /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-    virtual VPairComparator GetSimilarityComparator(bool reverese = false) const = 0;
+    virtual VPairComparator GetSimilarityComparator(bool reverese) const = 0;
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
     virtual String BucketToString() const = 0;

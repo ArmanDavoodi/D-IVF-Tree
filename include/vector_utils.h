@@ -440,7 +440,7 @@ public:
     }
 
     String ToString() const {
-        String str = "<Vectors: [";
+        String str("<Size=%hu, Cap=%hu, Dim=%hu, Vectors: [", _size, _cap, _dim);
         for (uint16_t i = 0; i < _size; ++i) {
             str += GetVector(i).ToString(_dim);
             if (i != _size - 1)
