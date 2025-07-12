@@ -294,9 +294,9 @@ public:
                     "vector set size mismatch. Expected=%hu, Actual=%hu",
                     size, set1.Size());
         status = status && (set2.Size() == size);
-        ErrorAssert(set2.Size() == size+5, LOG_TAG_TEST,
+        ErrorAssert(set2.Size() == size, LOG_TAG_TEST,
                     "vector set size mismatch. Expected=%hu, Actual=%hu",
-                    size+5, set2.Size());
+                    size, set2.Size());
 
         for (uint16_t i = 0; i < size; ++i) {
             copper::VectorPair vecp = set1[i];
