@@ -109,17 +109,41 @@ public:
 
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
     virtual size_t Bytes(bool is_internal_node) const = 0;
-protected:
-    inline static VPairComparator GetDistancePairSimilarityComparator(DistanceType distanceAlg, bool reverse) {
-        switch (distanceAlg) {
-            case DistanceType::L2Distance:
-                return (reverse ? L2::MoreSimilarVPair : L2::LessSimilarVPair);
-            default:
-                FatalAssert(false, LOG_TAG_COPPER_NODE, "Invalid distance algorithm: %d", (int)distanceAlg);
-                return nullptr;
+
+    inline static RetStatus KNearestNeighbours(const Vector& query, size_t k, uint16_t dim,
+                                               const std::vector<std::pair<VectorID, Vector>>& _data,
+                                               std::vector<std::pair<VectorID, DTYPE>>& neighbours,
+                                               const DistanceType distanceAlg,
+                                               bool sort = true, bool sort_from_more_similar_to_less = true) {
+        FatalAssert(k > 0, LOG_TAG_BASIC, "k should be greater than 0.");
+        FatalAssert(dim > 0, LOG_TAG_BASIC, "Vector dimension should be greater than 0.");
+        FatalAssert(_data.size() > 0, LOG_TAG_BASIC, "Data should contain at least one vector.");
+        FatalAssert(query.IsValid(), LOG_TAG_BASIC, "Query vector is invalid.");
+        FatalAssert(neighbours.empty(), LOG_TAG_BASIC, "Neighbours vector should be empty.");
+        CLOG_IF_TRUE(_data.size() <= k, LOG_LEVEL_WARNING, LOG_TAG_BASIC,
+                     "Data size (%lu) is less than or equal to k (%lu).", _data.size(), k);
+
+        for (const auto& pair : _data) {
+            DTYPE distance = Distance(query, pair.second, dim, distanceAlg);
+            neighbours.emplace_back(pair.first, distance);
+            std::push_heap(neighbours.begin(), neighbours.end(),
+                          GetDistancePairSimilarityComparator(distanceAlg, true));
+            if (neighbours.size() > k) {
+                std::pop_heap(neighbours.begin(), neighbours.end(),
+                              GetDistancePairSimilarityComparator(distanceAlg, true));
+                neighbours.pop_back();
+            }
+        }
+        if (sort) {
+            std::sort_heap(neighbours.begin(), neighbours.end(),
+                           GetDistancePairSimilarityComparator(distanceAlg, true));
+            if (!sort_from_more_similar_to_less) {
+                std::reverse(neighbours.begin(), neighbours.end());
+            }
         }
     }
 
+protected:
     virtual RetStatus SearchNodes(const Vector& query,
                                   const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
                                   std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) = 0;

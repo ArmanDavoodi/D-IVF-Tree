@@ -167,17 +167,8 @@ public:
 
     Vector ComputeCurrentCentroid() const override {
         CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, true);
-
-        switch (_distanceAlg)
-        {
-        case DistanceType::L2Distance:
-            return L2::ComputeCentroid(static_cast<const VTYPE*>(_bucket.GetVectors()),
-                                       _bucket.Size(), _bucket.Dimension());
-        default:
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_COPPER_NODE,
-                 "ComputeCurrentCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
-        }
-        return Vector(); // Return an empty vector if the distance type is invalid
+        return ComputeCentroid(static_cast<const VTYPE*>(_bucket.GetVectors()),
+                                       _bucket.Size(), _bucket.Dimension(), _distanceAlg);
     }
 
     inline uint16_t MinSize() const override {

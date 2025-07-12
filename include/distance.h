@@ -56,6 +56,50 @@ inline Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim) {
 
 };
 
+inline Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim, DistanceType distanceAlg) {
+    switch (distanceAlg) {
+    case DistanceType::L2Distance:
+        return L2::ComputeCentroid(vectors, size, dim);
+    default:
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+    }
+    return Vector(); // Return an empty vector if the distance type is invalid
+}
+
+inline constexpr DTYPE Distance(const Vector& a, const Vector& b, uint16_t dim, DistanceType distanceAlg) {
+    switch (distanceAlg) {
+    case DistanceType::L2Distance:
+        return L2::Distance(a, b, dim);
+    default:
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+    }
+    return 0; // Return 0 if the distance type is invalid
+}
+
+inline constexpr bool MoreSimilar(const DTYPE& a, const DTYPE& b, DistanceType distanceAlg) {
+    switch (distanceAlg) {
+    case DistanceType::L2Distance:
+        return L2::MoreSimilar(a, b);
+    default:
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+    }
+    return false; // Return false if the distance type is invalid
+}
+
+inline constexpr VPairComparator GetDistancePairSimilarityComparator(DistanceType distanceAlg, bool reverse) {
+    switch (distanceAlg) {
+    case DistanceType::L2Distance:
+        return (reverse ? L2::MoreSimilarVPair : L2::LessSimilarVPair);
+    default:
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "MoreSimilarVPair: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+    }
+    return nullptr; // Return nullptr if the distance type is invalid
+}
+
 };
 
 #endif
