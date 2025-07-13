@@ -16,105 +16,16 @@ public:
     Test() {
         tests["test_copper_index::copper_node_test"] = &Test::copper_node_test;
         tests["test_copper_index::copper_index_simple_test"] = &Test::copper_index_simple_test;
-        tests["test_copper_index::simple_divide_clustering"] = &Test::simple_divide_clustering;
 
         test_priority["test_copper_index::copper_node_test"] = 0;
         test_priority["test_copper_index::copper_index_simple_test"] = 1;
-        test_priority["test_copper_index::simple_divide_clustering"] = 2;
 
         all_tests.insert("test_copper_index::copper_node_test");
         all_tests.insert("test_copper_index::copper_index_simple_test");
-        all_tests.insert("test_copper_index::simple_divide_clustering");
 
     }
 
     ~Test() {}
-
-    bool simple_divide_clustering() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_copper_index::simple_divide_clustering for %luth time...", try_count);
-        bool status = true;
-
-        // constexpr uint16_t DIM = 3;
-        // constexpr uint16_t MIN_SIZE = 2;
-        // constexpr uint16_t MAX_SIZE = 8;
-        // const uint16_t data[MAX_SIZE][DIM] = {{1, 2, 3},
-        //                                       {4, 5, 6},
-        //                                       {7, 8, 9},
-        //                                       {10, 11, 12},
-        //                                       {13, 14, 15},
-        //                                       {16, 17, 18},
-        //                                       {19, 20, 21},
-        //                                       {22, 23, 24}};
-        // copper::VectorID ids[MAX_SIZE];
-        // copper::BufferManager _bufmgr;
-        // copper::CopperAttributes attr;
-        // attr.core.dimention = dim;
-        // attr.core.distanceAlg = copper::DistanceType::L2Distance;
-        // attr.core.clusteringAlg = copper::ClusteringType::SimpleDivide;
-        // attr.internal_max_size = KI_MAX;
-        // attr.internal_min_size = KI_MIN;
-        // attr.leaf_max_size = KL_MAX;
-        // attr.leaf_min_size = KL_MIN;
-        // attr.split_internal = KI_MAX / 2;
-        // attr.split_leaf = KL_MAX / 2;
-        // copper::VectorIndex _tree(attr);
-
-        // _bufmgr.Init();
-        // copper::VectorID node_id = _bufmgr.RecordRoot();
-        // copper::RetStatus rs = _bufmgr.UpdateClusterAddress(node_id, _tree.CreateNewNode(node_id));
-        // status = status && rs.IsOK();
-        //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
-        // uint16_t level = 2;
-
-        // copper::CopperNode *node = _bufmgr.GetNode(node_id);
-
-        // status = status && (node != nullptr);
-        // ErrorAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "Node should not be nullptr for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
-
-        // for (uint16_t i = 0; i < MAX_SIZE; ++i) {
-        //     ids[i] = _bufmgr.RecordVector(copper::VectorID::LEAF_LEVEL);
-        //     copper::Address vec_add = node->Insert(copper::Vector(data[i], DIM), ids[i]);
-        //     status = status && (vec_add != copper::INVALID_ADDRESS);
-        //     ErrorAssert(vec_add != copper::INVALID_ADDRESS, LOG_TAG_VECTOR_INDEX,
-        //                 "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
-        //     rs = _bufmgr.UpdateVectorAddress(ids[i], vec_add);
-        //     status = status && rs.IsOK();
-        //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
-        // }
-
-        // copper::VectorID _root_id = _bufmgr.RecordRoot();
-        // status = status && (_root_id.IsValid());
-        // ErrorAssert(_root_id.IsValid(), LOG_TAG_VECTOR_INDEX, "Root ID should"
-        //             "not be invalid: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-        // copper::CopperNode* new_root = _tree.CreateNewNode(_root_id);
-        // status = status && (new_root != nullptr);
-        // ErrorAssert(new_root != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to create new root node for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-        // rs = _bufmgr.UpdateClusterAddress(_root_id, new_root);
-        // status = status && rs.IsOK();
-        // ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-        // rs = _bufmgr.UpdateVectorAddress(_root_id, new_root->Insert(node->ComputeCurrentCentroid(), node_id));
-        // status = status && rs.IsOK();
-        // ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update vector address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-        // rs = node->AssignParent(_root_id);
-        // status = status && rs.IsOK();
-        // ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to assign parent for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
-        // ++level;
-
-
-        // std::vector<copper::CopperNode*> nodes;
-        // nodes.push_back(node);
-        // std::vector<copper::Vector> centroids;
-        // rs = _tree.S
-        // status = status && rs.IsOK();
-        // ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Clustering failed with error: %s", rs.Msg());
-
-        // for (uint16_t i = 0; i < centroids.size(); ++i) {
-        //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Centroid %u: %s", i, centroids[i].to_string().c_str());
-        // }
-
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::simple_divide_clustering.");
-        return status;
-    }
 
     bool copper_node_test() {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_copper_index::copper_node_test for %luth time...", try_count);
@@ -254,7 +165,6 @@ public:
         copper::VectorIndex _tree(attr);
 
         size_t num_nodes = 4;
-        size_t k = 6;
         std::vector<std::pair<copper::VectorID, copper::DTYPE>> neighbours;
         std::vector<std::pair<copper::VectorID, copper::Vector>> vectors;
         for (size_t i = 0; i < num_nodes; ++i) {
@@ -275,13 +185,48 @@ public:
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Index:%s", _tree.ToString().ToCStr());
 
+        copper::Vector target;
+        target.Create(dim);
+        target[0] = 5;
+        target[1] = 15;
+        target[2] = 6;
+        target[3] = 17;
+        size_t k = 6;
+        std::vector<std::pair<copper::VectorID, copper::DTYPE>> knn, ann;
 
-        /* insert till full -> do not test expand yet */
-        /* ----------- */
-        /* clustering tests */
-        /* test insertion untli expantion */
-        /* test SearchNodes with dummy nodes  */
-        /* test insertion until multiple expantions -> 3 levels */
+        /* This test case has 10 leaves so by checkning 10 nodes at each layer, we should get the exact KNN */
+        rs = _tree.ApproximateKNearestNeighbours(target, k, 10, 10, ann, true, true);
+        status = status && rs.IsOK();
+        ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "ApproximateKNearestNeighbours failed with status %s.", rs.Msg());
+        status = status && (ann.size() == k);
+        ErrorAssert(ann.size() == k, LOG_TAG_TEST,
+                    "ApproximateKNearestNeighbours should return %lu neighbours. size=%lu", k, ann.size());
+        PRINT_VECTOR_PAIR_BATCH(ann, LOG_TAG_TEST,
+                                "ApproximateKNearestNeighbours: Batch After sort ");
+
+        rs = copper::VectorIndexInterface::KNearestNeighbours(target, k, dim, vectors, knn,
+                                                              copper::DistanceType::L2Distance, true, true);
+        status = status && rs.IsOK();
+        ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "KNearestNeighbours failed with status %s.", rs.Msg());
+        status = status && (knn.size() == k);
+        ErrorAssert(knn.size() == k, LOG_TAG_TEST,
+                    "KNearestNeighbours should return %lu neighbours. size=%lu", k, knn.size());
+
+        PRINT_VECTOR_PAIR_BATCH(knn, LOG_TAG_TEST,
+                                "KNearestNeighbours: Batch After sort ");
+
+        for (size_t i = 0; i < k; ++i) {
+            status = status && (ann[i].first == knn[i].first);
+            ErrorAssert(ann[i].first == knn[i].first, LOG_TAG_TEST,
+                        "Neighbour %lu should have the same id. ann[%lu].first=" VECTORID_LOG_FMT
+                        ", knn[%lu].first=" VECTORID_LOG_FMT, i, i, VECTORID_LOG(ann[i].first),
+                        i, VECTORID_LOG(knn[i].first));
+            status = status && (ann[i].second == knn[i].second);
+            ErrorAssert(ann[i].second == knn[i].second, LOG_TAG_TEST,
+                        "Neighbour %lu should have the same vector. ann[%lu].second=" DTYPE_FMT
+                        ", knn[%lu].second=" DTYPE_FMT, i, i,
+                        ann[i].second, i, knn[i].second);
+        }
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::copper_index_simple_test.");
         return status;

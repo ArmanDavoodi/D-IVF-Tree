@@ -364,13 +364,16 @@ public:
         while (next.IsCentroid()) {
             CHECK_VECTORID_IS_VALID(next, LOG_TAG_VECTOR_INDEX);
             // Get the next layer of nodes
-            rs = SearchNodes(query, upper_layer, lower_layer, next.IsInternalNode() ? _internal_k : _leaf_k);
+            size_t search_n = (next.IsLeaf() ? k :
+                                               (next._level - 1 == VectorID::LEAF_LEVEL ? _leaf_k : _internal_k));
+            rs = SearchNodes(query, upper_layer, lower_layer, search_n);
             FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Search nodes failed with error: %s", rs.Msg());
             FatalAssert(!lower_layer.empty(), LOG_TAG_VECTOR_INDEX, "Lower layer should not be empty.");
-            FatalAssert((next.IsInternalNode() ? (lower_layer.size() <= _internal_k) : (lower_layer.size() <= _leaf_k)),
+            FatalAssert(lower_layer.size() <= search_n,
                         LOG_TAG_VECTOR_INDEX, "Lower layer size (%lu) is larger than %hu (%s).",
-                        lower_layer.size(), (next.IsInternalNode() ? _internal_k : _leaf_k),
-                        (next.IsInternalNode() ? "internal k" : "leaf case"));
+                        lower_layer.size(), search_n,
+                        (next.IsLeaf() ? "vector case" : (next._level - 1 == VectorID::LEAF_LEVEL ?
+                                                                        "leaf case" : "internal case")));
             FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_VECTOR_INDEX,
                         "Lower layer first element level (%hhu) does not match expected level (%hhu).",
                         lower_layer.front().first._level, next._level - 1);
@@ -432,7 +435,7 @@ public:
             CHECK_VECTORID_IS_VALID(curr_nodeId, LOG_TAG_VECTOR_INDEX);
             if (go_to_next_level) {
                 curr_level = curr_nodeId._level;
-                out += String("Level %lu: [", curr_level);
+                out += String("Level %lu:{Size=%lu, Nodes=[", curr_level, curr_level_stack.size() + 1);
                 go_to_next_level = false;
             }
             else {
@@ -460,7 +463,7 @@ public:
                 seen += node->Size();
             }
             if (curr_level_stack.empty()) {
-                out += String("]");
+                out += String("]}");
                 go_to_next_level = true;
                 next_level_stack.swap(curr_level_stack);
                 if (!curr_level_stack.empty()) {
