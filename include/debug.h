@@ -429,6 +429,12 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
 
 #ifdef ENABLE_TEST_LOGGING
 
+#define CLOG_ELINE() \
+    do {\
+        fprintf(OUT, "\n");\
+        fflush(OUT);\
+    } while(0)
+
 #define CLOG(level, tag, msg, ...) \
     do {\
         if (copper::Pass_Min_Level((level)) || copper::Pass_Tag((tag))) {\
@@ -528,6 +534,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
 #endif
 #else
 
+#define CLOG_ELINE()
 #define CLOG(level, tag, msg, ...)
 #define CLOG_IF_TRUE(cond, level, tag, msg, ...)
 #define CLOG_IF_FALSE(cond, level, tag, msg, ...)

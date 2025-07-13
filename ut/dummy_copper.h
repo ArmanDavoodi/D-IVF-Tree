@@ -200,6 +200,10 @@ public:
     size_t Bytes(bool is_internal_node) const override {
         return CopperNode::Bytes(core_attr.dimention, is_internal_node ? internal_max_size : leaf_max_size);
     }
+
+    inline String ToString() override {
+        return String();
+    }
 protected:
     const CopperCoreAttributes core_attr;
     const uint16_t leaf_min_size;

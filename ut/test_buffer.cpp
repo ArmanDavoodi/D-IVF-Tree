@@ -93,8 +93,8 @@ public:
             status = status && (root_level == vecs.size() - 1);
             ErrorAssert(root_level == vecs.size() - 1, LOG_TAG_TEST, "Root level should be %u.", vecs.size() - 1);
 
-            FaultAssert(_BufferManager.RecordVector(root_level), status, LOG_TAG_TEST,
-                        "Buffer manager should not allow to record vector with root level.");
+            // FaultAssert(_BufferManager.RecordVector(root_level), status, LOG_TAG_TEST,
+            //             "Buffer manager should not allow to record vector with root level.");
             FaultAssert(_BufferManager.RecordVector(root_level + 1), status, LOG_TAG_TEST,
                         "Buffer manager should not allow to record vector with highet levels than root level.");
 

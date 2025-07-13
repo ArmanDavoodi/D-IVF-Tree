@@ -1,9 +1,11 @@
-#include "test.h"
+#define PRINT_BUCKET true
 
 #define VECTOR_TYPE uint16_t
 #define VTYPE_FMT "%hu"
 #define DISTANCE_TYPE double
 #define DTYPE_FMT "%lf"
+
+#include "test.h"
 
 #include "copper.h"
 
@@ -251,13 +253,34 @@ public:
         attr.split_leaf = KL_MAX / 2;
         copper::VectorIndex _tree(attr);
 
-        std::vector<copper::CopperNode*> nodes;
+        size_t num_nodes = 4;
+        size_t k = 6;
+        std::vector<std::pair<copper::VectorID, copper::DTYPE>> neighbours;
+        std::vector<std::pair<copper::VectorID, copper::Vector>> vectors;
+        for (size_t i = 0; i < num_nodes; ++i) {
+            for (size_t j = i; j < max_size; j += num_nodes) {
+                copper::VectorID vec_id = copper::INVALID_VECTOR_ID;
+                rs = _tree.Insert(copper::Vector(_data[j], dim), vec_id, 1);
+                status = status && rs.IsOK();
+                ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Insert failed with status %s.", rs.Msg());
+                status = status && vec_id.IsValid();
+                ErrorAssert(vec_id.IsValid(), LOG_TAG_TEST, "Vector ID should be valid after insertion. vec_id="
+                            VECTORID_LOG_FMT, VECTORID_LOG(vec_id));
 
-        /* test SearchNodes with dummy nodes  */
+                vectors.emplace_back(vec_id, copper::Vector(_data[j], dim));
+                CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Inserted vector %lu: " VECTORID_LOG_FMT ", data=%s",
+                     j, VECTORID_LOG(vec_id), vectors.back().second.ToString(dim).ToCStr());
+            }
+        }
+
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Index:%s", _tree.ToString().ToCStr());
+
+
         /* insert till full -> do not test expand yet */
         /* ----------- */
         /* clustering tests */
         /* test insertion untli expantion */
+        /* test SearchNodes with dummy nodes  */
         /* test insertion until multiple expantions -> 3 levels */
 
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_copper_index::copper_index_simple_test.");

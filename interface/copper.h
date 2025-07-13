@@ -110,6 +110,8 @@ public:
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
     virtual size_t Bytes(bool is_internal_node) const = 0;
 
+    virtual String ToString() = 0;
+
     inline static RetStatus KNearestNeighbours(const Vector& query, size_t k, uint16_t dim,
                                                const std::vector<std::pair<VectorID, Vector>>& _data,
                                                std::vector<std::pair<VectorID, DTYPE>>& neighbours,
@@ -124,7 +126,7 @@ public:
                      "Data size (%lu) is less than or equal to k (%lu).", _data.size(), k);
 
         for (const auto& pair : _data) {
-            DTYPE distance = Distance(query, pair.second, dim, distanceAlg);
+            DTYPE distance = copper::Distance(query, pair.second, dim, distanceAlg);
             neighbours.emplace_back(pair.first, distance);
             std::push_heap(neighbours.begin(), neighbours.end(),
                           GetDistancePairSimilarityComparator(distanceAlg, true));
@@ -141,6 +143,8 @@ public:
                 std::reverse(neighbours.begin(), neighbours.end());
             }
         }
+
+        return RetStatus::Success();
     }
 
 protected:

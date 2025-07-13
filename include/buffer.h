@@ -122,7 +122,7 @@ public:
     // todo batch record
     VectorID RecordVector(uint8_t level) {
         FatalAssert(directory.size() >= 2, LOG_TAG_BUFFER, "Tree should have a height of at least 2");
-        FatalAssert(directory.size() - 1 > level, LOG_TAG_BUFFER, "Level is out of bounds. level=%hhu, max_level:%lu",
+        FatalAssert(directory.size() - 1 >= level, LOG_TAG_BUFFER, "Level is out of bounds. level=%hhu, max_level:%lu",
                     level, directory.size());
         FatalAssert(((level == 0) || (!directory[level - 1].empty())), LOG_TAG_BUFFER, "last level cannot be empty");
         VectorID _id = NextID(level);
