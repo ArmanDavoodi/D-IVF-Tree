@@ -22,6 +22,7 @@
 #define ENABLE_TEST_LOGGING
 #define ENABLE_ASSERTS
 #define MEMORY_DEBUG
+#define LOG_FUNCTION_NAME
 #elif BUILD==RELEASE
 #define ENABLE_ASSERTS
 #endif
@@ -30,6 +31,8 @@
 #ifdef ENABLE_TEST_LOGGING
 #define ENABLE_FAULT_LOGGING
 #endif
+
+#define UNUSED_VARIABLE(x) (void)(x)
 
 enum LOG_LEVELS : uint8_t {
     LOG_LEVEL_ZERO,
@@ -92,6 +95,16 @@ enum LOG_TAG_BITS : uint64_t {
 #define PRINT_CALLSTACK_MAX_FRAMES (10)
 #endif
 
+#ifdef PRINT_FUNCTION_NAME_PRETY
+#define FUNCTION_NAME __PRETTY_FUNCTION__
+#define FUNCTION_NAME_MAX_SIZE 50
+#else
+#define FUNCTION_NAME __FUNCTION__
+#define FUNCTION_NAME_MAX_SIZE 35
+#endif
+
+#define FILE_NAME_MAX_SIZE 35
+
 #define _COLORF_BLACK "\033[0;30m"
 #define _COLORF_RED "\033[0;31m"
 #define _COLORF_GREEN "\033[0;32m"
@@ -138,6 +151,8 @@ enum LOG_TAG_BITS : uint64_t {
 #include <atomic>
 #include <semaphore>
 #include <map>
+
+#include "utils/string.h"
 
 #ifdef __clang__
 #include <experimental/source_location>
@@ -318,22 +333,22 @@ inline void timetostr(const std::chrono::_V2::system_clock::time_point _time, ch
     sprintf(mbstr + num_chars, ".%lu", std::chrono::duration_cast<std::chrono::microseconds>(_m).count());
 }
 
-inline const char* leveltostr(LOG_LEVELS level)
+inline const char* leveltostr(LOG_LEVELS level, bool fault_checking = false)
 {
     switch (level)
     {
     case LOG_LEVEL_PANIC:
-        return COLORF_PURPLE "PANIC" COLORF_RESET;
+        return COLORF_PURPLE (fault_checking ? "  FAULT_CHECKING(PANIC)  " : "          PANIC          ") COLORF_RESET;
     case LOG_LEVEL_ERROR:
-        return COLORF_RED "ERROR" COLORF_RESET;
+        return COLORF_RED    (fault_checking ? "  FAULT_CHECKING(ERROR)  " : "          ERROR          ") COLORF_RESET;
     case LOG_LEVEL_WARNING:
-        return COLORF_YELLOW "WARNING" COLORF_RESET;
+        return COLORF_YELLOW (fault_checking ? " FAULT_CHECKING(WARNING) " : "         WARNING         ") COLORF_RESET;
     case LOG_LEVEL_LOG:
-        return COLORF_CYAN "LOG" COLORF_RESET;
+        return COLORF_CYAN   (fault_checking ? "   FAULT_CHECKING(LOG)   " : "           LOG           ") COLORF_RESET;
     case LOG_LEVEL_DEBUG:
-        return COLORF_GREEN "DEBUG" COLORF_RESET;
+        return COLORF_GREEN  (fault_checking ? "  FAULT_CHECKING(DEBUG)  " : "          DEBUG          ") COLORF_RESET;
     default:
-        return "UNDEFINED";
+        return               (fault_checking ? "FAULT_CHECKING(UNDEFINED)" : "        UNDEFINED        ");
     }
 }
 
@@ -342,27 +357,27 @@ inline const char* tagtostr(uint64_t tag)
     switch (tag)
     {
     case LOG_TAG_BASIC:
-        return "Basic" ;
+        return "     Basic     ";
     case LOG_TAG_VECTOR:
-        return "Vector" ;
+        return "    Vector     ";
     case LOG_TAG_VECTOR_SET:
-        return "Vector Set" ;
+        return "  Vector Set   ";
     case LOG_TAG_BUFFER:
-        return "Buffer" ;
+        return "    Buffer     ";
     case LOG_TAG_COPPER_NODE:
-        return "Copper Node" ;
+        return "  Copper Node  ";
     case LOG_TAG_VECTOR_INDEX:
-        return "Vector Index" ;
+        return " Vector Index  ";
     case LOG_TAG_CLUSTERING:
-        return "Core" ;
+        return "     Core      ";
     case LOG_TAG_MEMORY:
-        return "Memory";
+        return "    Memory     ";
     case LOG_TAG_NOT_IMPLEMENTED:
-        return "Not Implemented" ;
+        return "Not Implemented";
     case LOG_TAG_TEST:
-        return "Test" ;
+        return "     Test      ";
     default:
-        return "Undefined" ;
+        return "   Undefined   ";
     }
 }
 
@@ -394,10 +409,19 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
                 thread_id thread_id) {
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed
+    UNUSED_VARIABLE(func_name);
     if (debug::fault_checking != nullptr) {
 #ifdef ENABLE_FAULT_LOGGING
-        fprintf(OUT, "FAULT_CHECK(%s) | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
-            leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
+#ifdef LOG_FUNCTION_NAME
+        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+            leveltostr(level, true), tagtostr(tag), time_str,
+            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            copper::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+#else
+        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+            leveltostr(level, true), tagtostr(tag), time_str,
+            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+#endif
         fflush(OUT);
 #endif
         if (level == LOG_LEVEL_PANIC) {
@@ -410,13 +434,32 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
 
     if (Pass_CallStack_Level(level)) {
         std::string callstack = print_callstack();
-        fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
-            leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, callstack.c_str(),
+#ifdef LOG_FUNCTION_NAME
+        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str,
+            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            copper::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(), thread_id, callstack.c_str(),
             msg._msg);
+#else
+        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str,
+            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            thread_id, callstack.c_str(),
+            msg._msg);
+#endif
     }
     else {
-        fprintf(OUT, "%s | %s | %s | %s:%lu | %s | Thread(%lu) | Message: %s\n",
-            leveltostr(level), tagtostr(tag), time_str, file_name, line, func_name, thread_id, msg._msg);
+#ifdef LOG_FUNCTION_NAME
+        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str,
+            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            copper::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+#else
+        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+            leveltostr(level), tagtostr(tag), time_str,
+            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+#endif
+
     }
     fflush(OUT);
     if (level == LOG_LEVEL_PANIC) {
@@ -441,7 +484,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
             if (copper::Pass_Level((level))){\
                 copper::Log((level), (tag), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
                             std::chrono::system_clock::now(),\
-                            __FILE__, __PRETTY_FUNCTION__, __LINE__, THREAD_ID);\
+                            __FILE__, FUNCTION_NAME, __LINE__, THREAD_ID);\
             }\
         }\
     } while(0)

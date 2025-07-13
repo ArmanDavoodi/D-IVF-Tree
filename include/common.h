@@ -285,6 +285,4 @@ typedef DISTANCE_TYPE DTYPE;
 #define PRINT_VECTOR_PAIR_BATCH(vector)
 #endif
 
-#define UNUSED_VARIABLE(x) (void)(x)
-
 #endif

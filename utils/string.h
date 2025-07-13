@@ -220,8 +220,38 @@ public:
         return ((*this > other) || (*this == other));
     }
 
+    /* new_size of 0 means no change to the vector */
+    inline String& Fit(size_t new_size) {
+        if (new_size == size || new_size == 0) {
+            return *this;
+        }
+
+        char* new_data = static_cast<char*>(malloc((new_size + 1) * sizeof(char)));
+        if (new_size < size) {
+            memcpy(new_data, _data, new_size * sizeof(char));
+        }
+        else {
+            size_t prefix_spaces = (new_size - size) / 2;
+            size_t suffix_spaces = new_size - size - prefix_spaces;
+            memset(new_data, ' ', prefix_spaces * sizeof(char));
+            if (_data != nullptr) {
+                memcpy(new_data + prefix_spaces, _data, size * sizeof(char));
+            }
+            memset(new_data + prefix_spaces + size, ' ', suffix_spaces * sizeof(char));
+        }
+
+        if (_data != nullptr) {
+            free(_data);
+        }
+        new_data[new_size] = 0; // Null-terminate the string
+        _data = new_data;
+        size = new_size;
+
+        return *this;
+    }
+
     const char* ToCStr() const {
-        return _data;
+        return (_data ? _data : "");
     }
 protected:
     char* _data;
