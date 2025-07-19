@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <string>
 
-namespace copper {
+namespace divftree {
 
 class String {
 public:

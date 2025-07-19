@@ -7,39 +7,39 @@
 
 #include "vector_utils.h"
 
-// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
+// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_DIVFTREE_VERTEX
 namespace UT {
 class Test {
 public:
     Test() {
         tests["test_vector::vector_test"] = &Test::vector_test;
-        tests["test_vector::vector_set"] = &Test::vector_set;
+        tests["test_vector::vertex_cluster"] = &Test::vertex_cluster;
 
         test_priority["test_vector::vector_test"] = 0;
-        test_priority["test_vector::vector_set"] = 1;
+        test_priority["test_vector::vertex_cluster"] = 1;
 
         all_tests.insert("test_vector::vector_test");
-        all_tests.insert("test_vector::vector_set");
+        all_tests.insert("test_vector::vertex_cluster");
     }
 
     ~Test() {}
 
-    copper::VectorSet* CreateVectorSet(uint16_t dim, uint16_t capacity) {
-        copper::VectorSet* vec_set = static_cast<copper::VectorSet*>(
-            malloc(sizeof(copper::VectorSet) + copper::VectorSet::DataBytes(dim, capacity)));
-        FatalAssert(vec_set != nullptr, LOG_TAG_TEST, "Failed to allocate memory for VectorSet.");
-        new (vec_set) copper::VectorSet(dim, capacity);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created VectorSet: this=%p, dim=%hu, capacity=%hu",
-             vec_set, dim, capacity);
-        return vec_set;
+    divftree::Cluster* CreateCluster(uint16_t dim, uint16_t capacity) {
+        divftree::Cluster* cluster = static_cast<divftree::Cluster*>(
+            malloc(sizeof(divftree::Cluster) + divftree::Cluster::DataBytes(dim, capacity)));
+        FatalAssert(cluster != nullptr, LOG_TAG_TEST, "Failed to allocate memory for Cluster.");
+        new (cluster) divftree::Cluster(dim, capacity);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Cluster: this=%p, dim=%hu, capacity=%hu",
+             cluster, dim, capacity);
+        return cluster;
     }
 
-    void DestroyVectorSet(copper::VectorSet*& vec_set) {
-        FatalAssert(vec_set != nullptr, LOG_TAG_TEST, "Cannot destroy a null VectorSet.");
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Destroying VectorSet: this=%p", vec_set);
-        vec_set->~VectorSet();
-        free(vec_set);
-        vec_set = nullptr;
+    void DestroyCluster(divftree::Cluster*& cluster) {
+        FatalAssert(cluster != nullptr, LOG_TAG_TEST, "Cannot destroy a null Cluster.");
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Destroying Cluster: this=%p", cluster);
+        cluster->~Cluster();
+        free(cluster);
+        cluster = nullptr;
     }
 
     bool vector_test() {
@@ -47,9 +47,9 @@ public:
         bool status = true;
         {
             bool pre_delete_on_destroy;
-            copper::Address pre_address;
+            divftree::Address pre_address;
 
-            copper::Vector vec1;
+            divftree::Vector vec1;
             status = status && !vec1.IsValid();
             ErrorAssert(!vec1.IsValid(), LOG_TAG_TEST, "Vector should not be valid after default constructor.");
             status = status && !vec1._delete_on_destroy;
@@ -76,7 +76,7 @@ public:
             pre_delete_on_destroy = vec1._delete_on_destroy;
             pre_address = vec1.GetData();
 
-            copper::Vector vec2(static_cast<copper::Address>(_data[0]));
+            divftree::Vector vec2(static_cast<divftree::Address>(_data[0]));
             status = status && !vec2._delete_on_destroy;
             ErrorAssert(!vec2._delete_on_destroy, LOG_TAG_TEST, "Vector should not be deleted after link constructor.");
 
@@ -87,7 +87,7 @@ public:
 
             FaultAssert(vec2.Create(dim), status, LOG_TAG_TEST, "Valid linked vector should not be created.");
             FaultAssert(vec2.Link(vec1), status, LOG_TAG_TEST, "Valid linked vector should not be linked.");
-            FaultAssert(vec2.Link(static_cast<copper::Address>(_data[1])), status, LOG_TAG_TEST,
+            FaultAssert(vec2.Link(static_cast<divftree::Address>(_data[1])), status, LOG_TAG_TEST,
                         "Valid linked vector should not be linked.");
             FaultAssert(vec2.Destroy(), status, LOG_TAG_TEST,
                         "linked vector cannot be destroyed.");
@@ -98,8 +98,8 @@ public:
             status = status && (vec1._delete_on_destroy == pre_delete_on_destroy);
             ErrorAssert(vec1._delete_on_destroy == pre_delete_on_destroy, LOG_TAG_TEST,
                         "Vector should not change delete_on_destroy after faulty move assignment.");
-            status = status && (vec2.GetData() == static_cast<copper::Address>(_data[0]));
-            ErrorAssert(vec2.GetData() == static_cast<copper::Address>(_data[0]), LOG_TAG_TEST,
+            status = status && (vec2.GetData() == static_cast<divftree::Address>(_data[0]));
+            ErrorAssert(vec2.GetData() == static_cast<divftree::Address>(_data[0]), LOG_TAG_TEST,
                         "Vector should not change address after faulty operations.");
             status = status && (!vec2._delete_on_destroy);
             ErrorAssert(!vec2._delete_on_destroy, LOG_TAG_TEST,
@@ -107,11 +107,11 @@ public:
 
             FaultAssert(vec1.Create(dim), status, LOG_TAG_TEST, "Valid vector should not be created.");
             FaultAssert(vec1.Link(vec2), status, LOG_TAG_TEST, "Valid vector should not be linked.");
-            FaultAssert(vec1.Link(static_cast<copper::Address>(_data[1])), status, LOG_TAG_TEST,
+            FaultAssert(vec1.Link(static_cast<divftree::Address>(_data[1])), status, LOG_TAG_TEST,
                         "Valid vector should not be linked.");
             FaultAssert(vec1 = std::move(vec2), status, LOG_TAG_TEST, "Valid vector should not be assigned.");
-            status = status && (vec2.GetData() == static_cast<copper::Address>(_data[0]));
-            ErrorAssert(vec2.GetData() == static_cast<copper::Address>(_data[0]), LOG_TAG_TEST,
+            status = status && (vec2.GetData() == static_cast<divftree::Address>(_data[0]));
+            ErrorAssert(vec2.GetData() == static_cast<divftree::Address>(_data[0]), LOG_TAG_TEST,
                         "Vector should not change address after faulty move assignment.");
             status = status && !(vec2._delete_on_destroy);
             ErrorAssert(!(vec2._delete_on_destroy), LOG_TAG_TEST,
@@ -123,7 +123,7 @@ public:
             ErrorAssert(vec1._delete_on_destroy == pre_delete_on_destroy, LOG_TAG_TEST,
                         "Vector should not change delete_on_destroy after faulty operations.");
 
-            copper::Vector vec3(vec1, dim);
+            divftree::Vector vec3(vec1, dim);
             status = status && vec3._delete_on_destroy;
             ErrorAssert(vec3._delete_on_destroy, LOG_TAG_TEST, "Vector should be deleted after copy constructor.");
 
@@ -137,7 +137,7 @@ public:
             pre_delete_on_destroy = vec3._delete_on_destroy;
             pre_address = vec3.GetData();
 
-            copper::Vector vec4(std::move(vec3));
+            divftree::Vector vec4(std::move(vec3));
             status = status && (vec4._delete_on_destroy == pre_delete_on_destroy);
             ErrorAssert(vec4._delete_on_destroy == pre_delete_on_destroy, LOG_TAG_TEST,
                         "vector constructed using move, should inherit the delete_on_destroy of it's input.");
@@ -194,7 +194,7 @@ public:
                 ErrorAssert(vec1[i] == _data[2][i], LOG_TAG_TEST, "Vectors should have the same data.");
             }
 
-            copper::Vector vec5(vec2.GetData());
+            divftree::Vector vec5(vec2.GetData());
             status = status && (vec2.Similar(vec5, dim));
             ErrorAssert(vec2.Similar(vec5, dim), LOG_TAG_TEST,
                         "Vectors should be similar after link constructor.");
@@ -237,27 +237,27 @@ public:
         return status;
     }
 
-    bool vector_set() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_set for %luth time...", try_count);
+    bool vertex_cluster() {
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vertex_cluster for %luth time...", try_count);
         bool status = true;
 
-        copper::VectorSet* set1p = CreateVectorSet(dim, size);
-        copper::VectorSet* set2p = CreateVectorSet(dim, size+5);
-        copper::VectorSet& set1 = *set1p;
-        copper::VectorSet& set2 = *set2p;
+        divftree::Cluster* set1p = CreateCluster(dim, size);
+        divftree::Cluster* set2p = CreateCluster(dim, size+5);
+        divftree::Cluster& set1 = *set1p;
+        divftree::Cluster& set2 = *set2p;
 
         for (uint16_t i = 0; i < size; ++i) {
-            copper::Address va1 = set1.Insert(_data[i], _ids[i]);
-            copper::Address va2 = set2.Insert(copper::Vector(_data[i]), _ids[i]);
+            divftree::Address va1 = set1.Insert(_data[i], _ids[i]);
+            divftree::Address va2 = set2.Insert(divftree::Vector(_data[i]), _ids[i]);
 
-            status = status && (va1 == set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
-            ErrorAssert(va1 == set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)), LOG_TAG_TEST,
+            status = status && (va1 == set1.GetVectors() + (i * dim * sizeof(divftree::VTYPE)));
+            ErrorAssert(va1 == set1.GetVectors() + (i * dim * sizeof(divftree::VTYPE)), LOG_TAG_TEST,
                         "vector set returned wrong address. Expected=%p, Actual=%p",
-                        va1, set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
-            status = status && (va2 == set2.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
-            ErrorAssert(va2 == set2.GetVectors() + (i * dim * sizeof(copper::VTYPE)), LOG_TAG_TEST,
+                        va1, set1.GetVectors() + (i * dim * sizeof(divftree::VTYPE)));
+            status = status && (va2 == set2.GetVectors() + (i * dim * sizeof(divftree::VTYPE)));
+            ErrorAssert(va2 == set2.GetVectors() + (i * dim * sizeof(divftree::VTYPE)), LOG_TAG_TEST,
                         "vector set returned wrong address. Expected=%p, Actual=%p",
-                        va2, set1.GetVectors() + (i * dim * sizeof(copper::VTYPE)));
+                        va2, set1.GetVectors() + (i * dim * sizeof(divftree::VTYPE)));
 
             status = status && (set1[i].id == _ids[i]);
             ErrorAssert(set1[i].id == _ids[i], LOG_TAG_TEST,
@@ -285,9 +285,9 @@ public:
             }
         }
         FaultAssert(set1.Insert(_data[0], _ids[0]), status, LOG_TAG_TEST,
-                    "VectorSet should not insert when full.");
-        FaultAssert(set1.Insert(copper::Vector(_data[0]), _ids[0]), status, LOG_TAG_TEST,
-                    "VectorSet should not insert when full.");
+                    "Cluster should not insert when full.");
+        FaultAssert(set1.Insert(divftree::Vector(_data[0]), _ids[0]), status, LOG_TAG_TEST,
+                    "Cluster should not insert when full.");
 
         status = status && (set1.Size() == size);
         ErrorAssert(set1.Size() == size, LOG_TAG_TEST,
@@ -299,9 +299,9 @@ public:
                     size, set2.Size());
 
         for (uint16_t i = 0; i < size; ++i) {
-            copper::VectorPair vecp = set1[i];
-            copper::VectorID id = set1.GetVectorID(i);
-            copper::Vector vec1 = set1.GetVector(i);
+            divftree::VectorPair vecp = set1[i];
+            divftree::VectorID id = set1.GetVectorID(i);
+            divftree::Vector vec1 = set1.GetVector(i);
 
             status = status && (vecp.id == id);
             ErrorAssert(vecp.id == id, LOG_TAG_TEST,
@@ -325,8 +325,8 @@ public:
                         vec1.ToString(dim).ToCStr(), set1.GetVectorByID(id).ToString(dim).ToCStr());
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "VectorSet1: %s", set1.ToString().ToCStr());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "VectorSet2: %s", set2.ToString().ToCStr());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster1: %s", set1.ToString().ToCStr());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster2: %s", set2.ToString().ToCStr());
 
         set1.DeleteLast();
         status = status && (set1.Size() == size - 1);
@@ -337,12 +337,12 @@ public:
         ErrorAssert(!(set1.Contains(_ids[size - 1])), LOG_TAG_TEST,
                     "uint16 vector set should not contain vector id %lu", _ids[size - 1]);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "VectorSet1 after deletion: %s", set1.ToString().ToCStr());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster1 after deletion: %s", set1.ToString().ToCStr());
 
-        DestroyVectorSet(set1p);
-        DestroyVectorSet(set2p);
+        DestroyCluster(set1p);
+        DestroyCluster(set2p);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_set.");
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vertex_cluster.");
         return status;
     }
 
@@ -363,7 +363,7 @@ protected:
     static constexpr uint16_t dim = 8;
     static constexpr uint16_t size = 3;
 
-    copper::VTYPE _data[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
+    divftree::VTYPE _data[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
                                      {9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f},
                                      {8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f}};
     uint64_t _ids[size] = {1ul, 2ul, 3ul};

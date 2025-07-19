@@ -4,7 +4,7 @@
 # todo changing the core location after making gdb work
 
 ROOT = ..
-COPPER_PATH = $(ROOT)/include
+DIVFTREE_PATH = $(ROOT)/include
 
 BUILD_DIR = $(ROOT)/ut/build
 OBJ_DIR := $(BUILD_DIR)/obj
@@ -14,7 +14,7 @@ SRC_DIR = $(ROOT)/ut
 
 CXX = g++
 IGNORE_WARNING = -Wno-pedantic -Wno-write-strings -Wno-pointer-arith
-CXXFLAGS = -std=c++20 -I$(COPPER_PATH) -I$(ROOT) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic $(IGNORE_WARNING)
+CXXFLAGS = -std=c++20 -I$(DIVFTREE_PATH) -I$(ROOT) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic $(IGNORE_WARNING)
 
 # Add custom defines if they are provided
 ifneq ($(filter -D%,$(DEFINES)),)

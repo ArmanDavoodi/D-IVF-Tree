@@ -1,5 +1,5 @@
-#ifndef COPPER_COMMON_H_
-#define COPPER_COMMON_H_
+#ifndef DIVFTREE_COMMON_H_
+#define DIVFTREE_COMMON_H_
 
 #include <vector>
 #include <cstdint>
@@ -12,7 +12,7 @@
 
 #include "debug.h"
 
-namespace copper {
+namespace divftree {
 
 struct RetStatus {
     enum {
@@ -73,7 +73,7 @@ union VectorID {
         return _level == LEAF_LEVEL;
     }
 
-    inline bool IsInternalNode() const {
+    inline bool IsInternalVertex() const {
         return _level > LEAF_LEVEL;
     }
 
@@ -107,13 +107,13 @@ typedef const void* ConstAddress;
 
 constexpr Address INVALID_ADDRESS = nullptr;
 
-class CopperNodeInterface;
-class VectorIndexInterface;
+class DIVFTreeVertexInterface;
+class DIVFTreeInterface;
 class BufferManagerInterface;
-// class CopperNode;
-// class VectorIndex;
+// class DIVFTreeVertex;
+// class DIVFTree;
 // class BufferManager;
-// class VectorSet;
+// class Cluster;
 
 enum ClusteringType : int8_t {
     InvalidC,
@@ -143,6 +143,21 @@ inline constexpr bool IsValid(DistanceType type) {
 #define DISTANCE_TYPE double
 #define DTYPE_FMT "%lf"
 #endif
+
+#if defined(__cpp_lib_hardware_interference_size) || defined(__GNUC__) || defined(_MSC_VER)
+#include <new>
+constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
+#else
+constexpr size_t CACHE_LINE_SIZE = 64; // Fallback to common cache line size
+#endif
+
+inline constexpr size_t ALLIGNED_SIZE(size_t size) {
+    return (size % CACHE_LINE_SIZE == 0) ? size : (size + (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE)));
+}
+
+inline constexpr size_t ALLIGNEMENT(size_t size) {
+    return (size % CACHE_LINE_SIZE == 0) ? 0 : (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE));
+}
 
 typedef VECTOR_TYPE VTYPE;
 typedef DISTANCE_TYPE DTYPE;
@@ -178,7 +193,7 @@ typedef DISTANCE_TYPE DTYPE;
 //             return String("Invalid DataType");
 //     }
 // }
-// Todo: Log VectorIndex: VectorIndex(RootID:%s(%lu, %lu, %lu), # levels:lu, # nodes:lu, # vectors:lu, size:lu)
+// Todo: Log DIVFTree: DIVFTree(RootID:%s(%lu, %lu, %lu), # levels:lu, # vertices:lu, # vectors:lu, size:lu)
 
 #ifndef PRINT_BUCKET
 #define PRINT_BUCKET false
@@ -187,25 +202,28 @@ typedef DISTANCE_TYPE DTYPE;
 #define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
 #define VECTORID_LOG(vid) (!((vid).IsValid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
 
-#define NODE_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
-#define NODE_PTR_LOG(node)\
-    (((node) == nullptr) ? "NULL" :\
-        (!((node)->CentroidID().IsValid()) ? "INV" : ((node)->CentroidID().IsVector() ? "Non-Centroid" : \
-            ((node)->CentroidID().IsLeaf() ? "Leaf" : ((node)->CentroidID().IsInternalNode() ? "Internal" \
-                : "UNDEF"))))),\
-    (((node) == nullptr) ? 0 : (node)->MinSize()),\
-    (((node) == nullptr) ? 0 : (node)->MaxSize()),\
-    VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->CentroidID())),\
-    (((node) == nullptr) ? 0 : (node)->Size()),\
-    VECTORID_LOG((((node) == nullptr) ? copper::INVALID_VECTOR_ID : (node)->ParentID())),\
-    ((PRINT_BUCKET) ? ((((node) == nullptr)) ? "NULL" : ((node)->BucketToString()).ToCStr()) : "OMITTED")
+#define VECTOR_STATE_LOG_FMT "%s"
+#define VECTOR_STATE_LOG(state) ((state).state.load().ToString().ToCStr())
 
-#define NODE_SELF_LOG()\
+#define VERTEX_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
+#define VERTEX_PTR_LOG(vertex)\
+    (((vertex) == nullptr) ? "NULL" :\
+        (!((vertex)->CentroidID().IsValid()) ? "INV" : ((vertex)->CentroidID().IsVector() ? "Non-Centroid" : \
+            ((vertex)->CentroidID().IsLeaf() ? "Leaf" : ((vertex)->CentroidID().IsInternalVertex() ? "Internal" \
+                : "UNDEF"))))),\
+    (((vertex) == nullptr) ? 0 : (vertex)->MinSize()),\
+    (((vertex) == nullptr) ? 0 : (vertex)->MaxSize()),\
+    VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->CentroidID())),\
+    (((vertex) == nullptr) ? 0 : (vertex)->Size()),\
+    VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->ParentID())),\
+    ((PRINT_BUCKET) ? ((((vertex) == nullptr)) ? "NULL" : ((vertex)->BucketToString()).ToCStr()) : "OMITTED")
+
+#define VERTEX_SELF_LOG()\
     (!(_centroid_id.IsValid()) ? "INV" : (_centroid_id.IsVector() ? "Non-Centroid" : \
                                           (_centroid_id.IsLeaf() ? "Leaf" : \
-                                                                   (_centroid_id.IsInternalNode() ? "Internal" :\
+                                                                   (_centroid_id.IsInternalVertex() ? "Internal" :\
                                                                                                     "UNDEF")))),\
-    _min_size, _bucket.Capacity(), VECTORID_LOG(_centroid_id), _bucket.Size(), VECTORID_LOG(_parent_id),\
+    _min_size, _cluster.Capacity(), VECTORID_LOG(_centroid_id), _cluster.Size(), VECTORID_LOG(_parent_id),\
     ((PRINT_BUCKET) ? BucketToString().ToCStr() : "OMITTED")
 
 #define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
@@ -226,42 +244,42 @@ typedef DISTANCE_TYPE DTYPE;
 #define CHECK_VECTORID_IS_LEAF(vid, tag) \
     FatalAssert((vid).IsLeaf(), (tag), "VectorID " VECTORID_LOG_FMT " is not a leaf", VECTORID_LOG((vid)))
 
-#define CHECK_NODE_IS_LEAF(node, tag) \
-    FatalAssert(((node) != nullptr) && (node)->IsLeaf(), (tag), \
-                "Node is not a leaf: " NODE_LOG_FMT, NODE_PTR_LOG((node)))
-#define CHECK_NODE_IS_INTERNAL(node, tag) \
-    FatalAssert(((node) != nullptr) && !((node)->IsLeaf()), (tag), \
-                "Node is not an internal node: " NODE_LOG_FMT, NODE_PTR_LOG((node)))
+#define CHECK_VERTEX_IS_LEAF(vertex, tag) \
+    FatalAssert(((vertex) != nullptr) && (vertex)->IsLeaf(), (tag), \
+                "Vertex is not a leaf: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex)))
+#define CHECK_VERTEX_IS_INTERNAL(vertex, tag) \
+    FatalAssert(((vertex) != nullptr) && !((vertex)->IsLeaf()), (tag), \
+                "Vertex is not an internal vertex: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex)))
 
 #define CHECK_NOT_NULLPTR(ptr, tag) \
     FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
 
-#define CHECK_NODE_IS_VALID(node, tag, check_min_size) \
-    CHECK_NOT_NULLPTR((node), (tag)); \
-    CHECK_VECTORID_IS_VALID((node)->CentroidID(), (tag)); \
-    CHECK_VECTORID_IS_CENTROID((node)->CentroidID(), (tag)); \
-    FatalAssert((node)->VectorDimention() > 0, (tag), \
-                "Node has invalid vector dimension: " NODE_LOG_FMT, NODE_PTR_LOG((node))); \
-    CHECK_MIN_MAX_SIZE((node)->MinSize(), (node)->MaxSize(), (tag)); \
-    FatalAssert(((!(check_min_size)) || (node)->Size() >= (node)->MinSize()), (tag), \
-                "Node does not have enough elements: size=%hu, min_size=%hu.", \
-                (node)->Size(), (node)->MinSize()); \
-    FatalAssert((node)->Size() <= (node)->MaxSize(), (tag), \
-                "Node has too many elements: size=%hu, max_size=%hu.", \
-                (node)->Size(), (node)->MaxSize())
+#define CHECK_VERTEX_IS_VALID(vertex, tag, check_min_size) \
+    CHECK_NOT_NULLPTR((vertex), (tag)); \
+    CHECK_VECTORID_IS_VALID((vertex)->CentroidID(), (tag)); \
+    CHECK_VECTORID_IS_CENTROID((vertex)->CentroidID(), (tag)); \
+    FatalAssert((vertex)->VectorDimention() > 0, (tag), \
+                "Vertex has invalid vector dimension: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex))); \
+    CHECK_MIN_MAX_SIZE((vertex)->MinSize(), (vertex)->MaxSize(), (tag)); \
+    FatalAssert(((!(check_min_size)) || (vertex)->Size() >= (vertex)->MinSize()), (tag), \
+                "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
+                (vertex)->Size(), (vertex)->MinSize()); \
+    FatalAssert((vertex)->Size() <= (vertex)->MaxSize(), (tag), \
+                "Vertex has too many elements: size=%hu, max_size=%hu.", \
+                (vertex)->Size(), (vertex)->MaxSize())
 
-#define CHECK_NODE_SELF_IS_VALID(tag, check_min_size) \
+#define CHECK_VERTEX_SELF_IS_VALID(tag, check_min_size) \
     CHECK_VECTORID_IS_VALID(_centroid_id, (tag)); \
     CHECK_VECTORID_IS_CENTROID(_centroid_id, (tag)); \
-    FatalAssert(_bucket.Dimension() > 0, (tag), \
-                "Node has invalid vector dimension: " NODE_LOG_FMT, NODE_SELF_LOG()); \
-    CHECK_MIN_MAX_SIZE(_min_size, _bucket.Capacity(), (tag)); \
-    FatalAssert(((!(check_min_size)) || _bucket.Size() >= _min_size), (tag), \
-                "Node does not have enough elements: size=%hu, min_size=%hu.", \
-                _bucket.Size(), _min_size); \
-    FatalAssert(_bucket.Size() <= _bucket.Capacity(), (tag), \
-                "Node has too many elements: size=%hu, max_size=%hu.", \
-                _bucket.Size(), _bucket.Capacity()); \
+    FatalAssert(_cluster.Dimension() > 0, (tag), \
+                "Vertex has invalid vector dimension: " VERTEX_LOG_FMT, VERTEX_SELF_LOG()); \
+    CHECK_MIN_MAX_SIZE(_min_size, _cluster.Capacity(), (tag)); \
+    FatalAssert(((!(check_min_size)) || _cluster.Size() >= _min_size), (tag), \
+                "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
+                _cluster.Size(), _min_size); \
+    FatalAssert(_cluster.Size() <= _cluster.Capacity(), (tag), \
+                "Vertex has too many elements: size=%hu, max_size=%hu.", \
+                _cluster.Size(), _cluster.Capacity()); \
     FatalAssert(IsValid(_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
     FatalAssert(IsValid(_distanceAlg), (tag), "Distance algorithm is invalid."); \
     CHECK_NOT_NULLPTR(_similarityComparator, (tag)); \
@@ -270,10 +288,10 @@ typedef DISTANCE_TYPE DTYPE;
 #ifdef ENABLE_TEST_LOGGING
 #define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg, ...) \
     do { \
-        copper::String str(msg ": Batch Size: %lu, Vector Pair Batch: " __VA_OPT__(,) __VA_ARGS__,\
+        divftree::String str(msg ": Batch Size: %lu, Vector Pair Batch: " __VA_OPT__(,) __VA_ARGS__,\
                            (vector).size()); \
         for (const auto& pair : (vector)) { \
-            str += copper::String("<" VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "> ", \
+            str += divftree::String("<" VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "> ", \
                                   VECTORID_LOG(pair.first), pair.second); \
         } \
         CLOG(LOG_LEVEL_DEBUG, (tag), "%s", str.ToCStr()); \

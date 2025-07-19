@@ -7,7 +7,7 @@
 
 #include "distance.h"
 
-// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
+// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_DIVFTREE_VERTEX
 namespace UT {
 class Test {
 public:
@@ -44,7 +44,7 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data2=%s", data1.c_str());
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data3=%s", data2.c_str());
 
-        copper::DTYPE dist[size][size], base_dist[size][size];
+        divftree::DTYPE dist[size][size], base_dist[size][size];
 
         std::string dist_str = "";
         std::string base_dist_str = "";
@@ -56,10 +56,10 @@ public:
 
                 base_dist[i][j] = 0;
                 for (uint16_t k = 0; k < dim; ++k) {
-                    base_dist[i][j] += (((copper::DTYPE)_data[i][k] - (copper::DTYPE)_data[j][k]) *
-                                        ((copper::DTYPE)_data[i][k] - (copper::DTYPE)_data[j][k]));
+                    base_dist[i][j] += (((divftree::DTYPE)_data[i][k] - (divftree::DTYPE)_data[j][k]) *
+                                        ((divftree::DTYPE)_data[i][k] - (divftree::DTYPE)_data[j][k]));
                 }
-                dist[i][j] = copper::L2::Distance(copper::Vector(_data[i], dim), copper::Vector(_data[j], dim), dim);
+                dist[i][j] = divftree::L2::Distance(divftree::Vector(_data[i], dim), divftree::Vector(_data[j], dim), dim);
 
                 status = status && (dist[i][j] == base_dist[i][j]);
                 ErrorAssert(dist[i][j] == base_dist[i][j], LOG_TAG_TEST,
@@ -77,20 +77,20 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "dist: %s", dist_str.c_str());
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_dist: %s", base_dist_str.c_str());
 
-        const copper::VTYPE query[dim] = {0.15f, 20.4f, -9.0f, 1.1f, 10.0f, 6.0f, 5.1f, 9.55f};
+        const divftree::VTYPE query[dim] = {0.15f, 20.4f, -9.0f, 1.1f, 10.0f, 6.0f, 5.1f, 9.55f};
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query: %s", copper::Vector(query, dim).ToString(dim).ToCStr());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query: %s", divftree::Vector(query, dim).ToString(dim).ToCStr());
 
-        copper::DTYPE query_dist[size], base_query_dist[size];
+        divftree::DTYPE query_dist[size], base_query_dist[size];
         std::string query_dist_str = "";
         std::string base_query_dist_str = "";
         for (uint16_t i = 0; i < size; ++i) {
             base_query_dist[i] = 0;
             for (uint16_t k = 0; k < dim; ++k) {
-                base_query_dist[i] += (((copper::DTYPE)query[k] - (copper::DTYPE)_data[i][k]) *
-                                       ((copper::DTYPE)query[k] - (copper::DTYPE)_data[i][k]));
+                base_query_dist[i] += (((divftree::DTYPE)query[k] - (divftree::DTYPE)_data[i][k]) *
+                                       ((divftree::DTYPE)query[k] - (divftree::DTYPE)_data[i][k]));
             }
-            query_dist[i] = copper::L2::Distance(copper::Vector(query, dim), copper::Vector(_data[i], dim), dim);
+            query_dist[i] = divftree::L2::Distance(divftree::Vector(query, dim), divftree::Vector(_data[i], dim), dim);
 
             status = status && (query_dist[i] == base_query_dist[i]);
             ErrorAssert(query_dist[i] == base_query_dist[i], LOG_TAG_TEST,
@@ -109,19 +109,19 @@ public:
         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_query_dist_str: %s", base_query_dist_str.c_str());
 
         /* The most similar vector to query should be first -> for L2 that is the minimum distance */
-        std::sort(query_dist, query_dist + size, copper::L2::MoreSimilar);
+        std::sort(query_dist, query_dist + size, divftree::L2::MoreSimilar);
         for (uint16_t i = 0; i < size - 1; ++i) {
             status = status && (query_dist[i] <= query_dist[i + 1]);
             ErrorAssert(query_dist[i] <= query_dist[i + 1], LOG_TAG_TEST,
                         "uint16 l2 similarity err: " DTYPE_FMT " should be less than " DTYPE_FMT,
                         query_dist[i], query_dist[i + 1]);
         }
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query_dist_sorted: %s", copper::Vector(query_dist, size).
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query_dist_sorted: %s", divftree::Vector(query_dist, size).
             ToString(size).ToCStr());
 
-        copper::Vector cent = copper::L2::ComputeCentroid((const copper::VTYPE*)_data, size, dim);
+        divftree::Vector cent = divftree::L2::ComputeCentroid((const divftree::VTYPE*)_data, size, dim);
 
-        copper::Vector base_cent;
+        divftree::Vector base_cent;
         base_cent.Create(dim);
         for (uint16_t i = 0; i < dim; ++i) {
             base_cent[i] = 0;
@@ -157,60 +157,60 @@ public:
     //                                           {16, 17, 18},
     //                                           {19, 20, 21},
     //                                           {22, 23, 24}};
-    //     copper::VectorID ids[MAX_SIZE];
-    //     copper::BufferManager<uint16_t, DIM, MIN_SIZE, MAX_SIZE, MIN_SIZE, MAX_SIZE,
-    //                            double, copper::Simple_Divide_L2> _bufmgr;
-    //     using Node = copper::CopperNode<uint16_t, DIM, MIN_SIZE, MAX_SIZE,
-    //                                      double, copper::Simple_Divide_L2>;
+    //     divftree::VectorID ids[MAX_SIZE];
+    //     divftree::BufferManager<uint16_t, DIM, MIN_SIZE, MAX_SIZE, MIN_SIZE, MAX_SIZE,
+    //                            double, divftree::Simple_Divide_L2> _bufmgr;
+    //     using Vertex = divftree::DIVFTreeVertex<uint16_t, DIM, MIN_SIZE, MAX_SIZE,
+    //                                      double, divftree::Simple_Divide_L2>;
 
     //     _bufmgr.Init();
-    //     copper::VectorID node_id = _bufmgr.Record_Root();
-    //     copper::RetStatus rs = _bufmgr.UpdateClusterAddress(node_id, new Node(node_id));
+    //     divftree::VectorID vertex_id = _bufmgr.Record_Root();
+    //     divftree::RetStatus rs = _bufmgr.UpdateClusterAddress(vertex_id, new Vertex(vertex_id));
     //     status = status && rs.IsOK();
-    //         ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+    //         ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
     //     uint16_t level = 2;
 
-    //     copper::CopperNode<uint16_t, DIM, MIN_SIZE, MAX_SIZE, double, copper::Simple_Divide_L2> *node =
-    //         _bufmgr.template Get_Node<Node>(node_id);
+    //     divftree::DIVFTreeVertex<uint16_t, DIM, MIN_SIZE, MAX_SIZE, double, divftree::Simple_Divide_L2> *vertex =
+    //         _bufmgr.template Get_Vertex<Vertex>(vertex_id);
 
-    //     status = status && (node != nullptr);
-    //     ErrorAssert(node != nullptr, LOG_TAG_VECTOR_INDEX, "Node should not be nullptr for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+    //     status = status && (vertex != nullptr);
+    //     ErrorAssert(vertex != nullptr, LOG_TAG_VECTOR_INDEX, "Vertex should not be nullptr for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
 
     //     for (uint16_t i = 0; i < MAX_SIZE; ++i) {
     //         ids[i] = _bufmgr.Record_Vector(0);
-    //         copper::Address vec_add = node->Insert(copper::Vector<uint16_t, DIM>(data[i]), ids[i]);
-    //         status = status && (vec_add != copper::INVALID_ADDRESS);
-    //         ErrorAssert(vec_add != copper::INVALID_ADDRESS, LOG_TAG_VECTOR_INDEX,
+    //         divftree::Address vec_add = vertex->Insert(divftree::Vector<uint16_t, DIM>(data[i]), ids[i]);
+    //         status = status && (vec_add != divftree::INVALID_ADDRESS);
+    //         ErrorAssert(vec_add != divftree::INVALID_ADDRESS, LOG_TAG_VECTOR_INDEX,
     //                     "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
     //         rs = _bufmgr.UpdateVectorAddress(ids[i], vec_add);
     //         status = status && rs.IsOK();
     //         ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
     //     }
 
-    //     copper::VectorID _root_id = _bufmgr.Record_Root();
+    //     divftree::VectorID _root_id = _bufmgr.Record_Root();
     //     status = status && (_root_id.Is_Valid());
     //     ErrorAssert(_root_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Root ID should"
     //                 "not be invalid: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-    //     Node* new_root = new Node(_root_id);
+    //     Vertex* new_root = new Vertex(_root_id);
     //     status = status && (new_root != nullptr);
-    //     ErrorAssert(new_root != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to create new root node for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+    //     ErrorAssert(new_root != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to create new root vertex for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
     //     rs = _bufmgr.UpdateClusterAddress(_root_id, new_root);
     //     status = status && rs.IsOK();
     //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-    //     rs = _bufmgr.UpdateVectorAddress(_root_id, new_root->Insert(node->Compute_Current_Centroid(), node_id));
+    //     rs = _bufmgr.UpdateVectorAddress(_root_id, new_root->Insert(vertex->Compute_Current_Centroid(), vertex_id));
     //     status = status && rs.IsOK();
     //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update vector address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
-    //     rs = node->Assign_Parent(_root_id);
+    //     rs = vertex->Assign_Parent(_root_id);
     //     status = status && rs.IsOK();
-    //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to assign parent for node_id: " VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+    //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to assign parent for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
     //     ++level;
 
 
-    //     std::vector<Node*> nodes;
-    //     nodes.push_back(node);
-    //     std::vector<copper::Vector<uint16_t, DIM>> centroids;
-    //     copper::Simple_Divide_L2<uint16_t, DIM> _core;
-    //     rs = _core.template Cluster<Node, MIN_SIZE, MAX_SIZE, MIN_SIZE, MAX_SIZE>(nodes, 0, centroids, 2, _bufmgr);
+    //     std::vector<Vertex*> vertices;
+    //     vertices.push_back(vertex);
+    //     std::vector<divftree::Vector<uint16_t, DIM>> centroids;
+    //     divftree::Simple_Divide_L2<uint16_t, DIM> _core;
+    //     rs = _core.template Cluster<Vertex, MIN_SIZE, MAX_SIZE, MIN_SIZE, MAX_SIZE>(vertices, 0, centroids, 2, _bufmgr);
     //     status = status && rs.IsOK();
     //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Clustering failed with error: %s", rs.Msg());
 
@@ -239,7 +239,7 @@ protected:
     static constexpr uint16_t dim = 8;
     static constexpr uint16_t size = 3;
 
-    const copper::VTYPE _data[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
+    const divftree::VTYPE _data[size][dim] = {{0.2f, 25.6f, -12.2f, 1.112f, 36.0f, 7.5f, -3.3f, 8.8f},
                                             {9.1f, -4.6f, 5.5f, 2.2f, 3.3f, -1.1f, 6.6f, 7.7f},
                                             {8.8f, 9.9f, -10.1f, 11.2f, 12.3f, -13.4f, 14.5f, 15.6f}};
     const uint64_t _ids[size] = {1ul, 2ul, 3ul};

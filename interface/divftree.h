@@ -1,13 +1,13 @@
-#ifndef COPPER_INTERFACE_H_
-#define COPPER_INTERFACE_H_
+#ifndef DIVFTREE_INTERFACE_H_
+#define DIVFTREE_INTERFACE_H_
 
 #include "common.h"
 #include "vector_utils.h"
 #include "distance.h"
 
-namespace copper {
+namespace divftree {
 
-struct CopperCoreAttributes {
+struct DIVFTreeCoreAttributes {
     // DataType vtype;
     uint16_t dimention;
     // DataType dtype;
@@ -15,16 +15,16 @@ struct CopperCoreAttributes {
     DistanceType distanceAlg;
 };
 
-struct CopperNodeAttributes {
-    CopperCoreAttributes core;
+struct DIVFTreeVertexAttributes {
+    DIVFTreeCoreAttributes core;
     uint16_t min_size;
     uint16_t max_size;
     VPairComparator similarityComparator;
     VPairComparator reverseSimilarityComparator;
 };
 
-struct CopperAttributes {
-    CopperCoreAttributes core;
+struct DIVFTreeAttributes {
+    DIVFTreeCoreAttributes core;
     uint16_t leaf_min_size;
     uint16_t leaf_max_size;
     uint16_t internal_min_size;
@@ -47,23 +47,26 @@ struct CopperAttributes {
     FatalAssert(IsValid((attr).core.clusteringAlg), (tag), "Clustering algorithm is invalid."); \
     FatalAssert(IsValid((attr).core.distanceAlg), (tag), "Distance algorithm is invalid.")
 
-#define CHECK_NODE_ATTRIBUTES(attr, tag) \
+#define CHECK_VERTEX_ATTRIBUTES(attr, tag) \
     CHECK_CORE_ATTRIBUTES(attr, tag); \
     CHECK_MIN_MAX_SIZE(attr.min_size, attr.max_size, tag)
 
-#define CHECK_COPPER_ATTRIBUTES(attr, tag) \
+#define CHECK_DIVFTREE_ATTRIBUTES(attr, tag) \
     CHECK_CORE_ATTRIBUTES(attr.core, tag); \
     CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
     CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
 
-class CopperNodeInterface {
+class DIVFTreeVertexInterface {
 public:
-    CopperNodeInterface() = default;
-    virtual ~CopperNodeInterface() = default;
+    DIVFTreeVertexInterface() = default;
+    virtual ~DIVFTreeVertexInterface() = default;
     virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
+    virtual void Pin() = 0;
+    virtual void Unpin() = 0;
+
     virtual Address Insert(const Vector& vec, VectorID vec_id) = 0;
-    virtual VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) = 0;
+    virtual VectorUpdate MigrateLastVectorTo(DIVFTreeVertexInterface* _dest) = 0;
 
     virtual RetStatus Search(const Vector& query, size_t k,
                              std::vector<std::pair<VectorID, DTYPE>>& neighbours) = 0;
@@ -92,12 +95,12 @@ public:
     virtual String BucketToString() const = 0;
 };
 
-class VectorIndexInterface {
+class DIVFTreeInterface {
 public:
-    VectorIndexInterface() = default;
-    virtual ~VectorIndexInterface() = default;
+    DIVFTreeInterface() = default;
+    virtual ~DIVFTreeInterface() = default;
 
-    virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) = 0;
+    virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) = 0;
     virtual RetStatus Delete(VectorID vec_id) = 0;
 
     virtual RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
@@ -108,7 +111,7 @@ public:
     virtual size_t Size() const = 0;
 
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
-    virtual size_t Bytes(bool is_internal_node) const = 0;
+    virtual size_t Bytes(bool is_internal_vertex) const = 0;
 
     virtual String ToString() = 0;
 
@@ -126,7 +129,7 @@ public:
                      "Data size (%lu) is less than or equal to k (%lu).", _data.size(), k);
 
         for (const auto& pair : _data) {
-            DTYPE distance = copper::Distance(query, pair.second, dim, distanceAlg);
+            DTYPE distance = divftree::Distance(query, pair.second, dim, distanceAlg);
             neighbours.emplace_back(pair.first, distance);
             std::push_heap(neighbours.begin(), neighbours.end(),
                           GetDistancePairSimilarityComparator(distanceAlg, true));
@@ -148,24 +151,24 @@ public:
     }
 
 protected:
-    virtual RetStatus SearchNodes(const Vector& query,
+    virtual RetStatus SearchVertexs(const Vector& query,
                                   const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
                                   std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) = 0;
 
-    virtual VectorID RecordInto(const Vector& vec, CopperNodeInterface* container_node,
-                                CopperNodeInterface* node = nullptr) = 0;
+    virtual VectorID RecordInto(const Vector& vec, DIVFTreeVertexInterface* container_vertex,
+                                DIVFTreeVertexInterface* vertex = nullptr) = 0;
 
-    virtual RetStatus ExpandTree(CopperNodeInterface* root, const Vector& centroid) = 0;
+    virtual RetStatus ExpandTree(DIVFTreeVertexInterface* root, const Vector& centroid) = 0;
 
-    virtual size_t FindClosestCluster(const std::vector<CopperNodeInterface*>& candidates,
+    virtual size_t FindClosestCluster(const std::vector<DIVFTreeVertexInterface*>& candidates,
                                        const Vector& vec) = 0;
 
-    virtual RetStatus Split(std::vector<CopperNodeInterface*>& candidates, size_t node_idx) = 0;
-    virtual RetStatus Split(CopperNodeInterface* leaf) = 0;
+    virtual RetStatus Split(std::vector<DIVFTreeVertexInterface*>& candidates, size_t vertex_idx) = 0;
+    virtual RetStatus Split(DIVFTreeVertexInterface* leaf) = 0;
 
-    virtual CopperNodeInterface* CreateNewNode(VectorID id) = 0;
+    virtual DIVFTreeVertexInterface* CreateNewVertex(VectorID id) = 0;
 
-    virtual RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
+    virtual RetStatus Cluster(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
                               std::vector<Vector>& centroids, uint16_t split_into) = 0;
 };
 

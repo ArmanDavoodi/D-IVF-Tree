@@ -1,34 +1,34 @@
-#ifndef COPPER_H_
-#define COPPER_H_
+#ifndef DIVFTREE_H_
+#define DIVFTREE_H_
 
 #include "common.h"
 #include "vector_utils.h"
 
-#include "interface/copper.h"
+#include "interface/divftree.h"
 
 /* Needs distance.h and buffer.h */
 
-namespace copper {
+namespace divftree {
 
-class CopperNode : public CopperNodeInterface {
+class DIVFTreeVertex : public DIVFTreeVertexInterface {
 public:
-    CopperNode(VectorID id, CopperNodeAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
+    DIVFTreeVertex(VectorID id, DIVFTreeVertexAttributes attr) : _centroid_id(id), _parent_id(INVALID_VECTOR_ID),
         _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
         _similarityComparator(attr.similarityComparator),
         _reverseSimilarityComparator(attr.reverseSimilarityComparator),
-        _bucket(attr.core.dimention, attr.max_size) {}
+        _cluster(attr.core.dimention, attr.max_size) {}
 
-    ~CopperNode() = default;
+    ~DIVFTreeVertex() = default;
     RetStatus AssignParent(VectorID parent_id) override {
         _parent_id = parent_id;
         return RetStatus::Success();
     }
 
     Address Insert(const Vector& vec, VectorID vec_id) override {
-        return _bucket.Insert(vec, vec_id);
+        return _cluster.Insert(vec, vec_id);
     }
 
-    VectorUpdate MigrateLastVectorTo(CopperNodeInterface* _dest) override {
+    VectorUpdate MigrateLastVectorTo(DIVFTreeVertexInterface* _dest) override {
         UNUSED_VARIABLE(_dest);
         return VectorUpdate{INVALID_VECTOR_ID, INVALID_ADDRESS}; // Placeholder for actual implementation
     }
@@ -50,19 +50,19 @@ public:
     }
 
     uint16_t Size() const override {
-        return _bucket.Size();
+        return _cluster.Size();
     }
 
     bool IsFull() const override {
-        return _bucket.Size() >= _bucket.Capacity();
+        return _cluster.Size() >= _cluster.Capacity();
     }
 
     bool IsAlmostEmpty() const override {
-        return _bucket.Size() <= _min_size;
+        return _cluster.Size() <= _min_size;
     }
 
     bool Contains(VectorID id) const override {
-        return _bucket.Contains(id);
+        return _cluster.Contains(id);
     }
 
     bool IsLeaf() const override {
@@ -82,16 +82,16 @@ public:
     }
 
     uint16_t MaxSize() const override {
-        return _bucket.Capacity();
+        return _cluster.Capacity();
     }
 
     uint16_t VectorDimention() const override {
-        return _bucket.Dimension();
+        return _cluster.Dimension();
     }
 
     /* todo: A better method(compared to function pointer) to allow inlining for optimization */
     inline VPairComparator GetSimilarityComparator(bool reverese) const override {
-        CHECK_NODE_SELF_IS_VALID(LOG_TAG_COPPER_NODE, false);
+        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
         return (reverese ? _reverseSimilarityComparator : _similarityComparator);
     }
 
@@ -102,11 +102,11 @@ public:
     }
 
     String BucketToString() const override {
-        return _bucket.ToString(); // Return a string representation of the bucket
+        return _cluster.ToString(); // Return a string representation of the bucket
     }
 
     static size_t Bytes(uint16_t dim, uint16_t capacity) {
-        return sizeof(CopperNode) + VectorSet::DataBytes(dim, capacity);
+        return sizeof(DIVFTreeVertex) + Cluster::DataBytes(dim, capacity);
     }
 
 protected:
@@ -117,15 +117,15 @@ protected:
     const uint16_t _min_size;
     const VPairComparator _similarityComparator;
     const VPairComparator _reverseSimilarityComparator;
-    VectorSet _bucket;
+    Cluster _cluster;
 
 TESTABLE;
 };
 
-class VectorIndex : public VectorIndexInterface {
+class DIVFTree : public DIVFTreeInterface {
 public:
 
-    VectorIndex(CopperAttributes attr) : core_attr(attr.core), leaf_min_size(attr.leaf_min_size),
+    DIVFTree(DIVFTreeAttributes attr) : core_attr(attr.core), leaf_min_size(attr.leaf_min_size),
                                          leaf_max_size(attr.leaf_max_size),
                                          internal_min_size(attr.internal_min_size),
                                          internal_max_size(attr.internal_max_size),
@@ -145,25 +145,25 @@ public:
         FatalAssert(_root.IsLeaf(), LOG_TAG_VECTOR_INDEX, "first root should be a leaf: "
                     VECTORID_LOG_FMT, VECTORID_LOG(_root));
 
-        rs = _bufmgr.UpdateClusterAddress(_root, CreateNewNode(_root));
+        rs = _bufmgr.UpdateClusterAddress(_root, CreateNewVertex(_root));
         FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root: "
                     VECTORID_LOG_FMT, VECTORID_LOG(_root));
         _levels = 2;
         CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX,
-             "Init Copper Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
+             "Init DIVFTree Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
              VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
     }
 
-    ~VectorIndex() override {
+    ~DIVFTree() override {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown Copper Index End: rs=%s", rs.Msg());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
     }
 
-    RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t node_per_layer) override {
+    RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) override {
         UNUSED_VARIABLE(vec);
         UNUSED_VARIABLE(vec_id);
-        UNUSED_VARIABLE(node_per_layer);
+        UNUSED_VARIABLE(vertex_per_layer);
         return RetStatus::Success(); // Placeholder for actual insertion logic
     }
 
@@ -197,15 +197,15 @@ public:
         return 0.0;
     }
 
-    size_t Bytes(bool is_internal_node) const override {
-        return CopperNode::Bytes(core_attr.dimention, is_internal_node ? internal_max_size : leaf_max_size);
+    size_t Bytes(bool is_internal_vertex) const override {
+        return DIVFTreeVertex::Bytes(core_attr.dimention, is_internal_vertex ? internal_max_size : leaf_max_size);
     }
 
     inline String ToString() override {
         return String();
     }
 protected:
-    const CopperCoreAttributes core_attr;
+    const DIVFTreeCoreAttributes core_attr;
     const uint16_t leaf_min_size;
     const uint16_t leaf_max_size;
     const uint16_t internal_min_size;
@@ -219,7 +219,7 @@ protected:
     VectorID _root;
     uint64_t _levels;
 
-    RetStatus SearchNodes(const Vector& query,
+    RetStatus SearchVertexs(const Vector& query,
                           const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
                           std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) override {
         UNUSED_VARIABLE(query);
@@ -229,48 +229,48 @@ protected:
         return RetStatus::Success(); // Placeholder for actual search logic
     }
 
-    VectorID RecordInto(const Vector& vec, CopperNodeInterface* container_node,
-                        CopperNodeInterface* node = nullptr) override {
+    VectorID RecordInto(const Vector& vec, DIVFTreeVertexInterface* container_vertex,
+                        DIVFTreeVertexInterface* vertex = nullptr) override {
         UNUSED_VARIABLE(vec);
-        UNUSED_VARIABLE(container_node);
-        UNUSED_VARIABLE(node);
+        UNUSED_VARIABLE(container_vertex);
+        UNUSED_VARIABLE(vertex);
         return INVALID_VECTOR_ID; // Placeholder for actual record logic
     }
 
-    RetStatus ExpandTree(CopperNodeInterface* root, const Vector& centroid) override {
+    RetStatus ExpandTree(DIVFTreeVertexInterface* root, const Vector& centroid) override {
         UNUSED_VARIABLE(root);
         UNUSED_VARIABLE(centroid);
         return RetStatus::Success(); // Placeholder for actual tree expansion logic
     }
 
-    size_t FindClosestCluster(const std::vector<CopperNodeInterface*>& candidates,
+    size_t FindClosestCluster(const std::vector<DIVFTreeVertexInterface*>& candidates,
                               const Vector& vec) override {
         UNUSED_VARIABLE(candidates);
         UNUSED_VARIABLE(vec);
         return 0; // Placeholder for actual cluster finding logic
     }
 
-    RetStatus Split(std::vector<CopperNodeInterface*>& candidates, size_t node_idx) override {
+    RetStatus Split(std::vector<DIVFTreeVertexInterface*>& candidates, size_t vertex_idx) override {
         UNUSED_VARIABLE(candidates);
-        UNUSED_VARIABLE(node_idx);
+        UNUSED_VARIABLE(vertex_idx);
         return RetStatus::Success(); // Placeholder for actual split logic
     }
 
-    RetStatus Split(CopperNodeInterface* leaf) override {
+    RetStatus Split(DIVFTreeVertexInterface* leaf) override {
         UNUSED_VARIABLE(leaf);
         return RetStatus::Success(); // Placeholder for actual split logic
     }
 
-    CopperNodeInterface* CreateNewNode(VectorID id) override {
-        const bool is_internal_node = id.IsInternalNode();
-        CopperNode* new_node = static_cast<CopperNode*>(malloc(Bytes(is_internal_node)));
-        CHECK_NOT_NULLPTR(new_node, LOG_TAG_COPPER_NODE);
+    DIVFTreeVertexInterface* CreateNewVertex(VectorID id) override {
+        const bool is_internal_vertex = id.IsInternalVertex();
+        DIVFTreeVertex* new_vertex = static_cast<DIVFTreeVertex*>(malloc(Bytes(is_internal_vertex)));
+        CHECK_NOT_NULLPTR(new_vertex, LOG_TAG_DIVFTREE_VERTEX);
 
-        CopperNodeAttributes attr;
+        DIVFTreeVertexAttributes attr;
         attr.core = core_attr;
         attr.similarityComparator = _similarityComparator;
         attr.reverseSimilarityComparator = _reverseSimilarityComparator;
-        if (is_internal_node) {
+        if (is_internal_vertex) {
             attr.max_size = internal_max_size;
             attr.min_size = internal_min_size;
         }
@@ -279,15 +279,15 @@ protected:
             attr.min_size = leaf_min_size;
         }
 
-        new (new_node) CopperNode(id, attr);
-        CHECK_NODE_IS_VALID(new_node, LOG_TAG_COPPER_NODE, false);
-        return new_node;
+        new (new_vertex) DIVFTreeVertex(id, attr);
+        CHECK_VERTEX_IS_VALID(new_vertex, LOG_TAG_DIVFTREE_VERTEX, false);
+        return new_vertex;
     }
 
-    RetStatus Cluster(std::vector<CopperNodeInterface*>& nodes, size_t target_node_index,
+    RetStatus Cluster(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
                       std::vector<Vector>& centroids, uint16_t split_into) override {
-        UNUSED_VARIABLE(nodes);
-        UNUSED_VARIABLE(target_node_index);
+        UNUSED_VARIABLE(vertices);
+        UNUSED_VARIABLE(target_vertex_index);
         UNUSED_VARIABLE(centroids);
         UNUSED_VARIABLE(split_into);
         return RetStatus::Success(); // Placeholder for actual clustering logic

@@ -7,7 +7,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace copper {
+namespace divftree {
 
 using VPairComparator = bool (*)(const std::pair<VectorID, DTYPE>&, const std::pair<VectorID, DTYPE>&);
 

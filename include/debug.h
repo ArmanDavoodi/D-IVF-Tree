@@ -1,5 +1,5 @@
-#ifndef COPPER_DEBUG_H_
-#define COPPER_DEBUG_H_
+#ifndef DIVFTREE_DEBUG_H_
+#define DIVFTREE_DEBUG_H_
 
 #include <cstdint>
 
@@ -22,6 +22,7 @@
 #define ENABLE_TEST_LOGGING
 #define ENABLE_ASSERTS
 #define MEMORY_DEBUG
+#define LOCK_DEBUG
 #define LOG_FUNCTION_NAME
 #elif BUILD==RELEASE
 #define ENABLE_ASSERTS
@@ -47,9 +48,9 @@ enum LOG_LEVELS : uint8_t {
 enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_BASIC_BIT,
     LOG_TAG_VECTOR_BIT,
-    LOG_TAG_VECTOR_SET_BIT,
+    LOG_TAG_CLUSTER_BIT,
     LOG_TAG_BUFFER_BIT,
-    LOG_TAG_COPPER_NODE_BIT,
+    LOG_TAG_DIVFTREE_VERTEX_BIT,
     LOG_TAG_VECTOR_INDEX_BIT,
     LOG_TAG_CLUSTERING_BIT,
     LOG_TAG_MEMORY_BIT,
@@ -60,9 +61,9 @@ enum LOG_TAG_BITS : uint64_t {
 
 #define LOG_TAG_BASIC (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_BASIC_BIT))
 #define LOG_TAG_VECTOR (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_BIT))
-#define LOG_TAG_VECTOR_SET (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_SET_BIT))
+#define LOG_TAG_CLUSTER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CLUSTER_BIT))
 #define LOG_TAG_BUFFER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_BUFFER_BIT))
-#define LOG_TAG_COPPER_NODE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_COPPER_NODE_BIT))
+#define LOG_TAG_DIVFTREE_VERTEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_DIVFTREE_VERTEX_BIT))
 #define LOG_TAG_VECTOR_INDEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_INDEX_BIT))
 #define LOG_TAG_CLUSTERING (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CLUSTERING_BIT))
 #define LOG_TAG_MEMORY (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_MEMORY_BIT))
@@ -153,6 +154,7 @@ enum LOG_TAG_BITS : uint64_t {
 #include <map>
 
 #include "utils/string.h"
+#include "utils/thread.h"
 
 #ifdef __clang__
 #include <experimental/source_location>
@@ -171,11 +173,15 @@ enum LOG_TAG_BITS : uint64_t {
 #undef THREAD_ID
 #endif
 
+#ifdef DIVF_THREAD_ID
+#undef DIVF_THREAD_ID
+#endif
+
 #ifdef _WIN32
 #include <windows.h> // For GetCurrentThreadId
 using os_thread_id = DWORD;
 
-#define OS_THREAD_ID ((copper::os_thread_id)(GetCurrentThreadId()))
+#define OS_THREAD_ID ((divftree::os_thread_id)(GetCurrentThreadId()))
 
 std::string print_callstack() {
     /* Not implemented */
@@ -252,10 +258,12 @@ std::string print_callstack() {
 }
 
 #endif
-namespace copper {
+namespace divftree {
 
 using thread_id = unsigned long;
-#define THREAD_ID ((copper::thread_id)(OS_THREAD_ID))
+#define THREAD_ID ((divftree::thread_id)(OS_THREAD_ID))
+#define DIVF_THREAD_ID ((const divftree::DIVFThreadID)(_cur_thread_id))
+
 struct Log_Msg {
     char *_msg = nullptr;
 
@@ -360,12 +368,12 @@ inline const char* tagtostr(uint64_t tag)
         return "     Basic     ";
     case LOG_TAG_VECTOR:
         return "    Vector     ";
-    case LOG_TAG_VECTOR_SET:
+    case LOG_TAG_CLUSTER:
         return "  Vector Set   ";
     case LOG_TAG_BUFFER:
         return "    Buffer     ";
-    case LOG_TAG_COPPER_NODE:
-        return "  Copper Node  ";
+    case LOG_TAG_DIVFTREE_VERTEX:
+        return "  DIVFTree Vertex  ";
     case LOG_TAG_VECTOR_INDEX:
         return " Vector Index  ";
     case LOG_TAG_CLUSTERING:
@@ -404,23 +412,26 @@ inline bool * fault_checking = nullptr;
 class FaultCheckingExc : public std::exception  {};
 };
 
-inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::chrono::_V2::system_clock::time_point _time,
+inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
+                const std::chrono::_V2::system_clock::time_point _time,
                 const char* file_name, const char* func_name, size_t line,
-                thread_id thread_id) {
+                thread_id thread_id, divftree::DIVFThreadID divf_thread_id) {
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed
     UNUSED_VARIABLE(func_name);
     if (debug::fault_checking != nullptr) {
 #ifdef ENABLE_FAULT_LOGGING
 #ifdef LOG_FUNCTION_NAME
-        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level, true), tagtostr(tag), time_str,
-            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            copper::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
+            thread_id, divf_thread_id, msg._msg);
 #else
-        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level, true), tagtostr(tag), time_str,
-            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            thread_id, divf_thread_id, msg._msg);
 #endif
         fflush(OUT);
 #endif
@@ -435,35 +446,36 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
     if (Pass_CallStack_Level(level)) {
         std::string callstack = print_callstack();
 #ifdef LOG_FUNCTION_NAME
-        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
+        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            copper::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(), thread_id, callstack.c_str(),
-            msg._msg);
+            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
+            thread_id, divf_thread_id, callstack.c_str(), msg._msg);
 #else
-        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu) | Callstack=%s | Message: %s\n",
+        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            thread_id, callstack.c_str(),
-            msg._msg);
+            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            thread_id, divf_thread_id, callstack.c_str(), msg._msg);
 #endif
     }
     else {
 #ifdef LOG_FUNCTION_NAME
-        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            copper::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
+            thread_id, divf_thread_id, msg._msg);
 #else
-        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu) | Message: %s\n",
+        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            copper::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(), thread_id, msg._msg);
+            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            thread_id, divf_thread_id, msg._msg);
 #endif
 
     }
     fflush(OUT);
     if (level == LOG_LEVEL_PANIC) {
-        copper::sleep(1); // wait to make sure everything is flushed
+        divftree::sleep(1); // wait to make sure everything is flushed
         abort();
     }
 }
@@ -480,11 +492,11 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
 
 #define CLOG(level, tag, msg, ...) \
     do {\
-        if (copper::Pass_Min_Level((level)) || copper::Pass_Tag((tag))) {\
-            if (copper::Pass_Level((level))){\
-                copper::Log((level), (tag), (copper::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
+        if (divftree::Pass_Min_Level((level)) || divftree::Pass_Tag((tag))) {\
+            if (divftree::Pass_Level((level))){\
+                divftree::Log((level), (tag), (divftree::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
                             std::chrono::system_clock::now(),\
-                            __FILE__, FUNCTION_NAME, __LINE__, THREAD_ID);\
+                            __FILE__, FUNCTION_NAME, __LINE__, THREAD_ID, DIVF_THREAD_ID);\
             }\
         }\
     } while(0)
@@ -544,11 +556,11 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
 #define FaultAssert(statement, condtion, tag, msg, ...) \
     do {\
         bool _FAULTY = false; \
-        copper::debug::fault_checking = &_FAULTY;\
+        divftree::debug::fault_checking = &_FAULTY;\
         try { \
             (statement);\
         } \
-        catch (const copper::debug::FaultCheckingExc& e) {\
+        catch (const divftree::debug::FaultCheckingExc& e) {\
             _FAULTY = true;\
         } \
         catch (const std::exception& e) {\
@@ -561,7 +573,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg, const std::c
             CLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
                  "\' got unkown exception.");\
         }\
-        copper::debug::fault_checking = nullptr;\
+        divftree::debug::fault_checking = nullptr;\
         if (!(_FAULTY)) {\
             condtion = false;\
             char _ASSERT_TMP_DEBUG[sizeof((#statement))+sizeof((msg))+23] = "\'" #statement "\' No Errors Occured. ";\

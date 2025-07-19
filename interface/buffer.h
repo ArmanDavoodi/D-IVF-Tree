@@ -1,10 +1,10 @@
-#ifndef COPPER_BUFFER_INTERFACE_H_
-#define COPPER_BUFFER_INTERFACE_H_
+#ifndef DIVFTREE_BUFFER_INTERFACE_H_
+#define DIVFTREE_BUFFER_INTERFACE_H_
 
 #include "common.h"
 #include "vector_utils.h"
 
-namespace copper {
+namespace divftree {
 
 class BufferManagerInterface {
 // TODO: reuse deleted IDs
@@ -14,8 +14,8 @@ public:
     virtual RetStatus Init() = 0;
     virtual RetStatus Shutdown() = 0;
 
-    virtual CopperNodeInterface* GetNode(VectorID node_id) = 0;
-    virtual CopperNodeInterface* GetContainerLeaf(VectorID vec_id)= 0;
+    virtual DIVFTreeVertexInterface* GetVertex(VectorID vertex_id) = 0;
+    virtual DIVFTreeVertexInterface* GetContainerLeaf(VectorID vec_id)= 0;
     virtual Vector GetVector(VectorID id) = 0;
 
     virtual bool InBuffer(VectorID id) = 0;

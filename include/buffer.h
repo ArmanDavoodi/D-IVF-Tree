@@ -1,10 +1,10 @@
-#ifndef COPPER_BUFFER_H_
-#define COPPER_BUFFER_H_
+#ifndef DIVFTREE_BUFFER_H_
+#define DIVFTREE_BUFFER_H_
 
 #include "interface/buffer.h"
-#include "interface/copper.h"
+#include "interface/divftree.h"
 
-namespace copper {
+namespace divftree {
 
 struct VectorInfo {
     Address vector_address; // valid if not root: points to the vector data
@@ -35,7 +35,7 @@ public:
         for (size_t level = directory.size() - 1; level > 0; --level) {
             for (VectorInfo& vec : directory[level]) {
                 if (vec.cluster_address != INVALID_ADDRESS) {
-                    static_cast<CopperNodeInterface*>(vec.cluster_address)->~CopperNodeInterface();
+                    static_cast<DIVFTreeVertexInterface*>(vec.cluster_address)->~DIVFTreeVertexInterface();
                     free(vec.cluster_address);
                     vec.cluster_address = INVALID_ADDRESS;
                 }
@@ -47,25 +47,25 @@ public:
         return RetStatus::Success();
     }
 
-    CopperNodeInterface* GetNode(VectorID node_id) override {
-        CHECK_VECTORID_IS_VALID(node_id, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(node_id, LOG_TAG_BUFFER);
-        FatalAssert(directory.size() > node_id._level, LOG_TAG_BUFFER, "Level is out of bounds. NodeID="
-                    VECTORID_LOG_FMT ", max_level:%lu", VECTORID_LOG(node_id), directory.size());
-        FatalAssert(directory[node_id._level].size() > node_id._val, LOG_TAG_BUFFER, "NodeID val is out of bounds. "
-                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(node_id), directory[node_id._level].size());
-        FatalAssert(directory[node_id._level][node_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Node not found in the buffer. NodeID=" VECTORID_LOG_FMT, VECTORID_LOG(node_id));
+    DIVFTreeVertexInterface* GetVertex(VectorID vertex_id) override {
+        CHECK_VECTORID_IS_VALID(vertex_id, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_CENTROID(vertex_id, LOG_TAG_BUFFER);
+        FatalAssert(directory.size() > vertex_id._level, LOG_TAG_BUFFER, "Level is out of bounds. VertexID="
+                    VECTORID_LOG_FMT ", max_level:%lu", VECTORID_LOG(vertex_id), directory.size());
+        FatalAssert(directory[vertex_id._level].size() > vertex_id._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
+                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(vertex_id), directory[vertex_id._level].size());
+        FatalAssert(directory[vertex_id._level][vertex_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
+                    "Vertex not found in the buffer. VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
 
-        CopperNodeInterface* node = static_cast<CopperNodeInterface*>
-                                        (directory[node_id._level][node_id._val].cluster_address);
-        FatalAssert(node->CentroidID() == node_id, LOG_TAG_BUFFER, "Mismatch in ID. BaseID=" VECTORID_LOG_FMT
-                    ", Found ID=" VECTORID_LOG_FMT, VECTORID_LOG(node_id), VECTORID_LOG(node->CentroidID()));
+        DIVFTreeVertexInterface* vertex = static_cast<DIVFTreeVertexInterface*>
+                                        (directory[vertex_id._level][vertex_id._val].cluster_address);
+        FatalAssert(vertex->CentroidID() == vertex_id, LOG_TAG_BUFFER, "Mismatch in ID. BaseID=" VECTORID_LOG_FMT
+                    ", Found ID=" VECTORID_LOG_FMT, VECTORID_LOG(vertex_id), VECTORID_LOG(vertex->CentroidID()));
 
-        return node;
+        return vertex;
     }
 
-    CopperNodeInterface* GetContainerLeaf(VectorID vec_id) {
+    DIVFTreeVertexInterface* GetContainerLeaf(VectorID vec_id) {
         CHECK_VECTORID_IS_VALID(vec_id, LOG_TAG_BUFFER);
         CHECK_VECTORID_IS_VECTOR(vec_id, LOG_TAG_BUFFER);
         FatalAssert(directory.size() > vec_id._level, LOG_TAG_BUFFER, "Vector ID:%lu level is out of bounds."
@@ -75,12 +75,12 @@ public:
         FatalAssert(directory[vec_id._level][vec_id._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
                     "Leaf not found in the buffer. Vector ID:%lu", vec_id._id);
 
-        CopperNodeInterface* leaf = static_cast<CopperNodeInterface*>
+        DIVFTreeVertexInterface* leaf = static_cast<DIVFTreeVertexInterface*>
                                         (directory[vec_id._level][vec_id._val].cluster_address);
 
         CHECK_NOT_NULLPTR(leaf, LOG_TAG_BUFFER);
         CHECK_VECTORID_IS_VALID(leaf->CentroidID(), LOG_TAG_BUFFER);
-        CHECK_NODE_IS_LEAF(leaf, LOG_TAG_BUFFER);
+        CHECK_VERTEX_IS_LEAF(leaf, LOG_TAG_BUFFER);
         FatalAssert(leaf->Contains(vec_id), LOG_TAG_BUFFER, "Parent leaf " VECTORID_LOG_FMT
                     " dose not contain the vector" VECTORID_LOG_FMT,
                     VECTORID_LOG(leaf->CentroidID()), VECTORID_LOG(vec_id));
@@ -212,7 +212,7 @@ protected:
                     "the height of the tree(%hhu).",level, directory.size());
 
         VectorID _id = 0;
-        _id._creator_node_id = 0; // todo for disaggregated
+        _id._creator_vertex_id = 0; // todo for disaggregated
         _id._level = level;
         if (level == directory.size()) {
             _id._val = 0;

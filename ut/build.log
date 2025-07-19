@@ -10,10 +10,10 @@ Building the unit tests...\n
 mkdir -p ../ut/build
 mkdir -p ../ut/build/obj
 mkdir -p ../ut/build/bin
-g++ -std=c++20 -I../include -Wall -Wextra -pedantic -g -MMD -MP -DTESTING -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_ANY -c ../ut/test_copper_index.cpp -o ../ut/build/obj/test_copper_index.o
-g++  -o ../ut/build/bin/test_copper_index ../ut/build/obj/test_copper_index.o
+g++ -std=c++20 -I../include -Wall -Wextra -pedantic -g -MMD -MP -DTESTING -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_ANY -c ../ut/test_divftree_index.cpp -o ../ut/build/obj/test_divftree_index.o
+g++  -o ../ut/build/bin/test_divftree_index ../ut/build/obj/test_divftree_index.o
 g++ -std=c++20 -I../include -Wall -Wextra -pedantic -g -MMD -MP -DTESTING -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_ANY -c ../ut/test_debug_utils.cpp -o ../ut/build/obj/test_debug_utils.o
 g++  -o ../ut/build/bin/test_debug_utils ../ut/build/obj/test_debug_utils.o
 g++ -std=c++20 -I../include -Wall -Wextra -pedantic -g -MMD -MP -DTESTING -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_ANY -c ../ut/test_vector.cpp -o ../ut/build/obj/test_vector.o
 g++  -o ../ut/build/bin/test_vector ../ut/build/obj/test_vector.o
-rm ../ut/build/obj/test_copper_index.o ../ut/build/obj/test_vector.o ../ut/build/obj/test_debug_utils.o
+rm ../ut/build/obj/test_divftree_index.o ../ut/build/obj/test_vector.o ../ut/build/obj/test_debug_utils.o

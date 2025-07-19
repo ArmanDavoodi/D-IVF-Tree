@@ -1,11 +1,11 @@
-#ifndef COPPER_VECTOR_UTILS_H_
-#define COPPER_VECTOR_UTILS_H_
+#ifndef DIVFTREE_VECTOR_UTILS_H_
+#define DIVFTREE_VECTOR_UTILS_H_
 
 #include "common.h"
 
 #include <queue>
 
-namespace copper {
+namespace divftree {
 
 struct VectorUpdate {
     VectorID vector_id;
@@ -277,191 +277,338 @@ protected:
 TESTABLE;
 };
 
-struct VectorPair {
+struct VectorState {
+    uint8_t valid : 1; /* If 0 the vector either does not exists, is deleted, or is in middle of insertion */
+    /*
+     * If set to 1, it means that the vector is being moved and should not be read or deleted.
+     * When move is complete it will be set to 0 and valid bit will be unset.
+     */
+    uint8_t move : 1;
+    uint8_t unused : 6;
+
+    inline bool IsVisible() const {
+        return (((valid == 1) && (move == 0)) ? true : false);
+    }
+
+    inline bool IsValid() const {
+        return (valid == 1 ? true : false);
+    }
+
+    inline bool IsMoving() const {
+        return (move == 1 ? true : false);
+    }
+
+    inline VectorState operator|(const VectorState& other) const {
+        VectorState state{0};
+        state.valid = valid | other.valid;
+        state.move = move | other.move;
+        return state;
+    }
+
+    inline VectorState& operator|=(const VectorState& other) {
+        valid |= other.valid;
+        move |= other.move;
+        return *this;
+    }
+
+    inline VectorState operator&(const VectorState& other) const {
+        VectorState state{0};
+        state.valid = valid & other.valid;
+        state.move = move & other.move;
+        return state;
+    }
+
+    inline VectorState& operator&=(const VectorState& other) {
+        valid &= other.valid;
+        move &= other.move;
+        return *this;
+    }
+
+    inline VectorState operator~() const {
+        VectorState state{0};
+        state.valid = ~valid;
+        state.move = ~move;
+        return state;
+    }
+
+    inline static VectorState Invalid() {
+        return VectorState{0};
+    }
+
+    inline static VectorState Valid() {
+        VectorState state{0};
+        state.valid = 1;
+        return state;
+    }
+
+    inline static VectorState Move() {
+        VectorState state{0};
+        state.move = 1;
+        return state;
+    }
+
+    inline String ToString() const {
+        return String("(valid=%d, move=%d)", valid, move);
+    }
+};
+
+struct ClusterEntry {
+    std::atomic<VectorState> state;
     VectorID id;
-    Vector vec;
+    char vector[];
 
-    VectorPair(VectorID vector_id, Vector&& vector_data) : id(vector_id), vec(std::move(vector_data)) {}
+    inline bool IsValid() const {
+        VectorState _state = state.load();
+        VectorID copy = id;
+        UNUSED_VARIABLE(copy);
+        FatalAssert(!(_state.IsValid()) || copy.IsValid(), LOG_TAG_CLUSTER,
+                    "VectorID is not valid when state is valid. state=%s, id=" VECTORID_LOG_FMT " entry=%s",
+                    _state.ToString().ToCStr(), VECTORID_LOG(copy), ToString().ToCStr());
+        return _state.IsValid();
+    }
+
+    inline bool IsVisible() const {
+        VectorState _state = state.load();
+        VectorID copy = id;
+        UNUSED_VARIABLE(copy);
+        FatalAssert(!(_state.IsValid()) || copy.IsValid(), LOG_TAG_CLUSTER,
+                    "VectorID is not valid when state is valid. state=%s, id=" VECTORID_LOG_FMT " entry=%s",
+                    _state.ToString().ToCStr(), VECTORID_LOG(copy), ToString().ToCStr());
+        return _state.IsVisible();
+    }
+
+    /* Should only be called when the vertex lock is held(either in shared or exclusive mode) */
+    inline VectorState Move() {
+        VectorState expected = VectorState::Valid();
+        if (state.compare_exchange_strong(expected, VectorState::Valid() | VectorState::Move())) {
+            return *this;
+        }
+        return expected;
+    }
+
+    /* Should only be called when the vertex lock is held(either in shared or exclusive mode) */
+    inline VectorState Delete() {
+        return state.exchange(VectorState::Invalid());
+    }
+
+    inline bool operator==(const ClusterEntry& other) const {
+        return (this == &other);
+    }
+
+    inline bool operator!=(const ClusterEntry& other) const {
+        return (this != &other);
+    }
+
+    inline bool Similar(const ClusterEntry& other, uint16_t dim) const {
+        if (*this == other) {
+            return true;
+        }
+
+        return !(memcmp(vector, other.vector, dim * sizeof(VTYPE)));
+    }
+
+    inline VTYPE& operator[](size_t idx) {
+        return reinterpret_cast<VTYPE[]>(vector)[idx];
+    }
+
+    inline const VTYPE& operator[](size_t idx) const {
+        return reinterpret_cast<const VTYPE[]>(vector)[idx];
+    }
+
+    inline String ToString() const {
+        String str = String("<Address=%p, State: ", (void*)this) +
+                     state.load().ToString() + String("ID=" VECTORID_LOG_FMT ">", VECTORID_LOG(id));
+
+        return str;
+    }
+
+    inline String ToString(uint16_t dim) const {
+        String str = String("<Address=%p, State: ", (void*)this) +
+                     state.load().ToString() + String("ID=" VECTORID_LOG_FMT ">[", VECTORID_LOG(id));
+        for (uint16_t i = 0; i < dim; ++i) {
+            str += String(VTYPE_FMT, (*this)[i]) + String((i < (dim - 1)) ? ", " : "]");
+        }
+
+        return str;
+    }
 };
 
-struct ConstVectorPair {
-    const VectorID id;
-    const Vector vec;
-
-    ConstVectorPair(VectorID vector_id, const Vector& vector_data) : id(vector_id),
-                                                                     vec(std::move(const_cast<Vector&>(vector_data))) {}
-};
-
-class VectorSet {
+class Cluster {
 public:
-    VectorSet(const VectorSet& other) = delete;
-    VectorSet(VectorSet&& other) = delete;
-    ~VectorSet() = default;
-
-    VectorSet(uint16_t dimention, uint16_t capacity) : _size(0), _cap(capacity), _dim(dimention) {
-        FatalAssert(_dim > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with dimentiom of 0.");
-        FatalAssert(_cap > 0, LOG_TAG_VECTOR_SET, "Cannot create a VectorSet with capacity of 0.");
-        memset(GetVectors(), 0, sizeof(VTYPE) * _dim * _cap);
-        memset(static_cast<Address>(GetIDs()), -1, sizeof(VectorID) * _cap);
+    static inline constexpr size_t EntryBytes(uint16_t dim) {
+        return sizeof(ClusterEntry) + (sizeof(VTYPE) * (uint64_t)dim);
     }
 
-    inline Address GetVectors() {
-        return static_cast<Address>(_data);
+    static inline constexpr size_t AllignedDataBytes(uint16_t dim, uint16_t cap) {
+        return ALLIGNED_SIZE(EntryBytes(dim) * (uint64_t)cap);
     }
 
-    inline ConstAddress GetVectors() const {
-        return static_cast<ConstAddress>(_data);
+    static inline constexpr size_t AllignedBytes(uint16_t dim, uint16_t cap) {
+        return ALLIGNED_SIZE(sizeof(Cluster)) + AllignedDataBytes(dim, cap);
     }
 
-    inline VectorID* GetIDs() {
-        return static_cast<VectorID*>(GetVectors() + sizeof(VTYPE) * _dim * _cap);
+    static Cluster* CreateCluster(uint64_t version, VectorID centroid_id,
+                                  uint16_t min_size, uint16_t max_size,
+                                  uint16_t dimension) {
+        size_t bytes = AllignedBytes(dimension, max_size);
+
+        Cluster* cluster = static_cast<Cluster*>(std::aligned_alloc(CACHE_LINE_SIZE, bytes));
+        FatalAssert(cluster != nullptr, LOG_TAG_TEST, "Failed to allocate memory for Cluster.");
+        new (cluster) Cluster(version, centroid_id, min_size, max_size, dimension);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Cluster: %s",
+             cluster->ToString().ToCStr());
+        return cluster;
     }
 
-    inline const VectorID* GetIDs() const {
-        return static_cast<const VectorID*>(GetVectors() + sizeof(VTYPE) * _dim * _cap);
+    Cluster(const Cluster& other) = delete;
+    Cluster(Cluster&& other) = delete;
+    ~Cluster() = default;
+
+    /* Should only be called when vertex lock is held(either shared or exclusive) */
+    /* Will return invalid address to indicate that cluster is full */
+    inline ClusterEntry* Insert(const void* new_vector, VectorID id) {
+        FatalAssert(new_vector != nullptr, LOG_TAG_CLUSTER, "Cannot insert null vector.");
+        FatalAssert(id.IsValid(), LOG_TAG_CLUSTER, "Cannot insert vector with invalid ID: " VECTORID_LOG_FMT,
+                    VECTORID_LOG(id));
+        uint16_t offset = Reserve(1);
+        if (offset == UINT16_MAX) {
+            return nullptr; /* Cluster is full and someone should be splitting it so release your lock */
+        }
+
+        FatalAssert(!(_entry[offset].state.load().IsValid()), LOG_TAG_CLUSTER, "Cluster entry is valid!");
+        memcpy(_entry[offset].vector, new_vector, _dim * sizeof(VTYPE));
+        _entry[offset].id = id;
+        _entry[offset].state.store(VectorState::Valid()); /* todo memory order */
+        return &(_entry[offset]);
     }
 
-    inline Address Insert(const Vector& new_vector, VectorID id) {
-        FatalAssert(new_vector.IsValid(), LOG_TAG_VECTOR_SET, "Cannot insert invalid vector.");
-        FatalAssert(_size < _cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
-
-        Address loc = GetVectors() + (_size * _dim * sizeof(VTYPE));
-        memcpy(loc, new_vector.GetData(), _dim * sizeof(VTYPE));
-        (GetIDs())[_size] = id;
-        ++_size;
-        return loc;
-    }
-
-    inline Address Insert(const void* _src, VectorID id) {
-        FatalAssert(_src != nullptr, LOG_TAG_VECTOR_SET, "Cannot insert null vector.");
-        FatalAssert(_size < _cap, LOG_TAG_VECTOR_SET, "VectorSet is full.");
-
-        Address loc = GetVectors() + (_size * _dim * sizeof(VTYPE));
-        memcpy(loc, _src, _dim * sizeof(VTYPE));
-        GetIDs()[_size] = id;
-        ++_size;
-        return loc;
-    }
-
-    inline VectorID GetVectorID(uint16_t idx) const {
-        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        return GetIDs()[idx];
-    }
-
-    inline VectorID GetLastVectorID() const {
-        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        return GetIDs()[_size - 1];
-    }
-
-    inline bool Contains(VectorID id) const {
-        const VectorID* ids = GetIDs();
-        for (uint16_t index = 0; index < _size; ++index) {
-            if (ids[index] == id) {
-                return true;
+    /* Should only be called when vertex is pinned */
+    inline const ClusterEntry* FindEntry(VectorID id, bool onlyConsiderVisible = true) const {
+        uint16_t size = _size.load();
+        /* todo may need to fine tune so that if it is moving we return and don't move forward */
+        for (uint16_t index = 0; index < size; ++index) {
+            if ((onlyConsiderVisible ? _entry[index].state.load().IsVisible() :
+                                       _entry[index].state.load().IsValid()) &&
+                (_entry[index].id == id)) {
+                return &_entry[index];
             }
         }
 
-        return false;
+        return nullptr;
     }
 
-    inline uint16_t GetIndex(VectorID id) const {
-        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Bucket is Empty");
-        const VectorID* ids = GetIDs();
-        uint16_t index = 0;
-        for (; index < _size; ++index) {
-            if (ids[index] == id) {
-                break;
+    /* Should only be called when vertex is pinned */
+    inline ClusterEntry* FindEntry(VectorID id, bool onlyConsiderVisible = true) {
+        uint16_t size = _size.load();
+        /* todo may need to fine tune so that if it is moving we return and don't move forward */
+        for (uint16_t index = 0; index < size; ++index) {
+            if ((onlyConsiderVisible ? _entry[index].state.load().IsVisible() :
+                                       _entry[index].state.load().IsValid()) &&
+                (_entry[index].id == id)) {
+                return &_entry[index];
             }
         }
 
-        FatalAssert(index < _size, LOG_TAG_VECTOR_SET, "vector id:" VECTORID_LOG_FMT " not found", VECTORID_LOG(id));
-        return index;
+        return nullptr;
     }
 
-    inline Vector GetLastVector() {
-        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        Address loc = GetVectors() + ((_size - 1) * _dim * sizeof(VTYPE));
-        return Vector(loc);
+    /* Should only be called when vertex is pinned */
+    inline bool Contains(VectorID id, bool onlyConsiderVisible = true) const {
+        return (FindEntry(id, onlyConsiderVisible) != nullptr);
     }
 
-    inline const Vector GetLastVector() const {
-        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        Address loc = const_cast<Address>(GetVectors() + ((_size - 1) * _dim * sizeof(VTYPE)));
-        return Vector(loc);
+    inline ClusterEntry& operator[](uint16_t idx) {
+        FatalAssert(idx < _max_size, LOG_TAG_CLUSTER, "idx(%hu) >= _max_size(%hu)", idx, _max_size);
+        return _entry[idx];
     }
 
-    inline Vector GetVector(uint16_t idx) {
-        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        Address loc = GetVectors() + (idx * _dim * sizeof(VTYPE));
-        return Vector(loc);
+    inline const ClusterEntry& operator[](uint16_t idx) const {
+        FatalAssert(idx < _max_size, LOG_TAG_CLUSTER, "idx(%hu) >= _max_size(%hu)", idx, _max_size);
+        return _entry[idx];
     }
 
-    inline const Vector GetVector(uint16_t idx) const {
-        FatalAssert(idx < _size, LOG_TAG_VECTOR_SET, "idx(%hu) >= _size(%hu)", idx, _size);
-        Address loc = const_cast<Address>(GetVectors() + (idx * _dim * sizeof(VTYPE)));
-        return Vector(loc);
+    inline uint16_t FilledSize() const {
+        return _size.load();
     }
 
-    inline Vector GetVectorByID(VectorID id) {
-        return GetVector(GetIndex(id));
+    /* Has to be called with exclusive lock held if you need accurate results.
+       Cluster should be pinned */
+    inline uint16_t ComputeRealSize() const {
+        size_t size = 0;
+        for (uint16_t i = 0; i < _max_size; ++i) {
+            size += (_entry[i].state.load().IsVisible() ? 1 : 0);
+        }
+
+        size_t cur_size = _size.load();
+        UNUSED_VARIABLE(cur_size);
+        FatalAssert(size <= cur_size, LOG_TAG_CLUSTER, "Computed size(%lu) is larger than current size(%hu)",
+                    size, cur_size);
+        return size;
     }
 
-    inline const Vector GetVectorByID(VectorID id) const {
-        return GetVector(GetIndex(id));
-    }
-
-    inline VectorPair operator[](uint16_t idx) {
-        return VectorPair(GetVectorID(idx), GetVector(idx));
-    }
-
-    inline ConstVectorPair operator[](uint16_t idx) const {
-        return ConstVectorPair(GetVectorID(idx), GetVector(idx));
-    }
-
-    inline void DeleteLast() {
-        FatalAssert(_size > 0, LOG_TAG_VECTOR_SET, "Vector set is empty");
-        --_size;
-    }
-
-    inline uint16_t Size() const {
-        return _size;
-    }
-
-    inline uint16_t Capacity() const {
-        return _cap;
-    }
-
-    inline uint16_t Dimension() const {
-        return _dim;
-    }
-
-    static inline size_t DataBytes(uint16_t dim, uint16_t cap) {
-        return ((sizeof(VTYPE) * (uint64_t)dim) + sizeof(VectorID)) * (uint64_t)cap;
-    }
-
+    /* May return inconsistent data if SXLock is not held in exclusive mode */
     String ToString() const {
-        String str("<Size=%hu, Cap=%hu, Dim=%hu, Vectors: [", _size, _cap, _dim);
-        for (uint16_t i = 0; i < _size; ++i) {
-            str += GetVector(i).ToString(_dim);
-            if (i != _size - 1)
+        String str("<CurAddress= %p, Bytes=%lu, Version=%lu, SizeLimit=[%hu %hu], "
+                   "Dim=%hu, CachedParentID=" VECTORID_LOG_FMT
+                   ", CentroidID=" VECTORID_LOG_FMT ", Size=%hu, Entries: [",
+                   this, _bytes, _version, _min_size, _max_size, _dim, VECTORID_LOG(_parent_id),
+                   VECTORID_LOG(_centroid_id), _size);
+        for (uint16_t i = 0; i < _max_size; ++i) {
+            str += _entry[i].ToString(_dim);
+            if (i < (_max_size - 1)) {
                 str += ", ";
-        }
-        str += "], IDs: [";
-        for (uint16_t i = 0; i < _size; ++i) {
-            str += String(VECTORID_LOG_FMT, VECTORID_LOG(GetIDs()[i]));
-            if (i != _size - 1)
-                str += ", ";
+            }
         }
         str += "]>";
         return str;
     }
 
-protected:
-    uint16_t _size;
-    const uint16_t _cap;
+    const uint64_t _version; /* Incremented during split and compaction */
+    const VectorID _centroid_id;
+    const uint16_t _min_size;
+    const uint16_t _max_size;
     const uint16_t _dim;
-    // DataType _vtype;
-    char _data[]; // This is a flexible array member, it will be allocated with the size of _cap * (_dim * sizeof(VTYPE) + sizeof(VectorID))
+    const size_t _bytes;
+    // const DataType _vtype;
+
+protected:
+    Cluster(uint64_t version, VectorID centroid_id, uint16_t min_size, uint16_t max_size,
+            uint16_t dimention) : _version(version), _centroid_id(centroid_id),
+                                  _min_size(min_size), _max_size(max_size), _dim(dimention),
+                                  _bytes(AllignedBytes(_dim, _max_size)),
+                                  _entry(ALLIGNEMENT(sizeof(Cluster)) + (void*)_data),
+                                  _parent_id(INVALID_VECTOR_ID), _size(0) {
+        FatalAssert(_centroid_id.IsValid(), LOG_TAG_CLUSTER, "Invalid centroid ID.");
+        CHECK_MIN_MAX_SIZE(_min_size, _max_size, LOG_TAG_CLUSTER);
+        FatalAssert(_dim > 0, LOG_TAG_CLUSTER, "Cannot create a Cluster with dimentiom of 0.");
+        FatalAssert(_entry == ALLIGNED_SIZE(sizeof(Cluster)) + (void*)this,
+                    LOG_TAG_CLUSTER, "First entry is not in the right place. _entry=%p, this=%p",
+                    _entry, this);
+        FatalAssert(_max_size < UINT16_MAX, LOG_TAG_CLUSTER,
+                    "Cluster size is too large. _max_size=%hu", _max_size);
+        memset(_data, 0, AllignedBytes(_dim, _max_size) - sizeof(Cluster));
+        for (uint16_t i = 0; i < _max_size; ++i) {
+            _entry[i].id = INVALID_VECTOR_ID;
+        }
+    }
+
+    uint16_t Reserve(uint16_t numVectors) {
+        FatalAssert(numVectors > 0, LOG_TAG_CLUSTER, "Cannot reserve 0 vectors.");
+        uint16_t cur_size = _size.load();
+        while (cur_size + numVectors <= _max_size) {
+            if (_size.compare_exchange_strong(cur_size, cur_size + numVectors)) {
+                return cur_size;
+            }
+        }
+        return UINT16_MAX; /* Cluster is full */
+    }
+
+    ClusterEntry * const _entry;
+
+    VectorID _parent_id; /* may be outdated in a multi node setup */
+    std::atomic<uint16_t> _size;
+
+    char _data[];
 
 TESTABLE;
 };

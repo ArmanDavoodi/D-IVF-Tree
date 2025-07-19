@@ -2,9 +2,9 @@
 
 #include "distance.h"
 #include "buffer.h"
-#include "dummy_copper.h"
+#include "dummy_divftree.h"
 
-// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_COPPER_NODE
+// build using: ./build_ut.sh -DLOG_MIN_LEVEL=LOG_LEVEL_ERROR -DLOG_LEVEL=LOG_LEVEL_DEBUG -DLOG_TAG=LOG_TAG_DIVFTREE_VERTEX
 namespace UT {
 class Test {
 public:
@@ -26,23 +26,23 @@ public:
         bool status = true;
         constexpr uint16_t KI_MAX = 4, KI_MIN = 2;
         constexpr uint16_t KL_MAX = 8, KL_MIN = 1;
-        copper::BufferManager _BufferManager;
-        copper::CopperAttributes attr;
+        divftree::BufferManager _BufferManager;
+        divftree::DIVFTreeAttributes attr;
         attr.core.dimention = dim;
-        attr.core.distanceAlg = copper::DistanceType::L2Distance;
-        attr.core.clusteringAlg = copper::ClusteringType::SimpleDivide;
+        attr.core.distanceAlg = divftree::DistanceType::L2Distance;
+        attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;
         attr.internal_min_size = KI_MIN;
         attr.leaf_max_size = KL_MAX;
         attr.leaf_min_size = KL_MIN;
         attr.split_internal = KI_MAX / 2;
         attr.split_leaf = KL_MAX / 2;
-        copper::VectorIndex _tree(attr);
+        divftree::DIVFTree _tree(attr);
 
         FaultAssert(_BufferManager.RecordRoot(), status, LOG_TAG_TEST,
                     "Buffer manager should not allow to record root before init.");
 
-        copper::RetStatus rs = _BufferManager.Init();
+        divftree::RetStatus rs = _BufferManager.Init();
         status = status && (rs.IsOK());
         ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Buffer manager init failed with status %s.", rs.Msg());
 
@@ -50,15 +50,15 @@ public:
         FaultAssert(_BufferManager.RecordVector(0), status, LOG_TAG_TEST,
                     "Buffer manager should not allow to record vector before root.");
 
-        copper::VectorID first_root_id = copper::INVALID_VECTOR_ID;
+        divftree::VectorID first_root_id = divftree::INVALID_VECTOR_ID;
         first_root_id._id = 0;
         first_root_id._level = 1;
 
-        copper::VectorID cur_root_id = _BufferManager.RecordRoot();
+        divftree::VectorID cur_root_id = _BufferManager.RecordRoot();
         status = status && (cur_root_id == first_root_id);
         ErrorAssert(cur_root_id == first_root_id, LOG_TAG_TEST, "First Root ID should be same as first ID. First ID: " VECTORID_LOG_FMT
             ", cur_root_id: " VECTORID_LOG_FMT, VECTORID_LOG(first_root_id), VECTORID_LOG(cur_root_id));
-        rs = _BufferManager.UpdateClusterAddress(cur_root_id, _tree.CreateNewNode(cur_root_id));
+        rs = _BufferManager.UpdateClusterAddress(cur_root_id, _tree.CreateNewVertex(cur_root_id));
         status = status && (rs.IsOK());
         ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
 
@@ -66,7 +66,7 @@ public:
         uint64_t root_level = 1;
         std::vector<uint64_t> vecs;
 
-        copper::VectorID vec_id = _BufferManager.RecordVector(0);
+        divftree::VectorID vec_id = _BufferManager.RecordVector(0);
         status = status && (vec_id == 0);
         ErrorAssert(vec_id == 0, LOG_TAG_TEST, "first Vector ID should be 0.");
         vecs.emplace_back(vec_id._id);
@@ -86,7 +86,7 @@ public:
                 status = status && (cur_root_id._val == 0);
                 ErrorAssert(cur_root_id._val == 0, LOG_TAG_TEST, "Root val should be 0.");
                 vecs.emplace_back(cur_root_id._id);
-                rs = _BufferManager.UpdateClusterAddress(cur_root_id, _tree.CreateNewNode(cur_root_id));
+                rs = _BufferManager.UpdateClusterAddress(cur_root_id, _tree.CreateNewVertex(cur_root_id));
                 status = status && (rs.IsOK());
                 ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
             }
@@ -106,15 +106,15 @@ public:
                 " should be %u.", VECTORID_LOG(vec_id), (vecs[level]+1));
             vecs[level] = vec_id._id;
             if (level == 0) {
-                FaultAssert( _BufferManager.UpdateClusterAddress(vec_id, _tree.CreateNewNode(vec_id)), status, LOG_TAG_TEST,
+                FaultAssert( _BufferManager.UpdateClusterAddress(vec_id, _tree.CreateNewVertex(vec_id)), status, LOG_TAG_TEST,
                             "Buffer manager should not allow to update cluster address for vector ID " VECTORID_LOG_FMT
                             " with level 0.", VECTORID_LOG(vec_id));
-                rs = _BufferManager.UpdateVectorAddress(vec_id, copper::INVALID_ADDRESS + 1);
+                rs = _BufferManager.UpdateVectorAddress(vec_id, divftree::INVALID_ADDRESS + 1);
                 status = status && (rs.IsOK());
                 ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Buffer manager update vector address failed with status %s.", rs.Msg());
             }
             else {
-                rs = _BufferManager.UpdateClusterAddress(vec_id, _tree.CreateNewNode(vec_id));
+                rs = _BufferManager.UpdateClusterAddress(vec_id, _tree.CreateNewVertex(vec_id));
                 status = status && (rs.IsOK());
                 ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Buffer manager update cluster address failed with status %s.", rs.Msg());
 
