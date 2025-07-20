@@ -51,7 +51,7 @@ enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_CLUSTER_BIT,
     LOG_TAG_BUFFER_BIT,
     LOG_TAG_DIVFTREE_VERTEX_BIT,
-    LOG_TAG_VECTOR_INDEX_BIT,
+    LOG_TAG_DIVFTREE_BIT,
     LOG_TAG_CLUSTERING_BIT,
     LOG_TAG_MEMORY_BIT,
     LOG_TAG_NOT_IMPLEMENTED_BIT,
@@ -64,7 +64,7 @@ enum LOG_TAG_BITS : uint64_t {
 #define LOG_TAG_CLUSTER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CLUSTER_BIT))
 #define LOG_TAG_BUFFER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_BUFFER_BIT))
 #define LOG_TAG_DIVFTREE_VERTEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_DIVFTREE_VERTEX_BIT))
-#define LOG_TAG_VECTOR_INDEX (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_VECTOR_INDEX_BIT))
+#define LOG_TAG_DIVFTREE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_DIVFTREE_BIT))
 #define LOG_TAG_CLUSTERING (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CLUSTERING_BIT))
 #define LOG_TAG_MEMORY (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_MEMORY_BIT))
 #define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
@@ -374,7 +374,7 @@ inline const char* tagtostr(uint64_t tag)
         return "    Buffer     ";
     case LOG_TAG_DIVFTREE_VERTEX:
         return "  DIVFTree Vertex  ";
-    case LOG_TAG_VECTOR_INDEX:
+    case LOG_TAG_DIVFTREE:
         return " Vector Index  ";
     case LOG_TAG_CLUSTERING:
         return "     Core      ";

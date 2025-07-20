@@ -17,10 +17,18 @@ namespace divftree {
 struct RetStatus {
     enum {
         SUCCESS,
+
+        BATCH_CONFLICTING_OPERATIONS,
+        BATCH_UNKNOWN_OPERATION,
+
         FAIL
     } stat;
 
     const char* message;
+
+    static inline RetStatus Success() {
+        return RetStatus{SUCCESS, "OK"};
+    }
 
     static inline RetStatus Success() {
         return RetStatus{SUCCESS, "OK"};
@@ -159,6 +167,10 @@ inline constexpr size_t ALLIGNEMENT(size_t size) {
     return (size % CACHE_LINE_SIZE == 0) ? 0 : (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE));
 }
 
+inline constexpr bool ALLIGNED(size_t size) {
+    return (size % CACHE_LINE_SIZE == 0);
+}
+
 typedef VECTOR_TYPE VTYPE;
 typedef DISTANCE_TYPE DTYPE;
 
@@ -218,22 +230,16 @@ typedef DISTANCE_TYPE DTYPE;
     VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->ParentID())),\
     ((PRINT_BUCKET) ? ((((vertex) == nullptr)) ? "NULL" : ((vertex)->BucketToString()).ToCStr()) : "OMITTED")
 
-#define VERTEX_SELF_LOG()\
-    (!(_centroid_id.IsValid()) ? "INV" : (_centroid_id.IsVector() ? "Non-Centroid" : \
-                                          (_centroid_id.IsLeaf() ? "Leaf" : \
-                                                                   (_centroid_id.IsInternalVertex() ? "Internal" :\
-                                                                                                    "UNDEF")))),\
-    _min_size, _cluster.Capacity(), VECTORID_LOG(_centroid_id), _cluster.Size(), VECTORID_LOG(_parent_id),\
-    ((PRINT_BUCKET) ? BucketToString().ToCStr() : "OMITTED")
-
 #define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
 #define CHECK_MIN_MAX_SIZE(min_size, max_size, tag) \
-    FatalAssert((min_size) > 0, (tag), "Min size must be greater than 0."); \
-    FatalAssert(((max_size) / 2) >= (min_size), (tag), \
-                "Max size must be at least twice the min size. Min size: %hu, Max size: %hu", \
-                (min_size), (max_size))
+    do {
+        FatalAssert((min_size) > 0, (tag), "Min size must be greater than 0."); \
+        FatalAssert(((max_size) / 2) >= (min_size), (tag), \
+                    "Max size must be at least twice the min size. Min size: %hu, Max size: %hu", \
+                    (min_size), (max_size)); \
+    } while(0)
 
 #define CHECK_VECTORID_IS_VALID(vid, tag) \
     FatalAssert((vid).IsValid(), (tag), "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG((vid)))
@@ -255,35 +261,29 @@ typedef DISTANCE_TYPE DTYPE;
     FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
 
 #define CHECK_VERTEX_IS_VALID(vertex, tag, check_min_size) \
-    CHECK_NOT_NULLPTR((vertex), (tag)); \
-    CHECK_VECTORID_IS_VALID((vertex)->CentroidID(), (tag)); \
-    CHECK_VECTORID_IS_CENTROID((vertex)->CentroidID(), (tag)); \
-    FatalAssert((vertex)->VectorDimention() > 0, (tag), \
-                "Vertex has invalid vector dimension: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex))); \
-    CHECK_MIN_MAX_SIZE((vertex)->MinSize(), (vertex)->MaxSize(), (tag)); \
-    FatalAssert(((!(check_min_size)) || (vertex)->Size() >= (vertex)->MinSize()), (tag), \
-                "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
-                (vertex)->Size(), (vertex)->MinSize()); \
-    FatalAssert((vertex)->Size() <= (vertex)->MaxSize(), (tag), \
-                "Vertex has too many elements: size=%hu, max_size=%hu.", \
-                (vertex)->Size(), (vertex)->MaxSize())
+    do {
+        CHECK_NOT_NULLPTR((vertex), (tag)); \
+        CHECK_VECTORID_IS_VALID((vertex)->CentroidID(), (tag)); \
+        CHECK_VECTORID_IS_CENTROID((vertex)->CentroidID(), (tag)); \
+        FatalAssert((vertex)->VectorDimension() > 0, (tag), \
+                    "Vertex has invalid vector dimension: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex))); \
+        CHECK_MIN_MAX_SIZE((vertex)->MinSize(), (vertex)->MaxSize(), (tag)); \
+        FatalAssert(((!(check_min_size)) || (vertex)->Size() >= (vertex)->MinSize()), (tag), \
+                    "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
+                    (vertex)->Size(), (vertex)->MinSize()); \
+        FatalAssert((vertex)->Size() <= (vertex)->MaxSize(), (tag), \
+                    "Vertex has too many elements: size=%hu, max_size=%hu.", \
+                    (vertex)->Size(), (vertex)->MaxSize()); \
+    } while(0)
 
 #define CHECK_VERTEX_SELF_IS_VALID(tag, check_min_size) \
-    CHECK_VECTORID_IS_VALID(_centroid_id, (tag)); \
-    CHECK_VECTORID_IS_CENTROID(_centroid_id, (tag)); \
-    FatalAssert(_cluster.Dimension() > 0, (tag), \
-                "Vertex has invalid vector dimension: " VERTEX_LOG_FMT, VERTEX_SELF_LOG()); \
-    CHECK_MIN_MAX_SIZE(_min_size, _cluster.Capacity(), (tag)); \
-    FatalAssert(((!(check_min_size)) || _cluster.Size() >= _min_size), (tag), \
-                "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
-                _cluster.Size(), _min_size); \
-    FatalAssert(_cluster.Size() <= _cluster.Capacity(), (tag), \
-                "Vertex has too many elements: size=%hu, max_size=%hu.", \
-                _cluster.Size(), _cluster.Capacity()); \
-    FatalAssert(IsValid(_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
-    FatalAssert(IsValid(_distanceAlg), (tag), "Distance algorithm is invalid."); \
-    CHECK_NOT_NULLPTR(_similarityComparator, (tag)); \
-    CHECK_NOT_NULLPTR(_reverseSimilarityComparator, (tag))
+    do { \
+        FatalAssert(IsValid(_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
+        FatalAssert(IsValid(_distanceAlg), (tag), "Distance algorithm is invalid."); \
+        CHECK_NOT_NULLPTR(_similarityComparator, (tag)); \
+        CHECK_NOT_NULLPTR(_reverseSimilarityComparator, (tag)); \
+        _cluster.CheckSelfIsValid((check_min_size)); \
+    } while(0)
 
 #ifdef ENABLE_TEST_LOGGING
 #define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg, ...) \

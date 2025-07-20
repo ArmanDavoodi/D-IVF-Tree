@@ -167,42 +167,42 @@ public:
     //     divftree::VectorID vertex_id = _bufmgr.Record_Root();
     //     divftree::RetStatus rs = _bufmgr.UpdateClusterAddress(vertex_id, new Vertex(vertex_id));
     //     status = status && rs.IsOK();
-    //         ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
+    //         ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
     //     uint16_t level = 2;
 
     //     divftree::DIVFTreeVertex<uint16_t, DIM, MIN_SIZE, MAX_SIZE, double, divftree::Simple_Divide_L2> *vertex =
     //         _bufmgr.template Get_Vertex<Vertex>(vertex_id);
 
     //     status = status && (vertex != nullptr);
-    //     ErrorAssert(vertex != nullptr, LOG_TAG_VECTOR_INDEX, "Vertex should not be nullptr for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
+    //     ErrorAssert(vertex != nullptr, LOG_TAG_DIVFTREE, "Vertex should not be nullptr for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
 
     //     for (uint16_t i = 0; i < MAX_SIZE; ++i) {
     //         ids[i] = _bufmgr.Record_Vector(0);
     //         divftree::Address vec_add = vertex->Insert(divftree::Vector<uint16_t, DIM>(data[i]), ids[i]);
     //         status = status && (vec_add != divftree::INVALID_ADDRESS);
-    //         ErrorAssert(vec_add != divftree::INVALID_ADDRESS, LOG_TAG_VECTOR_INDEX,
+    //         ErrorAssert(vec_add != divftree::INVALID_ADDRESS, LOG_TAG_DIVFTREE,
     //                     "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
     //         rs = _bufmgr.UpdateVectorAddress(ids[i], vec_add);
     //         status = status && rs.IsOK();
-    //         ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
+    //         ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to insert vector with id: " VECTORID_LOG_FMT, VECTORID_LOG(ids[i]));
     //     }
 
     //     divftree::VectorID _root_id = _bufmgr.Record_Root();
     //     status = status && (_root_id.Is_Valid());
-    //     ErrorAssert(_root_id.Is_Valid(), LOG_TAG_VECTOR_INDEX, "Root ID should"
+    //     ErrorAssert(_root_id.Is_Valid(), LOG_TAG_DIVFTREE, "Root ID should"
     //                 "not be invalid: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
     //     Vertex* new_root = new Vertex(_root_id);
     //     status = status && (new_root != nullptr);
-    //     ErrorAssert(new_root != nullptr, LOG_TAG_VECTOR_INDEX, "Failed to create new root vertex for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+    //     ErrorAssert(new_root != nullptr, LOG_TAG_DIVFTREE, "Failed to create new root vertex for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
     //     rs = _bufmgr.UpdateClusterAddress(_root_id, new_root);
     //     status = status && rs.IsOK();
-    //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+    //     ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
     //     rs = _bufmgr.UpdateVectorAddress(_root_id, new_root->Insert(vertex->Compute_Current_Centroid(), vertex_id));
     //     status = status && rs.IsOK();
-    //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update vector address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
+    //     ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update vector address for root_id: " VECTORID_LOG_FMT, VECTORID_LOG(_root_id));
     //     rs = vertex->Assign_Parent(_root_id);
     //     status = status && rs.IsOK();
-    //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to assign parent for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
+    //     ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to assign parent for vertex_id: " VECTORID_LOG_FMT, VECTORID_LOG(vertex_id));
     //     ++level;
 
 
@@ -212,7 +212,7 @@ public:
     //     divftree::Simple_Divide_L2<uint16_t, DIM> _core;
     //     rs = _core.template Cluster<Vertex, MIN_SIZE, MAX_SIZE, MIN_SIZE, MAX_SIZE>(vertices, 0, centroids, 2, _bufmgr);
     //     status = status && rs.IsOK();
-    //     ErrorAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Clustering failed with error: %s", rs.Msg());
+    //     ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Clustering failed with error: %s", rs.Msg());
 
     //     for (uint16_t i = 0; i < centroids.size(); ++i) {
     //         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Centroid %u: %s", i, centroids[i].to_string().c_str());

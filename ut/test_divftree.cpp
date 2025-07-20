@@ -38,7 +38,7 @@ public:
         const uint64_t _ids[size] = {0ul, 1ul, 2ul, 3ul,
                                        4ul, 5ul, 6ul, 7ul};
         divftree::DIVFTreeAttributes attr;
-        attr.core.dimention = dim;
+        attr.core.dimension = dim;
         attr.core.distanceAlg = divftree::DistanceType::L2Distance;
         attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;
@@ -153,7 +153,7 @@ public:
         divftree::RetStatus rs = divftree::RetStatus::Success();
 
         divftree::DIVFTreeAttributes attr;
-        attr.core.dimention = dim;
+        attr.core.dimension = dim;
         attr.core.distanceAlg = divftree::DistanceType::L2Distance;
         attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;

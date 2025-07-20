@@ -93,6 +93,11 @@ public:
         }
         return blocked;
     }
+
+    inline String ToString() const {
+        return String("<LockMode=%s, SharedHolders=%lu>",
+                      LockModeToString(_mode).ToCStr(), _num_shared_holders.load());
+    }
 protected:
     LockMode _mode;
     std::atomic<uint64_t> _num_shared_holders;

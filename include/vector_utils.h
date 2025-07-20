@@ -2,6 +2,7 @@
 #define DIVFTREE_VECTOR_UTILS_H_
 
 #include "common.h"
+#include "distributed_common.h"
 
 #include <queue>
 
@@ -32,7 +33,7 @@ public:
         , linkCnt(new std::atomic<uint64_t>(1))
 #endif
     {
-        FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
+        FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimension 0.");
         FatalAssert(!other.IsValid() || IsValid(), LOG_TAG_VECTOR, "Malloc failed");
         if (IsValid()) {
             memcpy(_data, other._data, dim * sizeof(VTYPE));
@@ -46,7 +47,7 @@ public:
         , linkCnt(new std::atomic<uint64_t>(1))
 #endif
     {
-        FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
+        FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimension 0.");
         FatalAssert((other == nullptr) || IsValid(), LOG_TAG_VECTOR, "Malloc failed");
         if (IsValid()) {
             memcpy(_data, other, dim * sizeof(VTYPE));
@@ -126,14 +127,14 @@ public:
 
     inline void Create(uint16_t dim) {
         FatalAssert(!(IsValid()), LOG_TAG_VECTOR, "Vector is not invalid.");
-        FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimention 0.");
+        FatalAssert(dim > 0, LOG_TAG_VECTOR, "Cannot create vector with dimension 0.");
         _data = malloc(dim * sizeof(VTYPE));
         _delete_on_destroy = true;
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Malloc failed");
 #ifdef MEMORY_DEBUG
         linkCnt = new std::atomic<uint64_t>(1);
 #endif
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimention=%hu", this, _data, dim);
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimension=%hu", this, _data, dim);
     }
 
     /*
@@ -435,51 +436,174 @@ struct ClusterEntry {
 
 class Cluster {
 public:
-    static inline constexpr size_t EntryBytes(uint16_t dim) {
+    static inline constexpr size_t SingleEntryBytes(uint16_t dim) {
         return sizeof(ClusterEntry) + (sizeof(VTYPE) * (uint64_t)dim);
     }
 
     static inline constexpr size_t AllignedDataBytes(uint16_t dim, uint16_t cap) {
-        return ALLIGNED_SIZE(EntryBytes(dim) * (uint64_t)cap);
+        return ALLIGNED_SIZE(SingleEntryBytes(dim) * (uint64_t)cap);
+    }
+
+    static inline constexpr size_t AllignedHeaderBytes() {
+        return ALLIGNED_SIZE(sizeof(Cluster));
     }
 
     static inline constexpr size_t AllignedBytes(uint16_t dim, uint16_t cap) {
-        return ALLIGNED_SIZE(sizeof(Cluster)) + AllignedDataBytes(dim, cap);
+        return AllignedHeaderBytes() + AllignedDataBytes(dim, cap);
     }
 
     static Cluster* CreateCluster(uint64_t version, VectorID centroid_id,
                                   uint16_t min_size, uint16_t max_size,
-                                  uint16_t dimension) {
-        size_t bytes = AllignedBytes(dimension, max_size);
+                                  uint16_t dimension, uint8_t cluster_owner,
+                                  uint8_t num_dist_pins) {
 
-        Cluster* cluster = static_cast<Cluster*>(std::aligned_alloc(CACHE_LINE_SIZE, bytes));
+        Cluster* cluster = static_cast<Cluster*>(std::aligned_alloc(CACHE_LINE_SIZE,
+                                                                    AllignedBytes(dimension, max_size)));
         FatalAssert(cluster != nullptr, LOG_TAG_TEST, "Failed to allocate memory for Cluster.");
-        new (cluster) Cluster(version, centroid_id, min_size, max_size, dimension);
+        new (cluster) Cluster(sizeof(Cluster), version, centroid_id, min_size, max_size, dimension,
+                              cluster_owner, num_dist_pins);
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Cluster: %s",
              cluster->ToString().ToCStr());
         return cluster;
+    }
+
+    Cluster(uint64_t raw_header_bytes, uint64_t version, VectorID centroid_id,
+            uint16_t min_size, uint16_t max_size,
+            uint16_t dimension, uint8_t cluster_owner,
+            uint8_t num_dist_pins) : _header_bytes(ALLIGNED_SIZE(raw_header_bytes)),
+                                         _version(version), _centroid_id(centroid_id),
+                                         _min_size(min_size), _max_size(max_size),
+                                         _dim(dimension), _collectable(0), _owner(cluster_owner),
+                                         _distributed_pin(num_dist_pins),
+                                         _size(0), _parent_id(INVALID_VECTOR_ID),
+                                         _entry(ALLIGNEMENT(raw_header_bytes) + (void*)_data) {
+        FatalAssert(num_dist_pins > 0, LOG_TAG_CLUSTER,
+                    "Number of distributed pins should be greater than 0. num_dist_pins=%d", num_dist_pins);
+        FatalAssert(num_dist_pins <= NUM_COMPUTE_NODES, LOG_TAG_CLUSTER,
+                    "Number of distributed pins should be less than or equal to number of compute nodes. "
+                    "num_dist_pins=%d, NUM_COMPUTE_NODES=%d", num_dist_pins, NUM_COMPUTE_NODES);
+        FatalAssert(raw_header_bytes >= sizeof(Cluster), LOG_TAG_CLUSTER,
+                    "Raw header bytes(%lu) does not contain enough space(%lu).",
+                    raw_header_bytes, sizeof(Cluster));
+        FatalAssert(_header_bytes >= raw_header_bytes, LOG_TAG_CLUSTER,
+                    "Cluster bytes(%lu) does not contain enough space(%lu).",
+                    _header_bytes, raw_header_bytes);
+        FatalAssert(_header_bytes >= AllignedHeaderBytes(), LOG_TAG_CLUSTER,
+                    "Cluster bytes(%lu) does not contain enough space(%lu).",
+                    _header_bytes, AllignedHeaderBytes());
+        FatalAssert(ALLIGNED(_header_bytes), LOG_TAG_CLUSTER,
+                    "Cluster bytes(%lu) is not aligned to cache line size(%lu).",
+                    _header_bytes, CACHE_LINE_SIZE);
+        FatalAssert(_centroid_id.IsValid(), LOG_TAG_CLUSTER, "Invalid centroid ID.");
+        CHECK_MIN_MAX_SIZE(_min_size, _max_size, LOG_TAG_CLUSTER);
+        FatalAssert(_dim > 0, LOG_TAG_CLUSTER, "Cannot create a Cluster with dimension of 0.");
+        FatalAssert(_entry + _max_size + 1 == (void*)this + _header_bytes + AllignedDataBytes(_dim, _max_size),
+                    LOG_TAG_CLUSTER, "First entry is not in the right place. _entry=%p, this=%p",
+                    _entry, this);
+        FatalAssert(_max_size < UINT16_MAX, LOG_TAG_CLUSTER,
+                    "Cluster size is too large. _max_size=%hu", _max_size);
+        FatalAssert(_owner < MAX_COMPUTE_NODE_ID, LOG_TAG_CLUSTER,
+                    "Cluster owner is invalid. _owner=%hu", _owner);
+        FatalAssert(IsComputeNode(_owner), LOG_TAG_CLUSTER,
+                    "Cluster owner is not a compute node. _owner=%hu", _owner);
+
+        memset(_data, 0, ALLIGNEMENT(raw_header_bytes) + AllignedDataBytes(_dim, _max_size));
+        for (uint16_t i = 0; i < _max_size; ++i) {
+            _entry[i].id = INVALID_VECTOR_ID;
+        }
     }
 
     Cluster(const Cluster& other) = delete;
     Cluster(Cluster&& other) = delete;
     ~Cluster() = default;
 
+    inline void CheckValid(bool check_min_size) const {
+#ifdef ENABLE_ASSERTS
+        FatalAssert(_header_bytes >= AllignedHeaderBytes(), LOG_TAG_CLUSTER,
+                    "Cluster bytes(%lu) does not contain enough space(%lu).",
+                    _header_bytes, AllignedHeaderBytes());
+        FatalAssert(ALLIGNED(_header_bytes), LOG_TAG_CLUSTER,
+                    "Cluster bytes(%lu) is not aligned to cache line size(%lu).",
+                    _header_bytes, CACHE_LINE_SIZE);
+        CHECK_VECTORID_IS_VALID(_centroid_id, LOG_TAG_CLUSTER);
+        CHECK_VECTORID_IS_CENTROID(_centroid_id, LOG_TAG_CLUSTER);
+        CHECK_MIN_MAX_SIZE(_min_size, _max_size, LOG_TAG_CLUSTER);
+        FatalAssert(_dim > 0, LOG_TAG_CLUSTER, "Cannot create a Cluster with dimension of 0.");
+        FatalAssert(_entry + _max_size + 1 == (void*)this + _header_bytes + AllignedDataBytes(_dim, _max_size),
+                    LOG_TAG_CLUSTER, "First entry is not in the right place. _entry=%p, this=%p",
+                    _entry, this);
+        FatalAssert(_max_size < UINT16_MAX, LOG_TAG_CLUSTER,
+                    "Cluster size is too large. _max_size=%hu", _max_size);
+        FatalAssert(_owner < MAX_COMPUTE_NODE_ID, LOG_TAG_CLUSTER,
+                    "Cluster owner is invalid. _owner=%hu", _owner);
+        FatalAssert(IsComputeNode(_owner), LOG_TAG_CLUSTER,
+                    "Cluster owner is not a compute node. _owner=%hu", _owner);
+        uint16_t size = _size.load();
+        if (check_min_size) {
+            FatalAssert(size >= _min_size, LOG_TAG_CLUSTER,
+                        "Cluster size(%hu) is less than minimum size(%hu).", size, _min_size);
+        }
+        FatalAssert(size <= _max_size, LOG_TAG_CLUSTER,
+                    "Cluster size(%hu) is larger than maximum size(%hu).", size, _max_size);
+        uint16_t real_size = 0;
+        for (uint16_t i = 0; i < _max_size; ++i) {
+            if (_entry[i].IsVisible()) {
+                real_size++;
+            }
+        }
+        if (check_min_size) {
+            FatalAssert(real_size >= _min_size, LOG_TAG_CLUSTER,
+                        "Cluster real size(%hu) is less than minimum size(%hu).", real_size, _min_size);
+        }
+        FatalAssert(real_size <= _max_size, LOG_TAG_CLUSTER,
+                    "Cluster real size(%hu) is larger than maximum size(%hu).", real_size, _max_size);
+#endif
+    }
+
     /* Should only be called when vertex lock is held(either shared or exclusive) */
     /* Will return invalid address to indicate that cluster is full */
-    inline ClusterEntry* Insert(const void* new_vector, VectorID id) {
-        FatalAssert(new_vector != nullptr, LOG_TAG_CLUSTER, "Cannot insert null vector.");
-        FatalAssert(id.IsValid(), LOG_TAG_CLUSTER, "Cannot insert vector with invalid ID: " VECTORID_LOG_FMT,
-                    VECTORID_LOG(id));
-        uint16_t offset = Reserve(1);
-        if (offset == UINT16_MAX) {
-            return nullptr; /* Cluster is full and someone should be splitting it so release your lock */
+    inline uint16_t BatchInsert(const void** vectors, const VectorID* ids, uint16_t num_vectors,
+                                bool& need_split, ClusterEntry*& entry) {
+        FatalAssert(vectors != nullptr, LOG_TAG_CLUSTER, "Cannot insert null vector.");
+        FatalAssert(ids != nullptr, LOG_TAG_CLUSTER, "ids cannot be null!");
+        FatalAssert(num_vectors > 0, LOG_TAG_CLUSTER, "Cannot insert 0 vectors.");
+        FatalAssert(num_vectors < _max_size - _min_size, LOG_TAG_CLUSTER,
+                    "Cannot insert more vectors than available space.");
+        need_split = false;
+        uint16_t offset;
+        uint16_t num_reserved = Reserve(num_vectors, offset);
+        FatalAssert(num_reserved <= num_vectors, LOG_TAG_CLUSTER,
+                    "Reserved %hu vectors but requested %hu vectors.", num_reserved, num_vectors);
+        if (num_reserved < num_vectors) {
+            bool expected = false;
+            need_split = _change_in_progress.compare_exchange_strong(expected, true);
+            /* Cluster is full and someone should be splitting it so release your lock if you couldn't CAS change_IP */
         }
 
-        FatalAssert(!(_entry[offset].state.load().IsValid()), LOG_TAG_CLUSTER, "Cluster entry is valid!");
-        memcpy(_entry[offset].vector, new_vector, _dim * sizeof(VTYPE));
-        _entry[offset].id = id;
-        _entry[offset].state.store(VectorState::Valid()); /* todo memory order */
-        return &(_entry[offset]);
+        if (num_reserved == 0) {
+            entry = nullptr;
+            return 0; /* No space left */
+        }
+        FatalAssert(offset + num_reserved <= _max_size, LOG_TAG_CLUSTER,
+                    "Offset(%hu) + num_reserved(%hu) is larger than max size(%hu).",
+                    offset, num_reserved, _max_size);
+        FatalAssert(offset < _max_size, LOG_TAG_CLUSTER,
+                    "Offset(%hu) is larger than max size(%hu).", offset, _max_size);
+        entry = &_entry[offset];
+        for (uint16_t i = 0; i < num_reserved; ++i) {
+            FatalAssert(vectors[i] == nullptr, LOG_TAG_CLUSTER,
+                        "Invalid vector at id %hu", i);
+            FatalAssert(ids[i].IsValid(), LOG_TAG_CLUSTER, "Invalid VectorID in ids[%hu] = " VECTORID_LOG_FMT,
+                        i, VECTORID_LOG(ids[i]));
+            FatalAssert(_entry[offset + i].state.load().IsValid() == false, LOG_TAG_CLUSTER,
+                        "Cluster entry is valid at offset %hu", offset + i);
+            memcpy(_entry[offset + i].vector, static_cast<const char*>(vectors[i]) + (i * _dim * sizeof(VTYPE)),
+                   _dim * sizeof(VTYPE));
+            _entry[offset + i].id = ids[i];
+            _entry[offset + i].state.store(VectorState::Valid()); /* todo memory order */
+        }
+
+        return num_reserved;
     }
 
     /* Should only be called when vertex is pinned */
@@ -547,65 +671,62 @@ public:
     }
 
     /* May return inconsistent data if SXLock is not held in exclusive mode */
-    String ToString() const {
-        String str("<CurAddress= %p, Bytes=%lu, Version=%lu, SizeLimit=[%hu %hu], "
+    String ToString(bool detailed = false) const {
+        String str("<ClusterAddress=%p, StartDataAddress=%p, StartEntryAddress=%p, "
+                   "EndEntryAddress=%p, ClusterHeaderBytes=%lu, TotalAllignedHeaderBytes=%lu,"
+                   " TotalBytes=%lu, Version=%lu, SizeLimit=[%hu %hu], "
                    "Dim=%hu, CachedParentID=" VECTORID_LOG_FMT
-                   ", CentroidID=" VECTORID_LOG_FMT ", Size=%hu, Entries: [",
-                   this, _bytes, _version, _min_size, _max_size, _dim, VECTORID_LOG(_parent_id),
+                   ", CentroidID=" VECTORID_LOG_FMT ", Size=%hu",
+                   this, _data, _entry, _entry + _max_size, sizeof(Cluster),
+                   _header_bytes, _header_bytes + AllignedBytes(_dim, _max_size),
+                   _version, _min_size, _max_size, _dim, VECTORID_LOG(_parent_id),
                    VECTORID_LOG(_centroid_id), _size);
-        for (uint16_t i = 0; i < _max_size; ++i) {
-            str += _entry[i].ToString(_dim);
-            if (i < (_max_size - 1)) {
-                str += ", ";
+        if (detailed) {
+            for (uint16_t i = 0; i < _max_size; ++i) {
+                str += _entry[i].ToString(_dim);
+                if (i < (_max_size - 1)) {
+                    str += ", ";
+                }
             }
+            str += "]>";
         }
-        str += "]>";
+        else {
+            str += ">";
+        }
         return str;
     }
 
+    const uint64_t _header_bytes; /* Size of cluster header including vertex header and the padding */
     const uint64_t _version; /* Incremented during split and compaction */
     const VectorID _centroid_id;
+    /* only read during split -> holding a shared lock on it for migration of cluster should suffice */
+    VectorID _parent_id; /* may be outdated in a multi node setup */
     const uint16_t _min_size;
     const uint16_t _max_size;
     const uint16_t _dim;
-    const size_t _bytes;
+    /* number of invalid vectors in the cluster that can be removed during compaction */
+    std::atomic<uint16_t> _collectable;
+    uint8_t _owner;
+    std::atomic<bool> _change_in_progress;
+    std::atomic<uint8_t> _distributed_pin;
+    ClusterEntry * const _entry;
     // const DataType _vtype;
 
 protected:
-    Cluster(uint64_t version, VectorID centroid_id, uint16_t min_size, uint16_t max_size,
-            uint16_t dimention) : _version(version), _centroid_id(centroid_id),
-                                  _min_size(min_size), _max_size(max_size), _dim(dimention),
-                                  _bytes(AllignedBytes(_dim, _max_size)),
-                                  _entry(ALLIGNEMENT(sizeof(Cluster)) + (void*)_data),
-                                  _parent_id(INVALID_VECTOR_ID), _size(0) {
-        FatalAssert(_centroid_id.IsValid(), LOG_TAG_CLUSTER, "Invalid centroid ID.");
-        CHECK_MIN_MAX_SIZE(_min_size, _max_size, LOG_TAG_CLUSTER);
-        FatalAssert(_dim > 0, LOG_TAG_CLUSTER, "Cannot create a Cluster with dimentiom of 0.");
-        FatalAssert(_entry == ALLIGNED_SIZE(sizeof(Cluster)) + (void*)this,
-                    LOG_TAG_CLUSTER, "First entry is not in the right place. _entry=%p, this=%p",
-                    _entry, this);
-        FatalAssert(_max_size < UINT16_MAX, LOG_TAG_CLUSTER,
-                    "Cluster size is too large. _max_size=%hu", _max_size);
-        memset(_data, 0, AllignedBytes(_dim, _max_size) - sizeof(Cluster));
-        for (uint16_t i = 0; i < _max_size; ++i) {
-            _entry[i].id = INVALID_VECTOR_ID;
-        }
-    }
-
-    uint16_t Reserve(uint16_t numVectors) {
+    uint16_t Reserve(uint16_t numVectors, uint16_t& offset) {
         FatalAssert(numVectors > 0, LOG_TAG_CLUSTER, "Cannot reserve 0 vectors.");
+        offset = UINT16_MAX;
         uint16_t cur_size = _size.load();
-        while (cur_size + numVectors <= _max_size) {
+        while (cur_size < _max_size) {
+            numVectors = std::min(numVectors, _max_size - cur_size);
             if (_size.compare_exchange_strong(cur_size, cur_size + numVectors)) {
-                return cur_size;
+                offset = cur_size;
+                return numVectors;
             }
         }
-        return UINT16_MAX; /* Cluster is full */
+        return 0; /* Cluster is full */
     }
 
-    ClusterEntry * const _entry;
-
-    VectorID _parent_id; /* may be outdated in a multi node setup */
     std::atomic<uint16_t> _size;
 
     char _data[];

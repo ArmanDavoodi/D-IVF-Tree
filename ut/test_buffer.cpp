@@ -28,7 +28,7 @@ public:
         constexpr uint16_t KL_MAX = 8, KL_MIN = 1;
         divftree::BufferManager _BufferManager;
         divftree::DIVFTreeAttributes attr;
-        attr.core.dimention = dim;
+        attr.core.dimension = dim;
         attr.core.distanceAlg = divftree::DistanceType::L2Distance;
         attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;

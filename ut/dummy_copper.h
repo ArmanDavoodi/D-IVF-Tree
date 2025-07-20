@@ -16,7 +16,7 @@ public:
         _clusteringAlg(attr.core.clusteringAlg), _distanceAlg(attr.core.distanceAlg), _min_size(attr.min_size),
         _similarityComparator(attr.similarityComparator),
         _reverseSimilarityComparator(attr.reverseSimilarityComparator),
-        _cluster(attr.core.dimention, attr.max_size) {}
+        _cluster(attr.core.dimension, attr.max_size) {}
 
     ~DIVFTreeVertex() = default;
     RetStatus AssignParent(VectorID parent_id) override {
@@ -85,7 +85,7 @@ public:
         return _cluster.Capacity();
     }
 
-    uint16_t VectorDimention() const override {
+    uint16_t VectorDimension() const override {
         return _cluster.Dimension();
     }
 
@@ -137,19 +137,19 @@ public:
                                          _size(0), _root(INVALID_VECTOR_ID), _levels(2) {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Init();
-        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to init buffer manager.");
+        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to init buffer manager.");
         _root = _bufmgr.RecordRoot();
-        FatalAssert(_root.IsValid(), LOG_TAG_VECTOR_INDEX, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        FatalAssert(_root.IsCentroid(), LOG_TAG_VECTOR_INDEX, "root should be a centroid: "
+        FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
+        FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "root should be a centroid: "
                     VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        FatalAssert(_root.IsLeaf(), LOG_TAG_VECTOR_INDEX, "first root should be a leaf: "
+        FatalAssert(_root.IsLeaf(), LOG_TAG_DIVFTREE, "first root should be a leaf: "
                     VECTORID_LOG_FMT, VECTORID_LOG(_root));
 
         rs = _bufmgr.UpdateClusterAddress(_root, CreateNewVertex(_root));
-        FatalAssert(rs.IsOK(), LOG_TAG_VECTOR_INDEX, "Failed to update cluster address for root: "
+        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for root: "
                     VECTORID_LOG_FMT, VECTORID_LOG(_root));
         _levels = 2;
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX,
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE,
              "Init DIVFTree Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
              VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
     }
@@ -157,7 +157,7 @@ public:
     ~DIVFTree() override {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_VECTOR_INDEX, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
+        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
     }
 
     RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) override {
@@ -198,7 +198,7 @@ public:
     }
 
     size_t Bytes(bool is_internal_vertex) const override {
-        return DIVFTreeVertex::Bytes(core_attr.dimention, is_internal_vertex ? internal_max_size : leaf_max_size);
+        return DIVFTreeVertex::Bytes(core_attr.dimension, is_internal_vertex ? internal_max_size : leaf_max_size);
     }
 
     inline String ToString() override {
