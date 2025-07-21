@@ -68,35 +68,36 @@ struct DIVFTreeAttributes {
     CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
     CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
 
-enum UpdateType : int8_t {
-    VECTOR_INSERT,
-    VECTOR_MIGRATE,
-    VECTOR_DELETE,
-    VECTOR_INPLACE_UPDATE,
-    NUM_UPDATE_TYPES
+enum VertexUpdateType : int8_t {
+    VERTEX_INSERT,
+    VERTEX_MIGRATE,
+    VERTEX_DELETE,
+    VERTEX_INPLACE_UPDATE,
+    NUM_VERTEX_UPDATE_TYPES
 };
 
-struct BatchUpdateEntry {
-    UpdateType type;
+struct BatchVertexUpdateEntry {
+    VertexUpdateType type;
     bool is_urgent;
     VectorID vector_id;
     RetStatus *result;
 
     union {
         struct {
-            ConstAddress vector_data; // for VECTOR_INSERT
+            ConstAddress vector_data; // for VERTEX_INSERT
+            ConstAddress *cluster_entry_addr; // if successful, this will set to the address of final cluster entry where vector is inserted
         } insert_args;
 
         struct {
-            ConstAddress vector_data; // for VECTOR_INPLACE_UPDATE
+            ConstAddress vector_data; // for VERTEX_INPLACE_UPDATE
         } inplace_update_args;
     };
 };
 
 /* todo need to think more about the cases for inserting a new operation as it
 might cause deadlock or unnecessary errors*/
-struct BatchUpdate {
-    std::map<VectorID, BatchUpdateEntry> updates;
+struct BatchVertexUpdate {
+    std::map<VectorID, BatchVertexUpdateEntry> updates[NUM_VERTEX_UPDATE_TYPES];
     VectorID target_cluster;
     bool urgent = false;
 
@@ -109,42 +110,34 @@ struct BatchUpdate {
         FatalAssert(target_cluster._level == vector_id._level + 1,
                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
                     target_cluster._level, vector_id._level + 1);
-        auto& it = updates.find(vector_id);
         RetStatus rs = RetStatus::Success();
-        if (it != updates.end()) {
-            switch (it->second.type) {
-            case VECTOR_INSERT:
-            case VECTOR_MIGRATE:
-            case VECTOR_INPLACE_UPDATE:
-                CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                     "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                     VECTORID_LOG(vector_id));
-                rs = RetStatus{
-                    .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-                };
-                if (result != nullptr) {
-                    *result = rs;
-                }
-                return rs;
-
-            case VECTOR_DELETE:
-                CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
-                     "VectorID " VECTORID_LOG_FMT
-                     " already exists in the batch with a delete operation. Overwriting it with INPLACE_UPDATE_OPT.",
-                     VECTORID_LOG(vector_id));
-                it->second.type = VECTOR_INPLACE_UPDATE;
-                it->second.is_urgent ||= is_urgent;
-                it->second.vector_id = vector_id;
-                urgent ||= is_urgent;
-                return rs;
-            default:
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                     "Unknown update type for VectorID " VECTORID_LOG_FMT
-                     ": %d", VECTORID_LOG(vector_id), it->second.type);
-                return RetStatus::Fail("Unknown update type in batch");
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
             }
+            return rs;
         }
-        updates[vector_id] = {.type = VECTOR_INSERT,
+        else if (updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end()) {
+            CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT
+                 " already exists in the batch with a delete operation. Overwriting it with INPLACE_UPDATE_OPT.",
+                 VECTORID_LOG(vector_id));
+            it->second.type = VERTEX_INPLACE_UPDATE;
+            it->second.is_urgent ||= is_urgent;
+            it->second.vector_id = vector_id;
+            urgent ||= is_urgent;
+            return rs;
+        }
+
+        updates[vector_id] = {.type = VERTEX_INSERT,
                               .is_urgent = is_urgent,
                               .vector_id = vector_id,
                               .result = result,
@@ -162,32 +155,24 @@ struct BatchUpdate {
         FatalAssert(target_cluster._level == vector_id._level + 1,
                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
                     target_cluster._level, vector_id._level + 1);
-        auto& it = updates.find(vector_id);
         RetStatus rs = RetStatus::Success();
-        if (it != updates.end()) {
-            switch (it->second.type) {
-            case VECTOR_INSERT:
-            case VECTOR_MIGRATE:
-            case VECTOR_DELETE:
-            case VECTOR_INPLACE_UPDATE:
-                CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                     "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                     VECTORID_LOG(vector_id));
-                rs = RetStatus{
-                    .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-                };
-                if (result != nullptr) {
-                    *result = rs;
-                }
-                return rs;
-            default:
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                     "Unknown update type for VectorID " VECTORID_LOG_FMT
-                     ": %d", VECTORID_LOG(vector_id), it->second.type);
-                return RetStatus::Fail("Unknown update type in batch");
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
             }
+            return rs;
         }
-        updates[vector_id] = {.type = VECTOR_INPLACE_UPDATE,
+
+        updates[vector_id] = {.type = VERTEX_INPLACE_UPDATE,
                               .is_urgent = is_urgent,
                               .vector_id = vector_id,
                               .result = result,
@@ -204,32 +189,24 @@ struct BatchUpdate {
         FatalAssert(target_cluster._level == vector_id._level + 1,
                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
                     target_cluster._level, vector_id._level + 1);
-        auto& it = updates.find(vector_id);
         RetStatus rs = RetStatus::Success();
-        if (it != updates.end()) {
-            switch (it->second.type) {
-            case VECTOR_INSERT:
-            case VECTOR_MIGRATE:
-            case VECTOR_DELETE:
-            case VECTOR_INPLACE_UPDATE:
-                CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                     "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                     VECTORID_LOG(vector_id));
-                rs = RetStatus{
-                    .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-                };
-                if (result != nullptr) {
-                    *result = rs;
-                }
-                return rs;
-            default:
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                     "Unknown update type for VectorID " VECTORID_LOG_FMT
-                     ": %d", VECTORID_LOG(vector_id), it->second.type);
-                return RetStatus::Fail("Unknown update type in batch");
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
             }
+            return rs;
         }
-        updates[vector_id] = {.type = VECTOR_MIGRATE,
+
+        updates[vector_id] = {.type = VERTEX_MIGRATE,
                               .is_urgent = is_urgent,
                               .vector_id = vector_id,
                               .result = result};
@@ -245,31 +222,23 @@ struct BatchUpdate {
         FatalAssert(target_cluster._level == vector_id._level + 1,
                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
                     target_cluster._level, vector_id._level + 1);
-        auto& it = updates.find(vector_id);
         RetStatus rs = RetStatus::Success();
-        if (it != updates.end()) {
-            switch (it->second.type) {
-            case VECTOR_INSERT:
-            case VECTOR_MIGRATE:
-            case VECTOR_DELETE:
-            case VECTOR_INPLACE_UPDATE:
-                CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                     "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                     VECTORID_LOG(vector_id));
-                rs = RetStatus{
-                    .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-                };
-                if (result != nullptr) {
-                    *result = rs;
-                }
-                return rs;
-            default:
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                     "Unknown update type for VectorID " VECTORID_LOG_FMT
-                     ": %d", VECTORID_LOG(vector_id), it->second.type);
-                return RetStatus::Fail("Unknown update type in batch");
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
             }
+            return rs;
         }
+
         updates[vector_id] = {.type = VECTOR_DELETE,
                               .is_urgent = is_urgent,
                               .vector_id = vector_id,
@@ -289,8 +258,7 @@ public:
     // virtual void Pin() = 0;
     // virtual void Unpin() = 0;
 
-    virtual uint16_t BatchInsert(const void** vector_data, const VectorID* vec_id,
-                                 uint16_t num_vectors, bool& need_split, Address& offset) = 0;
+    virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
     // virtual RetStatus StartVectorMigration(VectorID target) = 0;
     // virtual RetStatus EndVectorMigration(VectorID target) = 0;
     virtual RetStatus StartVectorMigration(uint16_t target_idx) = 0; /* need to pin vector id to make sure it does not change(maybe hold shared lock on vertex) */

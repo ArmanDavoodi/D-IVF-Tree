@@ -21,6 +21,10 @@ struct RetStatus {
         BATCH_CONFLICTING_OPERATIONS,
         BATCH_UNKNOWN_OPERATION,
 
+        VERTEX_NEEDS_SPLIT, /* not enough space -> no vectors were placed in cluster -> split needed by caller */
+        VERTEX_NEEDS_MERGE, /* may be solved with a single compaction? */
+        VERTEX_NOT_ENOUGH_SPACE, /* returned when there is not enough space but someone else is splitting */
+
         FAIL
     } stat;
 

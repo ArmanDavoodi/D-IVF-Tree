@@ -27,7 +27,7 @@ String LockModeToString(LockMode mode) {
 /* Todo: a more efficent implementation */
 class SXLock {
 public:
-    SXLock() : _mode(SX_SHARED), _num_shared_holders(0) {}
+    SXLock() : _mode(SX_SHARED), _num_shared_holders(0), _signal{true} {}
     ~SXLock() = default;
 
     void Lock(LockMode mode) {
@@ -94,6 +94,11 @@ public:
         return blocked;
     }
 
+    void SleepTillSignalled(LockMode mode) {
+        _signal.store(false);
+        _signal.wait(false);
+    }
+
     inline String ToString() const {
         return String("<LockMode=%s, SharedHolders=%lu>",
                       LockModeToString(_mode).ToCStr(), _num_shared_holders.load());
@@ -102,6 +107,7 @@ protected:
     LockMode _mode;
     std::atomic<uint64_t> _num_shared_holders;
     std::shared_mutex _m;
+    std::atomic<bool> _signal;
 };
 
 };
