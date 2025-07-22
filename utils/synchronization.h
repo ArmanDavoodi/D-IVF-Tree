@@ -1,8 +1,9 @@
-#ifndef _LOCK_H_
-#define _LOCK_H_
+#ifndef SYNCHRONIZATION_H_
+#define SYNCHRONIZATION_H_
 
 #include <shared_mutex>
 #include <atomic>
+#include <condition_variable>
 
 #include "debug.h"
 
@@ -108,6 +109,45 @@ protected:
     std::atomic<uint64_t> _num_shared_holders;
     std::shared_mutex _m;
     std::atomic<bool> _signal;
+};
+
+template<LockMode mode>
+class LockWrapper {
+public:
+    LockWrapper(SXLock& lock) : _lock(lock) {}
+    ~LockWrapper() = default;
+
+    void lock() {
+        _lock.Lock(mode);
+    }
+
+    void unlock() {
+        _lock.Unlock();
+    }
+protected:
+    SXLock& _lock;
+};
+
+class CondVar {
+public:
+    CondVar() = default;
+    ~CondVar() = default;
+
+    void NotifyOne() {
+        _cond_var.notify_one();
+    }
+
+    void NotifyAll() {
+        _cond_var.notify_all();
+    }
+
+    template<LockMode mode>
+    void Wait(LockWrapper<mode> lock) {
+        _cond_var.wait(lock);
+    }
+
+protected:
+    std::condition_variable_any _cond_var;
 };
 
 };

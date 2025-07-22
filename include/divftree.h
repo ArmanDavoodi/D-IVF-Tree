@@ -7,7 +7,7 @@
 #include "distance.h"
 #include "distributed_common.h"
 
-#include "utils/lock.h"
+#include "utils/synchronization.h"
 
 #include "interface/divftree.h"
 
@@ -73,29 +73,138 @@ public:
         return RetStatus::Success();
     }
 
-    uint16_t BatchInsert(const void** vector_data, const VectorID* vec_id,
-                         uint16_t num_vectors, bool& need_split, Address& offset) override {
+    RetStatus BatchUpdate(BatchVertexUpdate& updates) override {
         CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        CHECK_VECTORID_IS_VALID(vec_id, LOG_TAG_DIVFTREE_VERTEX);
-        FatalAssert(vec_id._level == _cluster._centroid_id._level - 1, LOG_TAG_DIVFTREE_VERTEX, "Level mismatch! "
-            "input vector: (id: %lu, level: %lu), centroid vector: (id: %lu, level: %lu)"
-            , vec_id._id, vec_id._level, _cluster._centroid_id._id, _cluster._centroid_id._level);
-        FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE_VERTEX, "Cannot insert null vector into the bucket with id %lu.",
-                    vec_id._id, _cluster._centroid_id._id);
+        FatalAssert(updates.target_cluster == _cluster._centroid_id, LOG_TAG_DIVFTREE_VERTEX,
+                    "Target cluster ID does not match vertex centroid ID. target=%s, centroid=%s",
+                    updates.target_cluster.ToString().ToCStr(), _cluster._centroid_id.ToString().ToCStr());
+        /* At this point this vertex should already pinned by the called/buffer */
+        if (_lock.LockWithBlockCheck(SX_SHARED)) {
+            _lock.Unlock();
+            return RetStatus{.stat = RetStatus::VERTEX_UPDATED};
+        }
+        /* todo: handle urgent flag */
+        /* first apply all moves and deletes */
+        uint16_t filled_size = _cluster.FilledSize();
+        ClusterEntry* entry = _cluster._entry;
+        VectorState state;
+        /* Todo add some asserts */
+        for (uint16_t i = 0; i < filled_size; ++i) {
+            if (!entry[i].IsValid()) {
+                continue;
+            }
+            std::map<divftree::VectorID, divftree::BatchVertexUpdateEntry>::iterator it;
+            it = updates.updates[VERTEX_DELETE].find(entry[i].id);
+            if (it != updates.updates[VERTEX_DELETE].end()) {
+                /* this might happen due to lock-free synchronization between minor updates */
+                if (!entry[i].Delete(state)) {
+                    CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                         "Failed to delete vector with ID " VECTORID_LOG_FMT " and state %s in vertex %s.",
+                         VECTORID_LOG(entry[i].id), state.ToString().ToCStr(), ToString().ToCStr());
+                    it->second.result->stat = RetStatus::VECTOR_IS_INVALID;
+                }
+                else {
+                    it->second.result->stat = RetStatus::SUCCESS;
+                }
+                updates.updates[VERTEX_DELETE].erase(it);
+                continue;
+            }
 
-        uint16_t num_reserved = _cluster.BatchInsert(vector_data, &vec_id, num_vectors,
-                                                     need_split, (ClusterEntry*)offset);
+            it = updates.updates[VERTEX_MIGRATE].find(entry[i].id);
+            if (it != updates.updates[VERTEX_MIGRATE].end()) {
+                /* this might happen due to lock-free synchronization between minor updates */
+                if(!entry[i].Move(state)) {
+                    if (!state.IsValid()) {
+                        CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                            "Failed to migrate invalid vector with ID " VECTORID_LOG_FMT " in vertex %s.",
+                            VECTORID_LOG(entry[i].id), ToString().ToCStr());
+                        it->second.result->stat = RetStatus::VECTOR_IS_INVALID;
+                    }
+                    else {
+                        FatalAssert(state.IsMoving(), LOG_TAG_DIVFTREE,
+                                    "If migration fails for valid vector, it has to be already migrated!");
+                        CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                            "Failed to migrate moved vector with ID " VECTORID_LOG_FMT " in vertex %s.",
+                            VECTORID_LOG(entry[i].id), ToString().ToCStr());
+                        it->second.result->stat = RetStatus::VECTOR_IS_MIGRATED;
+                    }
+                }
+                else {
+                    it->second.result->stat = RetStatus::SUCCESS;
+                }
+                updates.updates[VERTEX_MIGRATE].erase(it);
+                continue;
+            }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX,
-             "BatchInsert: NumInserted=%hhu, NumRemaining=%hhu, NeedSplit=%s, InsertedOffset=%hhu, Cluster=%s",
-             num_reserved, num_vectors - num_reserved, (need_split ? "T" : "F"), _cluster._max_size - num_reserved,
-             _cluster.ToString().ToCStr());
-        return num_reserved;
+            it = updates.updates[VERTEX_INPLACE_UPDATE].find(entry[i].id);
+            /* Todo this should not happen when we do not have an exclusive lock */
+            if (it != updates.updates[VERTEX_INPLACE_UPDATE].end()) {
+                FatalAssert(*it->second.inplace_update_args.vector_data != nullptr, LOG_TAG_DIVFTREE,
+                            "Inplace update vector data cannot be null.");
+                memcpy(entry[i].vector, it->second.inplace_update_args.vector_data,
+                       _cluster._dimension * sizeof(VTYPE));
+                if (!entry[i].IsVisible()) {
+                    CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                         "Inplace update for vector with ID " VECTORID_LOG_FMT " in vertex %s is not visible.",
+                         VECTORID_LOG(entry[i].id), ToString().ToCStr());
+                    it->second.result->stat = RetStatus::VECTOR_IS_INVISIBLE;
+                }
+                else {
+                    it->second.result->stat = RetStatus::SUCCESS;
+                }
+            }
+        }
+
+        /* check if there are any non insertion updates missing */
+        for (auto& update_pair : updates.updates[VERTEX_DELETE]) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "Batch update contains delete operation for vector with ID " VECTORID_LOG_FMT
+                 " but it was not found in the vertex %s.",
+                 VECTORID_LOG(update_pair.first), ToString().ToCStr());
+            update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
+        }
+        for (auto& update_pair : updates.updates[VERTEX_MIGRATE]) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "Batch update contains migrate operation for vector with ID " VECTORID_LOG_FMT
+                 " but it was not found in the vertex %s.",
+                 VECTORID_LOG(update_pair.first), ToString().ToCStr());
+            update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
+        }
+        for (auto& update_pair : updates.updates[VERTEX_INPLACE_UPDATE]) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "Batch update contains inplace update operation for vector with ID " VECTORID_LOG_FMT
+                 " but it was not found in the vertex %s.",
+                 VECTORID_LOG(update_pair.first), ToString().ToCStr());
+            update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
+        }
+
+        updates.updates[VERTEX_DELETE].clear();
+        updates.updates[VERTEX_MIGRATE].clear();
+        updates.updates[VERTEX_INPLACE_UPDATE].clear();
+
+        /* now apply all inserts */
+
     }
 
-    RetStatus StartVectorMigration(uint16_t target_idx) {
-        
-    }
+    // uint16_t BatchInsert(const void** vector_data, const VectorID* vec_id,
+    //                      uint16_t num_vectors, bool& need_split, Address& offset) override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     CHECK_VECTORID_IS_VALID(vec_id, LOG_TAG_DIVFTREE_VERTEX);
+    //     FatalAssert(vec_id._level == _cluster._centroid_id._level - 1, LOG_TAG_DIVFTREE_VERTEX, "Level mismatch! "
+    //         "input vector: (id: %lu, level: %lu), centroid vector: (id: %lu, level: %lu)"
+    //         , vec_id._id, vec_id._level, _cluster._centroid_id._id, _cluster._centroid_id._level);
+    //     FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE_VERTEX, "Cannot insert null vector into the bucket with id %lu.",
+    //                 vec_id._id, _cluster._centroid_id._id);
+
+    //     uint16_t num_reserved = _cluster.BatchInsert(vector_data, &vec_id, num_vectors,
+    //                                                  need_split, (ClusterEntry*)offset);
+
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX,
+    //          "BatchInsert: NumInserted=%hhu, NumRemaining=%hhu, NeedSplit=%s, InsertedOffset=%hhu, Cluster=%s",
+    //          num_reserved, num_vectors - num_reserved, (need_split ? "T" : "F"), _cluster._max_size - num_reserved,
+    //          _cluster.ToString().ToCStr());
+    //     return num_reserved;
+    // }
 
     // VectorUpdate MigrateLastVectorTo(DIVFTreeVertexInterface* _dest) override {
     //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, true);
@@ -253,7 +362,8 @@ protected:
     const VPairComparator _similarityComparator;
     const VPairComparator _reverseSimilarityComparator;
     const Vector _centroid_copy;
-    SXLock lock;
+    SXLock _lock;
+    CondVar _cond_var;
     Cluster _cluster;
 
 TESTABLE;

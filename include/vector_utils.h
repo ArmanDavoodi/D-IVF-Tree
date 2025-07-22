@@ -332,6 +332,14 @@ struct VectorState {
         return state;
     }
 
+    inline bool operator==(const VectorState& other) const {
+        return (valid == other.valid) && (move == other.move);
+    }
+
+    inline bool operator!=(const VectorState& other) const {
+        return !(*this == other);
+    }
+
     inline static VectorState Invalid() {
         return VectorState{0};
     }
@@ -379,17 +387,20 @@ struct ClusterEntry {
     }
 
     /* Should only be called when the vertex lock is held(either in shared or exclusive mode) */
-    inline VectorState Move() {
+    inline bool Move(VectorState& current_state) {
         VectorState expected = VectorState::Valid();
-        if (state.compare_exchange_strong(expected, VectorState::Valid() | VectorState::Move())) {
-            return *this;
+        current_state = VectorState::Valid() | VectorState::Move();
+        if (state.compare_exchange_strong(expected, current_state)) {
+            return *true;
         }
-        return expected;
+        current_state = expected;
+        return false;
     }
 
     /* Should only be called when the vertex lock is held(either in shared or exclusive mode) */
-    inline VectorState Delete() {
-        return state.exchange(VectorState::Invalid());
+    inline bool Delete(VectorState& old_state) {
+        old_state = state.exchange(VectorState::Invalid());
+        return !(old_state.IsValid());
     }
 
     inline bool operator==(const ClusterEntry& other) const {

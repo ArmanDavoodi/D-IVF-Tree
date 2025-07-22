@@ -259,12 +259,6 @@ public:
     // virtual void Unpin() = 0;
 
     virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
-    // virtual RetStatus StartVectorMigration(VectorID target) = 0;
-    // virtual RetStatus EndVectorMigration(VectorID target) = 0;
-    virtual RetStatus StartVectorMigration(uint16_t target_idx) = 0; /* need to pin vector id to make sure it does not change(maybe hold shared lock on vertex) */
-    virtual RetStatus EndVectorMigration(uint16_t target_idx) = 0; /* need to pin vector id to make sure it does not change(maybe hold shared lock on vertex) */
-    // virtual RetStatus DeleteVector(VectorID target) = 0;
-    virtual RetStatus DeleteVector(uint16_t target_idx) = 0; /* need to pin vector id to make sure it does not change(maybe hold shared lock on vertex) */
 
     virtual RetStatus Search(const Vector& query, size_t k,
                              std::vector<std::pair<VectorID, DTYPE>>& neighbours) = 0;
