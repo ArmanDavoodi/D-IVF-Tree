@@ -78,6 +78,7 @@ public:
         FatalAssert(updates.target_cluster == _cluster._centroid_id, LOG_TAG_DIVFTREE_VERTEX,
                     "Target cluster ID does not match vertex centroid ID. target=%s, centroid=%s",
                     updates.target_cluster.ToString().ToCStr(), _cluster._centroid_id.ToString().ToCStr());
+        RetStatus rs = RetStatus::Success();
         /* At this point this vertex should already pinned by the called/buffer */
         if (_lock.LockWithBlockCheck(SX_SHARED)) {
             _lock.Unlock();
@@ -183,7 +184,16 @@ public:
         updates.updates[VERTEX_INPLACE_UPDATE].clear();
 
         /* now apply all inserts */
-
+        rs = _cluster.BatchInsert(updates.updates[VERTEX_INSERT]);
+        if (rs.stat == RetStatus::VERTEX_NOT_ENOUGH_SPACE) {
+            /* compete for a flag or something and if you get it you have to split */
+        }
+        else if (rs.stat != RetStatus::SUCCESS) {
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
+                 "Batch update failed with status: %s in vertex %s.",
+                 rs.Msg(), ToString().ToCStr());
+        }
+        /* todo return success? */
     }
 
     // uint16_t BatchInsert(const void** vector_data, const VectorID* vec_id,

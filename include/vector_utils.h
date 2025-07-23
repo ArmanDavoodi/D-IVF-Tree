@@ -573,48 +573,56 @@ public:
 
     /* Should only be called when vertex lock is held(either shared or exclusive) */
     /* Will return invalid address to indicate that cluster is full */
-    inline uint16_t BatchInsert(const void** vectors, const VectorID* ids, uint16_t num_vectors,
-                                bool& need_split, ClusterEntry*& entry) {
-        FatalAssert(vectors != nullptr, LOG_TAG_CLUSTER, "Cannot insert null vector.");
-        FatalAssert(ids != nullptr, LOG_TAG_CLUSTER, "ids cannot be null!");
-        FatalAssert(num_vectors > 0, LOG_TAG_CLUSTER, "Cannot insert 0 vectors.");
-        FatalAssert(num_vectors < _max_size - _min_size, LOG_TAG_CLUSTER,
-                    "Cannot insert more vectors than available space.");
+    inline RetStatus BatchInsert(std::map<VectorID, BatchVertexUpdateEntry>& updates) {
+        FatalAssert(updates.size() > 0, LOG_TAG_CLUSTER,
+                    "No updates to insert. updates.size()=%lu",
+                    updates.size());
+        uint16_t num_vectors = updates.size();
         need_split = false;
         uint16_t offset;
         uint16_t num_reserved = Reserve(num_vectors, offset);
         FatalAssert(num_reserved <= num_vectors, LOG_TAG_CLUSTER,
                     "Reserved %hu vectors but requested %hu vectors.", num_reserved, num_vectors);
         if (num_reserved < num_vectors) {
-            bool expected = false;
-            need_split = _change_in_progress.compare_exchange_strong(expected, true);
             /* Cluster is full and someone should be splitting it so release your lock if you couldn't CAS change_IP */
+            return RetStatus{.stat = VERTEX_NOT_ENOUGH_SPACE};
         }
 
-        if (num_reserved == 0) {
-            entry = nullptr;
-            return 0; /* No space left */
-        }
         FatalAssert(offset + num_reserved <= _max_size, LOG_TAG_CLUSTER,
                     "Offset(%hu) + num_reserved(%hu) is larger than max size(%hu).",
                     offset, num_reserved, _max_size);
         FatalAssert(offset < _max_size, LOG_TAG_CLUSTER,
                     "Offset(%hu) is larger than max size(%hu).", offset, _max_size);
         entry = &_entry[offset];
-        for (uint16_t i = 0; i < num_reserved; ++i) {
-            FatalAssert(vectors[i] == nullptr, LOG_TAG_CLUSTER,
-                        "Invalid vector at id %hu", i);
-            FatalAssert(ids[i].IsValid(), LOG_TAG_CLUSTER, "Invalid VectorID in ids[%hu] = " VECTORID_LOG_FMT,
-                        i, VECTORID_LOG(ids[i]));
+        std::map<VectorID, BatchVertexUpdateEntry>::iterator it = updates.begin();
+        for (uint16_t i = 0; i < updates.size(); ++i, ++it) {
+            FatalAssert(it != updates.end(), LOG_TAG_CLUSTER,
+                        "Not enough updates for the number of reserved vectors. i=%hu, updates.size()=%lu",
+                        i, updates.size());
+            FatalAssert(i + offset <= _max_size, LOG_TAG_CLUSTER,
+                        "Index(%hu) + offset(%hu) is larger than max size(%hu).",
+                        i, offset, _max_size);
+            FatalAssert(it->second.type == VERTEX_INSERT, LOG_TAG_CLUSTER,
+                        "Invalid update type!");
+            FatalAssert(it->second.insert_args.vector_data != nullptr, LOG_TAG_CLUSTER,
+                        "Invalid vector data!");
+            FatalAssert(it->second.insert_args.cluster_entry_addr != nullptr, LOG_TAG_CLUSTER,
+                        "Invalid cluster entry address pointer!");
+            FatalAssert(it->second.result != nullptr, LOG_TAG_CLUSTER,
+                        "Invalid result pointer!");
+            FatalAssert(it->second.vector_id.IsValid(), LOG_TAG_CLUSTER, "Invalid VectorID in ids[%hu] = " VECTORID_LOG_FMT,
+                        i, VECTORID_LOG(it->second.vector_id));
             FatalAssert(_entry[offset + i].state.load().IsValid() == false, LOG_TAG_CLUSTER,
                         "Cluster entry is valid at offset %hu", offset + i);
-            memcpy(_entry[offset + i].vector, static_cast<const char*>(vectors[i]) + (i * _dim * sizeof(VTYPE)),
+            memcpy(_entry[offset + i].vector, (it->second.insert_args.vector_data),
                    _dim * sizeof(VTYPE));
-            _entry[offset + i].id = ids[i];
+            _entry[offset + i].id = it->second.vector_id;
             _entry[offset + i].state.store(VectorState::Valid()); /* todo memory order */
+            *(it->second.insert_args.cluster_entry_addr) = &_entry[offset + i];
+            it->second.result->stat = RetStatus::SUCCESS;
         }
 
-        return num_reserved;
+        return RetStatus::Success();
     }
 
     /* Should only be called when vertex is pinned */
@@ -718,7 +726,6 @@ public:
     /* number of invalid vectors in the cluster that can be removed during compaction */
     std::atomic<uint16_t> _collectable;
     uint8_t _owner;
-    std::atomic<bool> _change_in_progress;
     std::atomic<uint8_t> _distributed_pin;
     ClusterEntry * const _entry;
     // const DataType _vtype;

@@ -153,6 +153,186 @@ inline constexpr bool IsValid(DistanceType type) {
     return ((type != DistanceType::InvalidD) && (type != DistanceType::NumTypesD));
 }
 
+enum VertexUpdateType : int8_t {
+    VERTEX_INSERT,
+    VERTEX_MIGRATE,
+    VERTEX_DELETE,
+    VERTEX_INPLACE_UPDATE,
+    NUM_VERTEX_UPDATE_TYPES
+};
+
+struct BatchVertexUpdateEntry {
+    VertexUpdateType type;
+    bool is_urgent;
+    VectorID vector_id;
+    RetStatus *result;
+
+    union {
+        struct {
+            ConstAddress vector_data; // for VERTEX_INSERT
+            Address *cluster_entry_addr; // if successful, this will set to the address of final cluster entry where vector is inserted
+        } insert_args;
+
+        struct {
+            ConstAddress vector_data; // for VERTEX_INPLACE_UPDATE
+        } inplace_update_args;
+    };
+};
+
+/* todo need to think more about the cases for inserting a new operation as it
+might cause deadlock or unnecessary errors*/
+struct BatchVertexUpdate {
+    std::map<VectorID, BatchVertexUpdateEntry> updates[NUM_VERTEX_UPDATE_TYPES];
+    VectorID target_cluster;
+    bool urgent = false;
+
+    inline RetStatus AddInsert(const VectorID& vector_id, ConstAddress vector_data,
+                               RetStatus *result = nullptr, bool is_urgent = false) {
+        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+        FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
+        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+        FatalAssert(target_cluster._level == vector_id._level + 1,
+                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+                    target_cluster._level, vector_id._level + 1);
+        RetStatus rs = RetStatus::Success();
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
+            }
+            return rs;
+        }
+        else if (updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end()) {
+            CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT
+                 " already exists in the batch with a delete operation. Overwriting it with INPLACE_UPDATE_OPT.",
+                 VECTORID_LOG(vector_id));
+            it->second.type = VERTEX_INPLACE_UPDATE;
+            it->second.is_urgent ||= is_urgent;
+            it->second.vector_id = vector_id;
+            urgent ||= is_urgent;
+            return rs;
+        }
+
+        updates[vector_id] = {.type = VERTEX_INSERT,
+                              .is_urgent = is_urgent,
+                              .vector_id = vector_id,
+                              .result = result,
+                              .insert_args.vector_data = vector_data};
+        urgent ||= is_urgent;
+        return RetStatus::Success();
+    }
+
+    inline RetStatus AddInplaceUpdate(const VectorID& vector_id, ConstAddress vector_data,
+                                      RetStatus *result = nullptr, bool is_urgent = false) {
+        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+        FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
+        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+        FatalAssert(target_cluster._level == vector_id._level + 1,
+                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+                    target_cluster._level, vector_id._level + 1);
+        RetStatus rs = RetStatus::Success();
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
+            }
+            return rs;
+        }
+
+        updates[vector_id] = {.type = VERTEX_INPLACE_UPDATE,
+                              .is_urgent = is_urgent,
+                              .vector_id = vector_id,
+                              .result = result,
+                              .inplace_update_args.vector_data = vector_data};
+        urgent ||= is_urgent;
+        return RetStatus::Success();
+    }
+
+    inline RetStatus AddMigrate(const VectorID& vector_id, RetStatus *result = nullptr,
+                                bool is_urgent = false) {
+        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+        FatalAssert(target_cluster._level == vector_id._level + 1,
+                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+                    target_cluster._level, vector_id._level + 1);
+        RetStatus rs = RetStatus::Success();
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
+            }
+            return rs;
+        }
+
+        updates[vector_id] = {.type = VERTEX_MIGRATE,
+                              .is_urgent = is_urgent,
+                              .vector_id = vector_id,
+                              .result = result};
+        urgent ||= is_urgent;
+        return RetStatus::Success();
+    }
+
+    inline RetStatus AddDelete(const VectorID& vector_id, RetStatus *result = nullptr,
+                                bool is_urgent = false) {
+        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+        FatalAssert(target_cluster._level == vector_id._level + 1,
+                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+                    target_cluster._level, vector_id._level + 1);
+        RetStatus rs = RetStatus::Success();
+        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+                 VECTORID_LOG(vector_id));
+            rs = RetStatus{
+                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+            };
+            if (result != nullptr) {
+                *result = rs;
+            }
+            return rs;
+        }
+
+        updates[vector_id] = {.type = VECTOR_DELETE,
+                              .is_urgent = is_urgent,
+                              .vector_id = vector_id,
+                              .result = result};
+        urgent ||= is_urgent;
+        return RetStatus::Success();
+    }
+};
+
 #ifndef VECTOR_TYPE
 #define VECTOR_TYPE uint16_t
 #define VTYPE_FMT "%hu"
