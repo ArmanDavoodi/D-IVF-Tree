@@ -407,18 +407,18 @@ typedef DISTANCE_TYPE DTYPE;
 #define VECTOR_STATE_LOG_FMT "%s"
 #define VECTOR_STATE_LOG(state) ((state).state.load().ToString().ToCStr())
 
-#define VERTEX_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
-#define VERTEX_PTR_LOG(vertex)\
-    (((vertex) == nullptr) ? "NULL" :\
-        (!((vertex)->CentroidID().IsValid()) ? "INV" : ((vertex)->CentroidID().IsVector() ? "Non-Centroid" : \
-            ((vertex)->CentroidID().IsLeaf() ? "Leaf" : ((vertex)->CentroidID().IsInternalVertex() ? "Internal" \
-                : "UNDEF"))))),\
-    (((vertex) == nullptr) ? 0 : (vertex)->MinSize()),\
-    (((vertex) == nullptr) ? 0 : (vertex)->MaxSize()),\
-    VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->CentroidID())),\
-    (((vertex) == nullptr) ? 0 : (vertex)->Size()),\
-    VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->ParentID())),\
-    ((PRINT_BUCKET) ? ((((vertex) == nullptr)) ? "NULL" : ((vertex)->BucketToString()).ToCStr()) : "OMITTED")
+// #define VERTEX_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
+// #define VERTEX_PTR_LOG(vertex)\
+//     (((vertex) == nullptr) ? "NULL" :\
+//         (!((vertex)->CentroidID().IsValid()) ? "INV" : ((vertex)->CentroidID().IsVector() ? "Non-Centroid" : \
+//             ((vertex)->CentroidID().IsLeaf() ? "Leaf" : ((vertex)->CentroidID().IsInternalVertex() ? "Internal" \
+//                 : "UNDEF"))))),\
+//     (((vertex) == nullptr) ? 0 : (vertex)->MinSize()),\
+//     (((vertex) == nullptr) ? 0 : (vertex)->MaxSize()),\
+//     VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->CentroidID())),\
+//     (((vertex) == nullptr) ? 0 : (vertex)->Size()),\
+//     VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->ParentID())),\
+//     ((PRINT_BUCKET) ? ((((vertex) == nullptr)) ? "NULL" : ((vertex)->BucketToString()).ToCStr()) : "OMITTED")
 
 #define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
@@ -442,10 +442,10 @@ typedef DISTANCE_TYPE DTYPE;
 
 #define CHECK_VERTEX_IS_LEAF(vertex, tag) \
     FatalAssert(((vertex) != nullptr) && (vertex)->IsLeaf(), (tag), \
-                "Vertex is not a leaf: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex)))
+                "Vertex is not a leaf: %s", (vertex)->ToString().ToCStr())
 #define CHECK_VERTEX_IS_INTERNAL(vertex, tag) \
     FatalAssert(((vertex) != nullptr) && !((vertex)->IsLeaf()), (tag), \
-                "Vertex is not an internal vertex: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex)))
+                "Vertex is not an internal vertex: %s", (vertex)->ToString().ToCStr())
 
 #define CHECK_NOT_NULLPTR(ptr, tag) \
     FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
@@ -456,7 +456,7 @@ typedef DISTANCE_TYPE DTYPE;
         CHECK_VECTORID_IS_VALID((vertex)->CentroidID(), (tag)); \
         CHECK_VECTORID_IS_CENTROID((vertex)->CentroidID(), (tag)); \
         FatalAssert((vertex)->VectorDimension() > 0, (tag), \
-                    "Vertex has invalid vector dimension: " VERTEX_LOG_FMT, VERTEX_PTR_LOG((vertex))); \
+                    "Vertex has invalid vector dimension: %s", (vertex)->ToString().ToCStr()); \
         CHECK_MIN_MAX_SIZE((vertex)->MinSize(), (vertex)->MaxSize(), (tag)); \
         FatalAssert(((!(check_min_size)) || (vertex)->Size() >= (vertex)->MinSize()), (tag), \
                     "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
@@ -472,7 +472,7 @@ typedef DISTANCE_TYPE DTYPE;
         FatalAssert(IsValid(_distanceAlg), (tag), "Distance algorithm is invalid."); \
         CHECK_NOT_NULLPTR(_similarityComparator, (tag)); \
         CHECK_NOT_NULLPTR(_reverseSimilarityComparator, (tag)); \
-        _cluster.CheckSelfIsValid((check_min_size)); \
+        _cluster.CheckValid((check_min_size)); \
     } while(0)
 
 #ifdef ENABLE_TEST_LOGGING

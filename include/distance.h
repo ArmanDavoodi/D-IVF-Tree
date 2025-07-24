@@ -37,13 +37,16 @@ inline constexpr bool LessSimilarVPair(const std::pair<VectorID, DTYPE>& a, cons
     return MoreSimilar(b.second, a.second);
 }
 
-inline Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim) {
+inline Vector ComputeCentroid(const ClusterEntry* vectors, size_t size, uint16_t dim) {
     FatalAssert(size > 0, LOG_TAG_BASIC, "size cannot be 0");
     FatalAssert(vectors != nullptr, LOG_TAG_BASIC, "size cannot be 0");
-    Vector centroid(vectors, dim);
+    FatalAssert(vectors[0].IsVisible(), LOG_TAG_BASIC, "First vector is not visible!");
+    Vector centroid(vectors[0].vector, dim);
     for (size_t v = 1; v < size; ++v) {
+        FatalAssert(vectors[v].IsVisible(), LOG_TAG_BASIC, "Vector is not visible!");
+        Vector current_vector(vectors[v].vector);
         for (uint16_t e = 0; e < dim; ++e) {
-            centroid[e] += vectors[v * dim + e];
+            centroid[e] += current_vector[e];
         }
     }
 
@@ -56,7 +59,7 @@ inline Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim) {
 
 };
 
-inline Vector ComputeCentroid(const VTYPE* vectors, size_t size, uint16_t dim, DistanceType distanceAlg) {
+inline Vector ComputeCentroid(const ClusterEntry* vectors, size_t size, uint16_t dim, DistanceType distanceAlg) {
     switch (distanceAlg) {
     case DistanceType::L2Distance:
         return L2::ComputeCentroid(vectors, size, dim);

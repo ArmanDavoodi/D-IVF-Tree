@@ -70,7 +70,6 @@ struct DIVFTreeAttributes {
 
 class DIVFTreeVertexInterface {
 public:
-    DIVFTreeVertexInterface() = delete;
     virtual ~DIVFTreeVertexInterface() = default;
     virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
@@ -85,11 +84,11 @@ public:
 
     virtual VectorID CentroidID() const = 0;
     virtual VectorID ParentID() const = 0;
-    virtual uint16_t Size() const = 0;
+    // virtual uint16_t Size() const = 0;
 
-    virtual bool IsFull() const = 0;
-    virtual bool IsAlmostEmpty() const = 0;
-    virtual bool Contains(VectorID id) const = 0;
+    // virtual bool IsFull() const = 0;
+    // virtual bool IsAlmostEmpty() const = 0;
+    // virtual bool Contains(VectorID id) const = 0;
 
     virtual bool IsLeaf() const = 0;
     virtual uint8_t Level() const = 0;
@@ -104,7 +103,7 @@ public:
     virtual VPairComparator GetSimilarityComparator(bool reverese) const = 0;
     virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
-    virtual String ToString() const = 0;
+    virtual String ToString(bool detailed = false) const = 0;
 };
 
 class DIVFTreeInterface {
