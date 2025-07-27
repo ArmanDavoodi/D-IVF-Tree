@@ -121,7 +121,7 @@ union VectorID {
 };
 
 typedef void* Address;
-typedef const void* ConstAddress;
+typedef const void* AddressToConst;
 
 constexpr Address INVALID_ADDRESS = nullptr;
 
@@ -153,11 +153,77 @@ inline constexpr bool IsValid(DistanceType type) {
     return ((type != DistanceType::InvalidD) && (type != DistanceType::NumTypesD));
 }
 
+
+/*
+
+    User local vector insert:
+        1) Reserve a unique vector id at level 0
+        2) Search for an appropriate leaf vertex to insert the vector and pin it
+        3) TryLock the leaf in shared mode and try to reserve memory in cluster
+            3.1) if lock failed it means there was an update and go to step 5
+        4) If node is full split(*)
+        5) If node is updating wait on cond var and retry based on the update type
+            5.1)
+        6) Create and insert entry in insertion state and increment _real_size
+        7) Create buffer Entry for the entry
+        8) change state from insertion to valid
+        9) unlock leaf
+        10) unpin leaf
+
+    User local vector delete:
+        1) Search for the vector in the buffer
+        2) If not found return not found
+        3) pin vertex and get lock in shared mode
+            3.1) if lock failed it means there was an update and
+                3.1.1)
+        4) check the entry and CAS from Valid to Invalid
+        5) if cas failed due to state:
+            5.1)
+        6) Create an empty buffer entry and cas it to the head of the version queue
+            6.1) can cas fail here?
+        7) Unpin vector and if pin is 0 delete it
+            7.1) If deleted cas the new entry with nullptr and unpin it and if 0 delete
+                7.2) can cas fail here?
+        8) decrement _real_size and if it is less than min_size get exclusive, compact(*) and if needed merge(*)
+        9) unlock vertex
+        10) unpin vertex
+
+    user local vector update:
+        1) Search for the vector in the buffer
+        2) If not found return not found
+        3) pin vertex and get lock in shared mode
+            3.1) if lock failed it means there was an update and
+                3.1.1)
+        4) check the entry and CAS from Valid to Valid|Move
+        5) if cas failed due to state:
+            5.1)
+        6) Unlock vertex but do not unpin it!
+        7) execute steps 2-7 of user local vector insert
+        8) Cas the new buffer entry as the head of the version queue and make the current old version
+            8.1) can cas fail? if not use exchange
+            8.2) unpin the old version and if 0 delete it
+        9) Unpin vector and if pin is 0 delete it
+            9.1) If deleted cas the new entry with nullptr and unpin it and if 0 delete
+        10) decrement _real_size and if it is less than min_size get exclusive, compact(*) and if needed merge(*)
+        11) unlock vertex
+        12) unpin vertex
+
+*/
 enum VertexUpdateType : int8_t {
+    /* Main operations */
     VERTEX_INSERT,
-    VERTEX_MIGRATE,
     VERTEX_DELETE,
+    VERTEX_MOVE,
     VERTEX_INPLACE_UPDATE,
+
+    /* Insertion subtypes */
+    VERTEX_MIGRATION_INSERT,
+    VERTEX_UPDATE_INSERT,
+
+    /* Deletion subtypes */
+    VERTEX_MIGRATION_DELETE,
+    VERTEX_UPDATE_DELETE,
+
     NUM_VERTEX_UPDATE_TYPES
 };
 
@@ -169,12 +235,12 @@ struct BatchVertexUpdateEntry {
 
     union {
         struct {
-            ConstAddress vector_data; // for VERTEX_INSERT
+            AddressToConst vector_data; // for VERTEX_INSERT
             Address *cluster_entry_addr; // if successful, this will set to the address of final cluster entry where vector is inserted
         } insert_args;
 
         struct {
-            ConstAddress vector_data; // for VERTEX_INPLACE_UPDATE
+            AddressToConst vector_data; // for VERTEX_INPLACE_UPDATE
         } inplace_update_args;
     };
 };
@@ -186,7 +252,7 @@ struct BatchVertexUpdate {
     VectorID target_cluster;
     bool urgent = false;
 
-    inline RetStatus AddInsert(const VectorID& vector_id, ConstAddress vector_data,
+    inline RetStatus AddInsert(const VectorID& vector_id, AddressToConst vector_data,
                                RetStatus *result = nullptr, bool is_urgent = false) {
         FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
         FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
@@ -197,7 +263,8 @@ struct BatchVertexUpdate {
                     target_cluster._level, vector_id._level + 1);
         RetStatus rs = RetStatus::Success();
         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
+            updates[VERTEX_MIGRATION_DELETE].find(vector_id) != updates[VERTEX_MIGRATION_DELETE].end() ||
             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
             CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
                  "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
@@ -211,6 +278,7 @@ struct BatchVertexUpdate {
             return rs;
         }
         else if (updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end()) {
+            /* delete should override insertion as it was either caused by user  */
             CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
                  "VectorID " VECTORID_LOG_FMT
                  " already exists in the batch with a delete operation. Overwriting it with INPLACE_UPDATE_OPT.",
@@ -231,7 +299,7 @@ struct BatchVertexUpdate {
         return RetStatus::Success();
     }
 
-    inline RetStatus AddInplaceUpdate(const VectorID& vector_id, ConstAddress vector_data,
+    inline RetStatus AddInplaceUpdate(const VectorID& vector_id, AddressToConst vector_data,
                                       RetStatus *result = nullptr, bool is_urgent = false) {
         FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
         FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
@@ -242,7 +310,7 @@ struct BatchVertexUpdate {
                     target_cluster._level, vector_id._level + 1);
         RetStatus rs = RetStatus::Success();
         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
             updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
             CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
@@ -276,7 +344,7 @@ struct BatchVertexUpdate {
                     target_cluster._level, vector_id._level + 1);
         RetStatus rs = RetStatus::Success();
         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
             updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
             CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
@@ -291,7 +359,7 @@ struct BatchVertexUpdate {
             return rs;
         }
 
-        updates[vector_id] = {.type = VERTEX_MIGRATE,
+        updates[vector_id] = {.type = VERTEX_MIGRATION_MOVE,
                               .is_urgent = is_urgent,
                               .vector_id = vector_id,
                               .result = result};
@@ -309,7 +377,7 @@ struct BatchVertexUpdate {
                     target_cluster._level, vector_id._level + 1);
         RetStatus rs = RetStatus::Success();
         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATE].find(vector_id) != updates[VERTEX_MIGRATE].end() ||
+            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
             updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
             CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,

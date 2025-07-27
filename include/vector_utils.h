@@ -41,7 +41,7 @@ public:
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: other=%p, this=%p, address=%p", &other, this, _data);
     }
 
-    Vector(ConstAddress other, uint16_t dim) : _data(other != nullptr ? malloc(dim * sizeof(VTYPE)) : nullptr),
+    Vector(AddressToConst other, uint16_t dim) : _data(other != nullptr ? malloc(dim * sizeof(VTYPE)) : nullptr),
                                                _delete_on_destroy(other != nullptr)
 #ifdef MEMORY_DEBUG
         , linkCnt(new std::atomic<uint64_t>(1))
@@ -71,7 +71,7 @@ public:
     }
 
     /*
-     * should not use ConstAddress as we would be able to change the data of that address.
+     * should not use AddressToConst as we would be able to change the data of that address.
      * The user should ensure that if the address is valid, it is not freed or deleted while
      * this vector(or other vectors) is linked to it.
      */
@@ -211,7 +211,7 @@ public:
         memcpy(_data, src._data, dim * sizeof(VTYPE));
     }
 
-    inline void CopyFrom(ConstAddress src, uint16_t dim) {
+    inline void CopyFrom(AddressToConst src, uint16_t dim) {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
         FatalAssert(src != INVALID_ADDRESS, LOG_TAG_VECTOR, "Source should not be invalid.");
 
@@ -222,7 +222,7 @@ public:
         return _data;
     }
 
-    inline ConstAddress GetData() const {
+    inline AddressToConst GetData() const {
         return _data;
     }
 
@@ -278,17 +278,21 @@ protected:
 TESTABLE;
 };
 
-struct VectorState {
-    uint8_t valid : 1; /* If 0 the vector either does not exists, is deleted, or is in middle of insertion */
-    /*
-     * If set to 1, it means that the vector is being moved and should not be read or deleted.
-     * When move is complete it will be set to 0 and valid bit will be unset.
-     */
-    uint8_t move : 1;
-    uint8_t unused : 6;
+union VectorState {
+    struct {
+        uint8_t valid : 1; /* If 0 the vector either does not exists, is deleted, or is in middle of insertion */
+        /*
+        * If set to 1, it means that the vector is being moved and should not be read or deleted.
+        * When move is complete it will be set to 0 and valid bit will be unset.
+        */
+        uint8_t move : 1;
+        uint8_t insertion : 1; /* If set to 1, the vector is in the middle of insertion and should not be read or deleted */
+        uint8_t unused : 5;
+    };
+    uint8_t raw;
 
     inline bool IsVisible() const {
-        return (((valid == 1) && (move == 0)) ? true : false);
+        return (((valid == 1) && (move == 0) && (insertion == 0)) ? true : false);
     }
 
     inline bool IsValid() const {
@@ -299,41 +303,37 @@ struct VectorState {
         return (move == 1 ? true : false);
     }
 
+    inline bool IsInserting() const {
+        return (insertion == 1 ? true : false);
+    }
+
     inline VectorState operator|(const VectorState& other) const {
-        VectorState state{0};
-        state.valid = valid | other.valid;
-        state.move = move | other.move;
+        VectorState state{raw | other.raw};
         return state;
     }
 
     inline VectorState& operator|=(const VectorState& other) {
-        valid |= other.valid;
-        move |= other.move;
+        raw |= other.raw;
         return *this;
     }
 
     inline VectorState operator&(const VectorState& other) const {
-        VectorState state{0};
-        state.valid = valid & other.valid;
-        state.move = move & other.move;
+        VectorState state{raw & other.raw};
         return state;
     }
 
     inline VectorState& operator&=(const VectorState& other) {
-        valid &= other.valid;
-        move &= other.move;
+        raw &= other.raw;
         return *this;
     }
 
     inline VectorState operator~() const {
-        VectorState state{0};
-        state.valid = ~valid;
-        state.move = ~move;
+        VectorState state{~raw};
         return state;
     }
 
     inline bool operator==(const VectorState& other) const {
-        return (valid == other.valid) && (move == other.move);
+        return (raw == other.raw);
     }
 
     inline bool operator!=(const VectorState& other) const {
@@ -356,33 +356,55 @@ struct VectorState {
         return state;
     }
 
+    inline static VectorState Insertion() {
+        VectorState state{0};
+        state.insertion = 1;
+        return state;
+    }
+
     inline String ToString() const {
-        return String("(valid=%d, move=%d)", valid, move);
+        return String("(valid=%d, move=%d, insertion=%d)", valid, move, insertion);
     }
 };
 
 struct ClusterEntry {
     std::atomic<VectorState> state;
-    VectorID id;
+    VectorID id; // should this also be atomic?
     char vector[];
+
+    inline void SanityCheck() const {
+        SanityCheck(state.load(), id);
+    }
+
+    inline static void SanityCheck(VectorState _state, VectorID _id) const {
+        UNUSED_VARIABLE(_state);
+        UNUSED_VARIABLE(copy);
+        FatalAssert(!(_state.IsValid()) || _id.IsValid(), LOG_TAG_CLUSTER,
+                    "VectorID is not valid when state is valid. state=%s, id=" VECTORID_LOG_FMT ", entry=%s",
+                    _state.ToString().ToCStr(), VECTORID_LOG(_id), ToString().ToCStr());
+        FatalAssert(!(_state.IsMoving()) || !(_state.IsInserting()), LOG_TAG_CLUSTER,
+                    "Vector cannot be both in the moving and insertion state at the same time! state=%s, id="
+                    VECTORID_LOG_FMT ", entry=%s",
+                    _state.ToString().ToCStr(), VECTORID_LOG(_id), ToString().ToCStr());
+        FatalAssert(!(_state.IsValid()) || !(_state.IsInserting()), LOG_TAG_CLUSTER,
+                    "Vector cannot be both valid and inserting at the same time! state=%s, id="
+                    VECTORID_LOG_FMT ", entry=%s",
+                    _state.ToString().ToCStr(), VECTORID_LOG(_id), ToString().ToCStr());
+        FatalAssert((_state.IsValid()) || !(_state.IsMoving()), LOG_TAG_CLUSTER,
+                    "Vector cannot move invalid vector! state=%s, id="
+                    VECTORID_LOG_FMT ", entry=%s",
+                    _state.ToString().ToCStr(), VECTORID_LOG(_id), ToString().ToCStr());
+    }
 
     inline bool IsValid() const {
         VectorState _state = state.load();
-        VectorID copy = id;
-        UNUSED_VARIABLE(copy);
-        FatalAssert(!(_state.IsValid()) || copy.IsValid(), LOG_TAG_CLUSTER,
-                    "VectorID is not valid when state is valid. state=%s, id=" VECTORID_LOG_FMT " entry=%s",
-                    _state.ToString().ToCStr(), VECTORID_LOG(copy), ToString().ToCStr());
+        SanityCheck(_state, id);
         return _state.IsValid();
     }
 
     inline bool IsVisible() const {
         VectorState _state = state.load();
-        VectorID copy = id;
-        UNUSED_VARIABLE(copy);
-        FatalAssert(!(_state.IsValid()) || copy.IsValid(), LOG_TAG_CLUSTER,
-                    "VectorID is not valid when state is valid. state=%s, id=" VECTORID_LOG_FMT " entry=%s",
-                    _state.ToString().ToCStr(), VECTORID_LOG(copy), ToString().ToCStr());
+        SanityCheck(_state, id);
         return _state.IsVisible();
     }
 
@@ -485,8 +507,8 @@ public:
                                          _version(version), _centroid_id(centroid_id),
                                          _min_size(min_size), _max_size(max_size),
                                          _dim(dimension), _collectable(0), _owner(cluster_owner),
-                                         _distributed_pin(num_dist_pins),
-                                         _size(0), _parent_id(INVALID_VECTOR_ID),
+                                         _distributed_pin(num_dist_pins), _real_size(0),
+                                         _reserved_size(0), _parent_id(INVALID_VECTOR_ID),
                                          _entry(ALLIGNEMENT(raw_header_bytes) + (void*)_data) {
         FatalAssert(num_dist_pins > 0, LOG_TAG_CLUSTER,
                     "Number of distributed pins should be greater than 0. num_dist_pins=%d", num_dist_pins);
@@ -549,7 +571,7 @@ public:
                     "Cluster owner is invalid. _owner=%hu", _owner);
         FatalAssert(IsComputeNode(_owner), LOG_TAG_CLUSTER,
                     "Cluster owner is not a compute node. _owner=%hu", _owner);
-        uint16_t size = _size.load();
+        uint16_t size = _real_size.load();
         if (check_min_size) {
             FatalAssert(size >= _min_size, LOG_TAG_CLUSTER,
                         "Cluster size(%hu) is less than minimum size(%hu).", size, _min_size);
@@ -558,16 +580,8 @@ public:
                     "Cluster size(%hu) is larger than maximum size(%hu).", size, _max_size);
         uint16_t real_size = 0;
         for (uint16_t i = 0; i < _max_size; ++i) {
-            if (_entry[i].IsVisible()) {
-                real_size++;
-            }
+            _entry[i].SanityCheck();
         }
-        if (check_min_size) {
-            FatalAssert(real_size >= _min_size, LOG_TAG_CLUSTER,
-                        "Cluster real size(%hu) is less than minimum size(%hu).", real_size, _min_size);
-        }
-        FatalAssert(real_size <= _max_size, LOG_TAG_CLUSTER,
-                    "Cluster real size(%hu) is larger than maximum size(%hu).", real_size, _max_size);
 #endif
     }
 
@@ -627,7 +641,7 @@ public:
 
     /* Should only be called when vertex is pinned */
     inline const ClusterEntry* FindEntry(VectorID id, bool onlyConsiderVisible = true) const {
-        uint16_t size = _size.load();
+        uint16_t size = _reserved_size.load();
         /* todo may need to fine tune so that if it is moving we return and don't move forward */
         for (uint16_t index = 0; index < size; ++index) {
             if ((onlyConsiderVisible ? _entry[index].state.load().IsVisible() :
@@ -642,7 +656,7 @@ public:
 
     /* Should only be called when vertex is pinned */
     inline ClusterEntry* FindEntry(VectorID id, bool onlyConsiderVisible = true) {
-        uint16_t size = _size.load();
+        uint16_t size = _reserved_size.load();
         /* todo may need to fine tune so that if it is moving we return and don't move forward */
         for (uint16_t index = 0; index < size; ++index) {
             if ((onlyConsiderVisible ? _entry[index].state.load().IsVisible() :
@@ -671,7 +685,7 @@ public:
     }
 
     inline uint16_t FilledSize() const {
-        return _size.load();
+        return _reserved_size.load();
     }
 
     /* Has to be called with exclusive lock held if you need accurate results.
@@ -682,7 +696,7 @@ public:
             size += (_entry[i].state.load().IsVisible() ? 1 : 0);
         }
 
-        size_t cur_size = _size.load();
+        size_t cur_size = _reserved_size.load();
         UNUSED_VARIABLE(cur_size);
         FatalAssert(size <= cur_size, LOG_TAG_CLUSTER, "Computed size(%lu) is larger than current size(%hu)",
                     size, cur_size);
@@ -695,11 +709,11 @@ public:
                    "EndEntryAddress=%p, ClusterHeaderBytes=%lu, TotalAllignedHeaderBytes=%lu,"
                    " TotalBytes=%lu, Version=%lu, SizeLimit=[%hu %hu], "
                    "Dim=%hu, CachedParentID=" VECTORID_LOG_FMT
-                   ", CentroidID=" VECTORID_LOG_FMT ", Size=%hu",
+                   ", CentroidID=" VECTORID_LOG_FMT ", ReservedSize=%hu, Size=%hhu, Owner=%hu",
                    this, _data, _entry, _entry + _max_size, sizeof(Cluster),
                    _header_bytes, _header_bytes + AllignedBytes(_dim, _max_size),
                    _version, _min_size, _max_size, _dim, VECTORID_LOG(_parent_id),
-                   VECTORID_LOG(_centroid_id), _size);
+                   VECTORID_LOG(_centroid_id), _reserved_size.load(), _real_size.load(), _owner);
         if (detailed) {
             for (uint16_t i = 0; i < _max_size; ++i) {
                 str += _entry[i].ToString(_dim);
@@ -727,6 +741,9 @@ public:
     std::atomic<uint16_t> _collectable;
     uint8_t _owner;
     std::atomic<uint8_t> _distributed_pin;
+    /* responsibility of the user may change if we only have the shared lock */
+    /* Is used to determine if merge/compaction is necessary */
+    std::atomic<uint16_t> _real_size;
     ClusterEntry * const _entry;
     // const DataType _vtype;
 
@@ -734,10 +751,10 @@ protected:
     uint16_t Reserve(uint16_t numVectors, uint16_t& offset) {
         FatalAssert(numVectors > 0, LOG_TAG_CLUSTER, "Cannot reserve 0 vectors.");
         offset = UINT16_MAX;
-        uint16_t cur_size = _size.load();
+        uint16_t cur_size = _reserved_size.load();
         while (cur_size < _max_size) {
             numVectors = std::min(numVectors, _max_size - cur_size);
-            if (_size.compare_exchange_strong(cur_size, cur_size + numVectors)) {
+            if (_reserved_size.compare_exchange_strong(cur_size, cur_size + numVectors)) {
                 offset = cur_size;
                 return numVectors;
             }
@@ -745,7 +762,7 @@ protected:
         return 0; /* Cluster is full */
     }
 
-    std::atomic<uint16_t> _size;
+    std::atomic<uint16_t> _reserved_size;
 
     char _data[];
 

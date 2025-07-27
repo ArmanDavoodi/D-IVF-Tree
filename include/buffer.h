@@ -4,14 +4,59 @@
 #include "interface/buffer.h"
 #include "interface/divftree.h"
 
+#include <memory>
+#include <atomic>
+
 namespace divftree {
 
-struct VectorInfo {
-    Address vector_address; // valid if not root: points to the vector data
-    Address cluster_address; // If it is a centroid -> is the address of the cluster with that id/ if a vector, address of the container leaf
+enum VersionUpdateType {
+    UPDATE_COMPACT, // compaction
+    UPDATE_MERGE, // merge and may also have compaction. parent was node ? with version
+    UPDATE_SPLIT, // split into nodes[] with versions[]
 
-    VectorInfo() : vector_address(INVALID_ADDRESS), cluster_address(INVALID_ADDRESS) {}
-    VectorInfo(Address data, Address cluster) : vector_address(data), cluster_address(cluster) {}
+    // Todo: should we even create new entries for these cases or should we just use pin to delete them?
+    UPDATE_RELOCATE, // migration to cluster id with version to cluster id with version
+    UPDATE_DELETE,
+
+    NUM_VERSION_UPDATE_TYPES
+}
+
+struct VersionUpdateInfo {
+    VersionUpdateType type;
+    std::experimental::atomic_shared_ptr<BufferVectorEntry> a;
+    union {
+
+        struct {
+            std::shared_ptr<BufferVectorEntry> parent; // new entry that is created after split/merge
+        } merge;
+
+        struct {
+            std::vector<std::shared_ptr<BufferVectorEntry>> vertices;
+        } split;
+
+        struct {
+            VectorID from_cluster_id; // cluster id from which the vector was migrated
+            VectorID to_cluster_id; // cluster id to which the vector was migrated
+        } relocate;
+    };
+}
+
+struct BufferVectorEntry {
+    const uint64_t version; // version of the vector
+    const std::atomic<Address> container_address; // valid if not root: the address of the cluster containing the vector
+    const std::atomic<uint16_t> entry_offset; // valid if not root: offset of the cluster entry in the vertex containing the vector
+    const Address cluster_address; // If it is a centroid -> is the address of the cluster with that id/ if a vector, address of the container leaf
+
+    /* We also need to know what happend in the previous version i.e if splitted to which nodes with which versions? if merged who was the parent and version */
+    std::atomic<BufferVectorEntry*> previous_version;
+    /* todo: should I use shared_ptr instead and do not have a list of previous versions? */
+    std::atomic<uint64_t> pin; // as long as this entry is the head of the list, it will have at least 1 pin
+    std::atomic<bool> deleted;
+
+    BufferVectorEntry(uint64_t ver, Address cont_addr, uint16_t entry_offs, Address clust_addr,
+                      BufferVectorEntry* prev_version = nullptr, bool empty = false)
+        : version(ver), container_address(cont_addr), entry_offset(entry_offs), cluster_address(clust_addr),
+          previous_version(prev_version), pin(1), deleted(empty) {}
 };
 class BufferManager : public BufferManagerInterface {
 // TODO: reuse deleted IDs
@@ -115,7 +160,7 @@ public:
                     "last level cannot be empty");
         VectorID _id = NextID(directory.size());
         directory.emplace_back();
-        directory[_id._level].emplace_back(INVALID_ADDRESS, INVALID_ADDRESS);
+        directory[_id._level].emplace_back(nullptr);
         return _id;
     }
 
@@ -126,19 +171,14 @@ public:
                     level, directory.size());
         FatalAssert(((level == 0) || (!directory[level - 1].empty())), LOG_TAG_BUFFER, "last level cannot be empty");
         VectorID _id = NextID(level);
-        directory[level].emplace_back(INVALID_ADDRESS, INVALID_ADDRESS);
+        directory[level].emplace_back(nullptr);
         return _id;
     }
 
-    RetStatus UpdateVectorAddress(VectorID id, Address vector_address) {
+    RetStatus UpdateVectorInfo(VectorID id, Address cont_addr, Address entry_addr, Address clust_addr) {
         RetStatus rs = RetStatus::Success();
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
-        // TODO: reconsider when adding merge logic
-        FatalAssert(vector_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Invalidating vector address. VectorID=" VECTORID_LOG_FMT, VECTORID_LOG(id));
-        FatalAssert(InBuffer(id), LOG_TAG_BUFFER, "Vector does not exist in the buffer. VectorID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(id));
-        directory[id._level][id._val].vector_address = vector_address;
+        directory[id._level][id._val].compare_exchange_strong()
         return rs;
     }
 
@@ -228,7 +268,7 @@ protected:
         return _id;
     }
 
-    std::vector<std::vector<VectorInfo>> directory;
+    std::vector<std::vector<std::atomic<BufferVectorEntry*>>> directory;
 
 TESTABLE;
 };
