@@ -7,123 +7,144 @@
 #include <set>
 #include <vector>
 #include <shared_mutex>
+#include <atomic>
+#include <mutex>
 
 #include "debug.h"
 
+#include "utils/thread.h"
+
 union SlotFlag {
-    char flag; // 1 byte for the flag
     struct {
-        uint8_t need_call_destructor : 1; // 1 bit for destructor call flag
-        uint8_t unused : 7; // 7 bits unused
+        uint8_t is_free : 1; // if the slot is free
+        uint8_t marked_by_gc : 1; // if the slot is marked by garbage collector
+        uint8_t need_call_destructor : 1; // if the object needs to call destructor
+        uint8_t reserved : 5; // reserved for future use
     };
+    uint8_t value;
+
+    SlotFlag() : value(0) {}
+
+    inline void SetFree() {
+        is_free = 1;
+    }
+
+    inline void SetUsed() {
+        is_free = 0;
+    }
+
+    inline void SetMarkedByGC() {
+        marked_by_gc = 1;
+    }
+
+    inline void ClearMarkedByGC() {
+        marked_by_gc = 0;
+    }
+
+    inline void SetNeedCallDestructor() {
+        need_call_destructor = 1;
+    }
+
+    inline void ClearNeedCallDestructor() {
+        need_call_destructor = 0;
+    }
+
+    inline void Clear() {
+        value = 0;
+    }
 };
 
-template<size_t slot_size>
-struct MemoryChunk {
-    const size_t num_slots;
-    char data[];
-    /* Before each object we should have 1 byte flag which indicates that we have to call destructor or not */
-
-    /* the user should make sure the data is alligned */
-    static inline MemoryChunk<slot_size>* CreateNewChunk(size_t slots) {
-        size_t bytes = sizeof(MemoryChunk<slot_size>) + slots * (slot_size + 1);
-        MemoryChunk<slot_size>* new_chunk = reinterpret_cast<MemoryChunk<slot_size>*>(std::malloc(bytes));
-        if (!new_chunk) {
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_MEMORY, "Failed to allocate memory chunk of size %zu", bytes);
-        }
-        memset(new_chunk, 0, bytes);
-        new (new_chunk) MemoryChunk<slot_size>(slots);
-        return new_chunk;
-    }
-
-    ~MemoryChunk() = default;
-
-    inline void* GetSlot(size_t offset) {
-        return reinterpret_cast<void*>(data + offset * (slot_size + 1) + 1);
-    }
-
-    inline SlotFlag* GetSlotFlag(size_t offset) {
-        return reinterpret_cast<SlotFlag*>(data + offset * (slot_size + 1));
-    }
-
-protected:
-    MemoryChunk(size_t sz) : size(sz) {}
+struct Slot {
+    SlotFlag flag; // flags for the slot
+    char data[]; // pointer to the allocated memory
 };
 
 struct SlotRange {
-    size_t start;
-    size_t end;
+    std::atomic<size_t> startOffset;
+    const size_t endOffset; // exclusive
+
+    SlotRange* next; // pointer to the next range in the linked list
 };
 
-template<typename T, size_t size = sizeof(T)>
+struct SlotList {
+    std::atomic<SlotRange*> head;
+    std::atomic<SlotRange*> tail;
+};
+
+/* Todo: implement an efficent arena later  */
+template<typename T, size_t DataSize = sizeof(T)>
 class MemoryPool {
+
+constexpr SLOT_SIZE = DataSize + sizeof(SlotFlag);
+
 public:
-    MemoryPool(size_t initial_slots = 1024) : num_free_slots(0),
-                                              last_chunk_size(std::min(initial_slots, MAX_SLOTS_PER_CHUNK)),
-                                              num_total_slots(0) {
-        if (initial_slots == 0) {
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_MEMORY, "Memory pool initialized with zero slots.");
-        }
-        size_t num_chunks = initial_slots / MAX_SLOTS_PER_CHUNK + (initial_slots % MAX_SLOTS_PER_CHUNK != 0);
-        for (size_t i = 0; i < num_chunks; i++) {
-            Expand(last_chunk_size, MAX_SLOTS_PER_CHUNK * i);
-        }
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Memory pool initialized with %zu slots.", num_total_slots);
-    }
 
     ~MemoryPool() {
         std::unique_lock lock(mutex);
-        for (auto& chunk : chunks) {
-            if (chunk != nullptr) {
-                for (size_t i = 0; i < chunk->num_slots; i++) {
-                    if (chunk->GetSlotFlag(i)->need_call_destructor == 1) {
-                        T* obj = reinterpret_cast<T*>(chunk->GetSlot(i));
-                        obj->~T(); // Call destructor if needed
-                    }
+        SlotRange* current = free_slots.head.load(std::memory_order_relaxed);
+        while (current != nullptr) {
+            for (size_t i = current->startOffset.load(std::memory_order_relaxed); i < current->endOffset; ++i) {
+                Slot& slot = *(Slot*)(_data + (SLOT_SIZE * i));
+                if (slot.flag.need_call_destructor) {
+                    (reinterpret_cast<T*>(slot.data))->~T();
                 }
-                std::free(chunk);
-                chunk = nullptr;
             }
+            free_slots.head.store(current->next, std::memory_order_relaxed);
+            delete current;
+            current = free_slots.head.load(std::memory_order_relaxed);
         }
-        chunks.clear();
-        free_slots.clear();
+
+        std::free(_data);
         CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Memory pool destroyed, all chunks freed.");
-    }
-
-    inline void Expand(size_t slots_needed, size_t num_current_slots) {
-        std::unique_lock lock(mutex);
-
-        if (slots_needed == 0 || slots_needed > MAX_SLOTS_PER_CHUNK) {
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_MEMORY, "Cannot expand memory pool with %zu slots, max is %zu.", slots_needed, MAX_SLOTS_PER_CHUNK);
-        }
-
-        if (num_current_slots < num_free_slots.load()) {
-            return; // some memory was allocated. retry and check if more is needed.
-        }
-
-        for (size_t i = 0; i < slots_needed; i++) {
-            MemoryChunk<T>* new_chunk = MemoryChunk<T>::CreateNewChunk(slots_needed);
-            chunks.insert(new_chunk);
-            free_slots.push_back({num_total_slots, num_total_slots + slots_needed - 1});
-            num_total_slots += slots_needed;
-            num_free_slots.fetch_add(slots_needed);
-        }
     }
 
     inline T* Malloc() {
         std::shared_lock lock(mutex);
-        while (num_free_slots.load() == 0) {
-            lock.unlock();
-            Expand(std::min(last_chunk_size * GROWTH_RATE, MAX_SLOTS_PER_CHUNK), num_free_slots.load());
-            lock.lock();
+        SlotRange* current = free_slots.head.load(std::memory_order_acquire);
+        while (current != nullptr) {
+            size_t offset = current->startOffset.load(std::memory_order_acquire);
+            if (offset >= current->endOffset) {
+                SlotRange* old = current;
+                do {
+                    current = free_slots.head.load(std::memory_order_acquire); // move to the next range
+                    DIVFTREE_YIELD();
+                    DIVFTREE_YIELD();
+                    DIVFTREE_YIELD();
+                } while (current == old);
+                continue;
+            }
+            while (!current->startOffset.compare_exchange_strong(offset, offset + 1, std::memory_order_acq_rel)) {
+                if (offset >= current->endOffset) {
+                    break; // no more slots in this range
+                }
+            }
+
+            if (offset == current->endOffset - 1) {
+                free_slots.head.store(current->next, std::memory_order_release);
+                do {
+                    current->next = garbage_ptrs.head.load(std::memory_order_relaxed);
+                } while(!garbage_ptrs.head.compare_exchange_strong(current->next, current, std::memory_order_acq_rel));
+            }
+
+            if (offset < current->endOffset) {
+                Slot& slot = *(Slot*)(_data + (SLOT_SIZE * offset));
+                FatalAssert(slot.flag.is_free, LOG_TAG_MEMORY, "Slot is not free when trying to allocate memory.");
+                slot.flag.Clear();
+                slot.flag.SetUsed();
+                return reinterpret_cast<T*>(slot.data);
+            }
+            current = free_slots.head.load(std::memory_order_acquire);
         }
+
+        return nullptr;
     }
 
     inline T* MallocZero() {
 
     }
 
-    inline T* New() {
+    template<typename... Args>
+    inline T* New(Args&&... args) {
 
     }
 
@@ -133,23 +154,12 @@ public:
     inline void Delete(T* ptr) {
     }
 
-    inline bool TryFree(T* ptr) {
-    }
-
-    inline bool TryDelete(T* ptr) {
-    }
-
 protected:
-    constexpr size_t MAX_SLOTS_PER_CHUNK = 8192;
-    constexpr size_t GROWTH_RATE = 2;
-
-    std::shared_mutex mutex;
-    std::set<MemoryChunk<T>*> chunks;
-    /* Todo: use map if it uses too much memory */
-    std::vector<SlotRange> free_slots;
-    std::atomic<size_t> num_free_slots;
-    std::atomic<size_t> last_chunk_size;
-    size_t num_total_slots;
+    SlotList free_slots;
+    SlotList garbage_ptrs;
+    std::shared_mutex mutex; // for thread-safe operations
+    const size_t num_slots;
+    void* _data;
 };
 
 
