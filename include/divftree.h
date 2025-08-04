@@ -58,7 +58,7 @@
   * 1) ReadCluster&Pin(Id):
   *   1.1) BufferReadCluster&Pin(Id):
   *     1.1.1) read Directory[level][val] -> BufferEntry
-  *     1.1.2) FAA(ReaderPin, 1)
+  *     1.1.2) FAA(ReaderPin, 1) // what the ptr changes just after our cas? -> we can(?) use cas in unpin instead and use FAA here on reader pin but adds contention -> if not we can use cas for incrementing and decrementing only the pin?
   *     1.1.3) Return BufferEntry->ClusterPtr
   *
   * 2) ReadCluster&Lock(Id, LockType, bool NoRetry):
