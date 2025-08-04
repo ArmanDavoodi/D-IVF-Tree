@@ -40,6 +40,99 @@
  *
  */
 
+ /*
+  * Data Structures:
+  * 1) BufferEntry:
+  *     1.1) SXLock
+  *     1.1) ReaderPin: 64bit
+  *     1.2) Ptr: Cluster* -> 64bit
+  *     1.3) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
+  *             has a 32bit head and a 32bit tail. when a new element is added,
+  *             if tail+1 == head(list is full), both head and tail are advanced by 1
+  *             and oldest version is overwritten. else tail is advanced by 1.
+  *
+  */
+
+ /*
+  * Single Node Operations:
+  * 1) ReadCluster&Pin(Id):
+  *   1.1) BufferReadCluster&Pin(Id):
+  *     1.1.1) read Directory[level][val] -> BufferEntry
+  *     1.1.2) FAA(ReaderPin, 1)
+  *     1.1.3) Return BufferEntry->ClusterPtr
+  *
+  * 2) ReadCluster&Lock(Id, LockType, bool NoRetry):
+  *     2.1) BufferReadCluster&Lock(Id, LockType):
+  *         2.1.1) read Directory[level][val] -> BufferEntry
+  *        2.1.2) if NoRetry: Lock(BufferEntry->Lock, LockType) and return BufferEntry->ClusterPtr
+  *         2.1.3) bool blocked = !(TryLock(BufferEntry->Lock, LockType))
+  *         2.1.4) if blocked -> wait for lock + unlock then return retry
+  *     return BufferEntry->ClusterPtr
+  *
+  * 2) BufferUnpin(cluster):
+  *     2.1) Read Directory[cluster.id.level][cluster.id.val] -> BufferEntry
+  *         2.1.1) if CAS(<Version,ReaderPin> -> <Version,ReaderPin-1>) return
+  *         2.1.2) if Version has changed -> goto 2.2(check version first!)
+  *         2.1.3) if ReadPin has changed -> goto 2.1.1
+  *     2.2) pin = FAS(cluster->localPin, 1)
+  *          // local pin is 0 by default unless this version is being discarded. However, if we
+  *         // first use double cas as atomic exchange <version, pin, ptr> to <version+1, 0(?), newptr> then
+  *         // we will use FAA to add the old pin to the new pin and if it becoms 0 then the insertion deletes
+  *        // the old cluster. Therefore 2.2 can give us a negative/Really high positive pin.
+  *        // clusterptr is only changed when the thread has exclusive lock on the cluster.
+  *     2.3) if pin == 0 delete cluster
+  *
+  * 3) SearchCluster(q, k):
+  *   3.1) read cluster size Atomic
+  *   3.2) for i in [0, size):
+  *     3.2.1) if vector[i] is not visible continue
+  *     3.2.2) res += <vector[i], dist(q, vector[i])>
+  *     3.2.3) if res.size() > k -> pop the least similar vector
+  *   3.3) return res
+  *
+  * 4) Insert Vector:
+  *    4.1) Layers = [[<atomic read rootId, 0>]]
+  *    4.2) CurrentLayer = 0
+  *    4.3) while Layers[CurrentLayer] > LeafLevel:
+  *        4.3.1) Layers[CurrentLayer + 1] = []
+  *        4.3.2) for each id in Layers[CurrentLayer]:
+  *             4.3.2.1) c = ReadCluster&Pin(id)
+  *             4.3.2.2) if c == nullptr continue // can this happen anymore?
+  *             4.3.2.3) Layers[CurrentLayer + 1] += c.Search(q, k) -> limit to k -> k = 1 if next layer is leaf
+  *             4.3.2.4) BufferUnpin(c)
+  *        4.3.3) if Layers[CurrentLayer + 1].size() == 0
+  *             4.3.3.1) if currentLayer != 0 -> Layers[CurrentLayer] = [] & currentLayer = currentLayer - 1
+  *             4.3.3.2) goto 4.3.2
+  *        4.3.4) currentLayer++
+  *    4.4) Layers[CurrentLayer].size == 1
+  *    4.5) c = ReadCluster&Lock(Layers[CurrentLayer][0].id, shared, RetryIfNeeded) // reconsider in distributed case
+  *    4.6) if c == retry
+  *         4.6.1) if currentLayer != 0 -> Layers[CurrentLayer] = [] & currentLayer = currentLayer - 1
+  *         4.6.2) goto 4.3
+  *    4.7) res = c.insert(q)
+  *    4.8) if res == NEED_SPLIT -> Compaction&SplitIfNeeded&Insert(c, q) and return
+  *    4.9) if res == FULL -> sleep on condition variable until split is done then goto 4.6.1
+  *    4.10) retrun
+  *
+  * 5) Insert Vertex:
+  * 
+  * 6) Compaction&SplitIfNeeded&Insert:
+  * 
+  * 7) Migrate Vector:
+  * 
+  * 8) Delete Vector(?):
+  * 
+  * 9) Inplace Update Vector:
+  * 
+  * 10) Migrate Vertex:
+  * 
+  * 11) Delete Vertex:
+  * 
+  * 12) Inplace Update Vertex:
+  * 
+  * 13) ANN:
+  */
+
 namespace divftree {
 
 class DIVFTreeVertex : public DIVFTreeVertexInterface {
