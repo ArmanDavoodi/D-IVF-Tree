@@ -42,11 +42,18 @@
 
  /*
   * Data Structures:
+  * // May have a differnet BufferEntry for non-centroid vectors as they do not need spinlock, readerPin, clusterPtr, ...
   * 1) BufferEntry:
   *     1.1) SXLock
-  *     1.1) ReaderPin: 64bit
-  *     1.2) Ptr: Cluster* -> 64bit
-  *     1.3) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
+  *     1.2) CondVar
+  *     1.3) Container: VectorID -> 64bit
+  *     1.4) EntryOffset: 16bit
+  *     1.5) State: 16bit? -> same as the state in the cluster
+  *     1.5) ContainerVersion 32bit
+  *     1.6) SXSpinLock
+  *     1.7) ReaderPin: 64bit
+  *     1.8) Ptr: Cluster* -> 64bit
+  *     1.9) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
   *             has a 32bit head and a 32bit tail. when a new element is added,
   *             if tail+1 == head(list is full), both head and tail are advanced by 1
   *             and oldest version is overwritten. else tail is advanced by 1.
@@ -55,82 +62,107 @@
 
  /*
   * Single Node Operations:
-  * 1) ReadCluster&Pin(Id):
+  * 1) ReadCluster(Id):
   *   1.1) BufferReadCluster&Pin(Id):
   *     1.1.1) read Directory[level][val] -> BufferEntry
-  *     1.1.2) FAA(ReaderPin, 1) // what the ptr changes just after our cas? -> we can(?) use cas in unpin instead and use FAA here on reader pin but adds contention -> if not we can use cas for incrementing and decrementing only the pin?
-  *     1.1.3) Return BufferEntry->ClusterPtr
+  *     1.1.2) SXSpinLock(shared)
+  *     1.1.2) FAA(ReaderPin, 1)
+  *     1.1.3) cluster = BufferEntry->ClusterPtr
+  *     1.1.4) SXSpinUnlock()
+  *     1.1.5) Return cluster
   *
-  * 2) ReadCluster&Lock(Id, LockType, bool NoRetry):
-  *     2.1) BufferReadCluster&Lock(Id, LockType):
+  * 2) ReadBuffer(Id, LockType, bool NoRetry):
+  *     2.1) BufferReadBuffer(Id, LockType):
   *         2.1.1) read Directory[level][val] -> BufferEntry
   *        2.1.2) if NoRetry: Lock(BufferEntry->Lock, LockType) and return BufferEntry->ClusterPtr
   *         2.1.3) bool blocked = !(TryLock(BufferEntry->Lock, LockType))
   *         2.1.4) if blocked -> wait for lock + unlock then return retry
-  *     return BufferEntry->ClusterPtr
+  *     return BufferEntry
   *
-  * 2) BufferUnpin(cluster):
-  *     2.1) Read Directory[cluster.id.level][cluster.id.val] -> BufferEntry
-  *         2.1.1) if CAS(<Version,ReaderPin> -> <Version,ReaderPin-1>) return
-  *         2.1.2) if Version has changed -> goto 2.2(check version first!)
-  *         2.1.3) if ReadPin has changed -> goto 2.1.1
-  *     2.2) pin = FAS(cluster->localPin, 1)
-  *          // local pin is 0 by default unless this version is being discarded. However, if we
-  *         // first use double cas as atomic exchange <version, pin, ptr> to <version+1, 0(?), newptr> then
-  *         // we will use FAA to add the old pin to the new pin and if it becoms 0 then the insertion deletes
-  *        // the old cluster. Therefore 2.2 can give us a negative/Really high positive pin.
-  *        // clusterptr is only changed when the thread has exclusive lock on the cluster.
-  *     2.3) if pin == 0 delete cluster
+  * 3) Buffer::UpgradeLockFromSharedToExclusive(cluster):
+  *     3.1) BufferEntry = Directory[cluster->centroid_id.level][cluster->centroid_id.val]
+  *     // there should already be a flag set to one which indicates that a change is in progress
+  *     3.2) BufferEntry.Unlock()
+  *     3.3) BufferEntry.Lock(SX_EXCLUSIVE)
   *
-  * 3) SearchCluster(q, k):
-  *   3.1) read cluster size Atomic
-  *   3.2) for i in [0, size):
-  *     3.2.1) if vector[i] is not visible continue
-  *     3.2.2) res += <vector[i], dist(q, vector[i])>
-  *     3.2.3) if res.size() > k -> pop the least similar vector
-  *   3.3) return res
+  * 2) ClusterUnpin(cluster):
+  *     2.1) pin = FAS(cluster->localPin, 1) // different from bufferEntry ReaderPin
+  *     2.2) if pin == 0 delete cluster
   *
-  * 4) Insert Vector:
-  *    4.1) Layers = [[<atomic read rootId, 0>]]
-  *    4.2) CurrentLayer = 0
-  *    4.3) while Layers[CurrentLayer] > LeafLevel:
-  *        4.3.1) Layers[CurrentLayer + 1] = []
-  *        4.3.2) for each id in Layers[CurrentLayer]:
-  *             4.3.2.1) c = ReadCluster&Pin(id)
-  *             4.3.2.2) if c == nullptr continue // can this happen anymore?
-  *             4.3.2.3) Layers[CurrentLayer + 1] += c.Search(q, k) -> limit to k -> k = 1 if next layer is leaf
-  *             4.3.2.4) BufferUnpin(c)
-  *        4.3.3) if Layers[CurrentLayer + 1].size() == 0
-  *             4.3.3.1) if currentLayer != 0 -> Layers[CurrentLayer] = [] & currentLayer = currentLayer - 1
-  *             4.3.3.2) goto 4.3.2
-  *        4.3.4) currentLayer++
-  *    4.4) Layers[CurrentLayer].size == 1
-  *    4.5) c = ReadCluster&Lock(Layers[CurrentLayer][0].id, shared, RetryIfNeeded) // reconsider in distributed case
-  *    4.6) if c == retry
-  *         4.6.1) if currentLayer != 0 -> Layers[CurrentLayer] = [] & currentLayer = currentLayer - 1
-  *         4.6.2) goto 4.3
-  *    4.7) res = c.insert(q)
-  *    4.8) if res == NEED_SPLIT -> Compaction&SplitIfNeeded&Insert(c, q) and return
-  *    4.9) if res == FULL -> sleep on condition variable until split is done then goto 4.6.1
-  *    4.10) retrun
+  * 3) Buffer::BufferUnlock(cluster):
+  *     3.1) BufferEntry = Directory[cluster->centroid_id.level][cluster->centroid_id.val]
+  *     3.2) if lockType=exclusive -> Unset MajorUpdateIPFlag -> condVar.signal_all
+  *     3.3) Unlock(BufferEntry->Lock)
   *
-  * 5) Insert Vertex:
-  * 
+  * 4) SearchCluster(q, k):
+  *   4.1) read cluster size Atomic
+  *   4.2) for i in [0, size):
+  *     4.2.1) if vector[i] is not visible continue
+  *     4.2.2) res += <vector[i], dist(q, vector[i])>
+  *     4.2.3) if res.size() > k -> pop the least similar vector
+  *   4.3) return res
+  *
+  * 5) Insert Vector:
+  *    5.1) Layers = [[<atomic read rootId, 0>]]
+  *    5.2) CurrentLayer = 0
+  *    5.3) while Layers[CurrentLayer] > LeafLevel:
+  *        5.3.1) Layers[CurrentLayer + 1] = []
+  *        5.3.2) for each id in Layers[CurrentLayer]:
+  *             5.3.2.1) c = ReadCluster&Pin(id)
+  *             5.3.2.2) if c == nullptr continue // can this happen anymore?
+  *             5.3.2.3) Layers[CurrentLayer + 1] += c.Search(q, k) -> limit to k -> k = 1 if next layer is leaf
+  *             5.3.2.4) ClusterUnpin(c)
+  *        5.3.3) if Layers[CurrentLayer + 1].size() == 0
+  *             5.3.3.1) if currentLayer != 0 -> Layers[CurrentLayer] = [] & currentLayer = currentLayer - 1
+  *             5.3.3.2) goto 5.3.2
+  *        5.3.4) currentLayer++
+  *    5.4) Layers[CurrentLayer].size == 1
+  *    5.5) c = ReadBuffer(Layers[CurrentLayer][0].id, shared, RetryIfNeeded) // reconsider in distributed case
+  *    5.6) if c == retry // or maybe check the version log to see what happend and act accordingly
+  *         5.6.1) if currentLayer != 0 -> Layers[CurrentLayer] = [] & currentLayer = currentLayer - 1
+  *         5.6.2) goto 5.3.2
+  *    5.7) res = c.insert(q) and create their bufferEntry
+  *    5.8) if res == NEED_SPLIT -> Compaction&SplitIfNeeded&Insert(c, q) and return
+  *    5.9) if res == FULL -> sleep on condition variable until split is done then unlock and goto 5.6.1
+  *    5.10) c.Unlock()
+  *    5.11) return
+  *
   * 6) Compaction&SplitIfNeeded&Insert:
+  *    6.1) BufferUpgradeLockFromSharedToExclusive()
+  *    6.2) if reservedSize(max_size) - real_size + pendingInserts.size < 2 * min_size -> compaction
+  *    6.3) else Split
+  *    6.4) BufferUnlock()
+  *
+  * 7) Compaction:
+  *     7.1) newCluster = new cluster(version++)
+  *     7.2) for i in [0, filled_size):
+  *         7.2.1) if vector[i] is not valid -> continue
+  *         7.2.2) newCluster.insert(vector[i]) && directory[vector[i]].atomicStore64(EntryOffset, containerVersion)
+  *     7.3) for newVectors -> cluster.insert(vectors) and update their bufferEntry
+  *     7.4) Unlock()
+  *
+  * 8) Split:
+  *     8.1) newClusters = clustering(c, newVectors)
+  *     8.2) parent = cluster.parent, parentVersion = cluster.parent.version // from bufferEntry both in one atomicLoad128
+  *     8.3) ReadParentBuffer(shared) -> if blocked go to 8.2
+  *     8.4) if (parent or version did not match or vector was not there unlock and go to 8.2)
+  *     8.5) Change selfState in parent to SPLIT_IP -> if failed -> meaning that a migration is happening and we have tp wait for it but it can take a lot of time so spinning should not be an option?
+  *     8.5) Reserve enough space in parent for all new clusters
+  *     8.6) if returned FULL -> Unlock -> waitOnCondVar -> Check Log to see what happened -> if 
   * 
-  * 7) Migrate Vector:
-  * 
-  * 8) Delete Vector(?):
-  * 
-  * 9) Inplace Update Vector:
-  * 
-  * 10) Migrate Vertex:
-  * 
-  * 11) Delete Vertex:
-  * 
-  * 12) Inplace Update Vertex:
-  * 
-  * 13) ANN:
+  * 9) Migrate Vector:
+  *
+  * 10) Delete Vector(?):
+  *
+  * 11) Inplace Update Vector:
+  *
+  * 12) Migrate Vertex:
+  *
+  * 13) Delete Vertex:
+  *
+  * 14) Inplace Update Vertex:
+  *
+  * 15) ANN:
   */
 
 namespace divftree {
