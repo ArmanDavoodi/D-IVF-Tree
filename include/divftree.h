@@ -144,13 +144,23 @@
   * 8) Split:
   *     8.1) newClusters = clustering(c, newVectors)
   *     8.2) parent = cluster.parent, parentVersion = cluster.parent.version // from bufferEntry both in one atomicLoad128
-  *     8.3) ReadParentBuffer(shared) -> if blocked go to 8.2
+  *     8.3) ReadParentBuffer(shared) -> if blocked reread cluster parent and parent version and if did not match unlock and reread the new parent
   *     8.4) if (parent or version did not match or vector was not there unlock and go to 8.2)
-  *     8.5) Change selfState in parent to SPLIT_IP -> if failed -> meaning that a migration is happening and we have tp wait for it but it can take a lot of time so spinning should not be an option?
+  *     // assume that during migration, both self and parent are locked in shared mode so we should not see migration state at this point as we have exclusive lock on self and shared on parent
   *     8.5) Reserve enough space in parent for all new clusters
-  *     8.6) if returned FULL -> Unlock -> waitOnCondVar -> Check Log to see what happened -> if 
+  *     8.6) if returned FULL -> UnlockParent -> waitOnCondVar -> Check Log to see what happened -> if compaction go ahead, if splitted -> check which of the newly splitted or best suitted for being parent of each new cluster
+  *     8.7) if returned NEED_SPLIT -> Compaction&SplitIfNeeded&Insert and return
+  *     8.8) Insert and unlock and return
   * 
-  * 9) Migrate Vector:
+  * 9) Migrate Vector:(this is vertex)
+  *     9.1) ReadBufferEntry(vector.id, shared)
+  *     9.2) GetParent() -> retry if shared lock on parent failed and see if our local parent has changed
+  *     9.3) change state to M. Unlock parent
+  *     9.4) ReadBuffer(target, shared)
+  *     9.5) target.insert()
+  *     9.6) unlock target
+  *     9.7) ReadParent() -> change state to invalid
+  *     9.8) unlock self
   *
   * 10) Delete Vector(?):
   *
