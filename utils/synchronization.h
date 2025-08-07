@@ -111,6 +111,123 @@ protected:
     std::atomic<bool> _signal;
 };
 
+class SXSpinLock {
+public:
+    SXSpinLock() : _mode(SX_SHARED), _lock{0} {}
+    ~SXSpinLock() = default;
+
+    void Lock(LockMode mode) {
+        do {
+            while (_lock._data._exclusive_flag.load(std::memory_order_acquire) == LOCKED) {
+                DIVFTREE_YIELD();
+            }
+
+            if (mode == SX_SHARED) {
+                non_atomic_lock res{0};
+                res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
+                if (res._data._exclusive_flag == LOCKED) {
+                    _lock._counter.fetch_sub(1, std::memory_order_release);
+                    continue;
+                }
+                FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+                break;
+            }
+            else {
+                non_atomic_lock expected{0};
+                if (!_lock._data._exclusive_flag.compare_exchange_strong(expected._data._exclusive_flag,
+                                                                         LOCKED, std::memory_order_seq_cst)) {
+                    continue;
+                }
+
+                while (_lock._data._shared_counter.load(std::memory_order_acquire) > 0) {
+                    DIVFTREE_YIELD();
+                }
+                FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+                _mode = SX_EXCLUSIVE;
+                break;
+            }
+        } while(true);
+    }
+
+    void Unlock() {
+        if (_mode == SX_SHARED) {
+            FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) > 0,
+                        LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
+            _lock._data._shared_counter.fetch_sub(1, std::memory_order_release);
+        } else {
+            FatalAssert(_mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
+            FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) == 0,
+                        LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when there are shared holders!");
+            FatalAssert(_lock._data._exclusive_flag.load(std::memory_order_acquire) == LOCKED,
+                        LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
+            _mode = SX_SHARED;
+            _lock._data._exclusive_flag.store(0, std::memory_order_release);
+        }
+    }
+
+    /* May return false negative for exclusive lock as we might cas sooner than a FAA but see the result of FAA */
+    bool TryLock(LockMode mode) {
+        if (mode == SX_SHARED) {
+            non_atomic_lock res{0};
+            res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
+            if (res._data._exclusive_flag == LOCKED) {
+                _lock._counter.fetch_sub(1, std::memory_order_release);
+                return false;
+            }
+            FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+            return true;
+        }
+        else {
+            non_atomic_lock expected{0};
+            if (!_lock._data._exclusive_flag.compare_exchange_strong(expected._data._exclusive_flag,
+                                                                        LOCKED, std::memory_order_seq_cst)) {
+                return false;
+            }
+
+            if (_lock._data._shared_counter.load(std::memory_order_acquire) > 0) {
+                _lock._data._exclusive_flag.store(0, std::memory_order_release);
+                return false;
+            }
+
+            FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+            _mode = SX_EXCLUSIVE;
+            return true;
+        }
+    }
+
+    /* better naming */
+    bool LockWithBlockCheck(LockMode mode) {
+        bool blocked = !(TryLock(mode));
+        if (blocked) {
+            Lock(mode);
+        }
+        return blocked;
+    }
+
+    inline String ToString() const {
+        return String("<LockMode=%s, SharedHolders=%u>",
+                      LockModeToString(_mode).ToCStr(), _lock._data._shared_counter.load());
+    }
+protected:
+    constexpr static uint32_t LOCKED = INT32_MIN;
+    LockMode _mode;
+
+    union non_atomic_lock {
+        struct {
+            uint32_t _exclusive_flag;
+            uint32_t _shared_counter;
+        } _data;
+        uint64_t _counter;
+    };
+    union {
+        struct {
+            std::atomic<uint32_t> _exclusive_flag;
+            std::atomic<uint32_t> _shared_counter;
+        } _data;
+        std::atomic<uint64_t> _counter;
+    } _lock;
+};
+
 template<LockMode mode>
 class LockWrapper {
 public:
