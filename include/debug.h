@@ -264,6 +264,9 @@ using thread_id = unsigned long;
 #define THREAD_ID ((divftree::thread_id)(OS_THREAD_ID))
 #define DIVF_THREAD_ID ((const divftree::DIVFThreadID)(_cur_thread_id))
 
+#define TYPE_ALIGNED(ptr, alignment) \
+    ((((uintptr_t)(ptr)) % (alignment)) == 0)
+
 struct Log_Msg {
     char *_msg = nullptr;
 

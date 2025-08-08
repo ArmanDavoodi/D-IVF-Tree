@@ -13,6 +13,109 @@
 
 namespace divftree {
 
+// Atomic compare_exchange (void* API):
+//   if (*dest == *expected) { *dest = *desired; return true; }
+//   else { *expected = observed; return false; }
+/* Todo: is not working and has bugs!!! */
+inline bool compare_exchange128(void* dest, void* expected, const void* desired) {
+    FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(desired, 16), LOG_TAG_BASIC, "Desired pointer is not 16-byte aligned");
+
+#if HAVE_CMPXCHG16B
+    uint64_t exp_lo = *(reinterpret_cast<const uint64_t*>(expected) + 0);
+    uint64_t exp_hi = *(reinterpret_cast<const uint64_t*>(expected) + 1);
+    uint64_t des_lo = *(reinterpret_cast<const uint64_t*>(desired) + 0);
+    uint64_t des_hi = *(reinterpret_cast<const uint64_t*>(desired) + 1);
+
+    unsigned char success;
+    asm volatile(
+        "lock cmpxchg16b %1\n\t"
+        "setz %0"
+        : "=q"(success), "+m"(*(char(*)[16])dest), "+a"(exp_lo), "+d"(exp_hi)
+        : "b"(des_lo), "c"(des_hi)
+        : "memory"
+    );
+
+    if (!success) {
+        // Write observed value back into *expected
+        *reinterpret_cast<uint64_t*>(expected) = exp_lo;
+        *(reinterpret_cast<uint64_t*>(expected) + 1) = exp_hi;
+    }
+    return success != 0;
+#else
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> g(mtx);
+
+    uint64_t cur_lo = *(reinterpret_cast<uint64_t*>(dest) + 0);
+    uint64_t cur_hi = *(reinterpret_cast<uint64_t*>(dest) + 1);
+    uint64_t exp_lo = *(reinterpret_cast<const uint64_t*>(expected) + 0);
+    uint64_t exp_hi = *(reinterpret_cast<const uint64_t*>(expected) + 1);
+
+    if (cur_lo == exp_lo && cur_hi == exp_hi) {
+        *(reinterpret_cast<uint64_t*>(dest) + 0) = *(reinterpret_cast<const uint64_t*>(desired) + 0);
+        *(reinterpret_cast<uint64_t*>(dest) + 1) = *(reinterpret_cast<const uint64_t*>(desired) + 1);
+        return true;
+    } else {
+        *reinterpret_cast<uint64_t*>(const_cast<void*>(expected)) = cur_lo;
+        *(reinterpret_cast<uint64_t*>(const_cast<void*>(expected)) + 1) = cur_hi;
+        return false;
+    }
+#endif
+}
+
+// Atomic store: *dest = *src (128 bits)
+inline void atomic_store128(void* dest, const void* src) {
+    FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
+
+#if HAVE_AVX512_128_ATOMIC_LOAD_STORE
+    __m128i v = _mm_load_si128(reinterpret_cast<const __m128i*>(src));
+    asm volatile("vmovdqa64 %1, %0"
+                 : "=m"(*(char(*)[16])dest)
+                 : "x"(v)
+                 : "memory");
+#elif HAVE_CMPXCHG16B
+    while (!compare_exchange128(dest, src, src)) {
+        DIVFTREE_YIELD();
+    }
+#else
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> g(mtx);
+    std::memcpy(dest, src, 16);
+#endif
+}
+
+// Atomic load: out = *src (128 bits)
+inline void atomic_load128(void* out, const void* src) {
+    FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
+
+#if HAVE_AVX512_128_ATOMIC_LOAD_STORE
+    __m128i v;
+    asm volatile("vmovdqa64 %1, %0"
+                 : "=x"(v)
+                 : "m"(*(const char(*)[16])src)
+                 : "memory");
+    _mm_store_si128(reinterpret_cast<__m128i*>(out), v);
+#elif HAVE_CMPXCHG16B
+    uint8_t expected_buf[16] __attribute__((aligned(16)));
+    uint8_t desired_buf[16] __attribute__((aligned(16)));
+    // expected = src's current value
+    std::memcpy(expected_buf, src, 16);
+    std::memcpy(desired_buf, expected_buf, 16);
+    while (!compare_exchange128(const_cast<void*>(src), expected_buf, desired_buf)) {
+        // expected_buf updated with observed value on failure
+        std::memcpy(desired_buf, expected_buf, 16);
+    }
+    std::memcpy(out, expected_buf, 16);
+#else
+    static std::mutex mtx;
+    std::lock_guard<std::mutex> g(mtx);
+    std::memcpy(out, src, 16);
+#endif
+}
+
 enum LockMode {
     SX_SHARED, SX_EXCLUSIVE
 };
