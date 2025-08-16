@@ -89,7 +89,7 @@ inline void atomic_load128(const void* src, void* dest) {
 #if (defined(__DIVFTREE_ATOMIC128__) && (defined(__i386__) || defined(__x86_64__)))
     (__m128i*)dest = _mm_load_si128((const __m128i*)src);
 #elif defined(__DIVFTREE_CMPXCHG128__)
-    std::memcpy(dest, src, 16);
+    // std::memcpy(dest, src, 16);
     compare_exchange128(const_cast<void*>(src), dest, dest);
 #else
     std::memcpy(dest, reinterpret_cast<const std::atomic<__int128_t>*>(src)->load(std::memory_order_relaxed),
