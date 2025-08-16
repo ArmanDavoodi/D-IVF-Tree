@@ -1,6 +1,8 @@
 #ifndef SYNCHRONIZATION_H_
 #define SYNCHRONIZATION_H_
 
+#include "configs/support.h"
+
 #include <shared_mutex>
 #include <atomic>
 #include <condition_variable>
@@ -13,106 +15,85 @@
 
 namespace divftree {
 
-// Atomic compare_exchange (void* API):
-//   if (*dest == *expected) { *dest = *desired; return true; }
-//   else { *expected = observed; return false; }
-/* Todo: is not working and has bugs!!! */
-inline bool compare_exchange128(void* dest, void* expected, const void* desired) {
+inline bool compare_exchange128(void* dest, void* expected, const void* desired,
+                                bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
-    FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
-    FatalAssert(TYPE_ALIGNED(desired, 16), LOG_TAG_BASIC, "Desired pointer is not 16-byte aligned");
+    // FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
+    // FatalAssert(TYPE_ALIGNED(desired, 16), LOG_TAG_BASIC, "Desired pointer is not 16-byte aligned");
 
-#if HAVE_CMPXCHG16B
-    uint64_t exp_lo = *(reinterpret_cast<const uint64_t*>(expected) + 0);
-    uint64_t exp_hi = *(reinterpret_cast<const uint64_t*>(expected) + 1);
-    uint64_t des_lo = *(reinterpret_cast<const uint64_t*>(desired) + 0);
-    uint64_t des_hi = *(reinterpret_cast<const uint64_t*>(desired) + 1);
-
-    unsigned char success;
-    asm volatile(
-        "lock cmpxchg16b %1\n\t"
-        "setz %0"
-        : "=q"(success), "+m"(*(char(*)[16])dest), "+a"(exp_lo), "+d"(exp_hi)
-        : "b"(des_lo), "c"(des_hi)
-        : "memory"
-    );
-
-    if (!success) {
-        // Write observed value back into *expected
-        *reinterpret_cast<uint64_t*>(expected) = exp_lo;
-        *(reinterpret_cast<uint64_t*>(expected) + 1) = exp_hi;
+#ifdef __DIVFTREE_CMPXCHG128__
+    bool result;
+    uint64_t* cmp = reinterpret_cast<uint64_t*>(expected);
+    uint64_t* with = reinterpret_cast<uint64_t*>(desired);
+    if (relaxed) {
+        asm volatile
+        (
+            "lock cmpxchg16b %1\n\t"
+            "setz %0"       // on gcc6 and later, use a flag output constraint instead
+            : "=q" ( result )
+            , "+m" ( *dest )
+            , "+d" ( cmp[1] )
+            , "+a" ( cmp[0] )
+            : "c" ( with[1] )
+            , "b" ( with[0] )
+            : "cc"
+        );
     }
-    return success != 0;
+    else {
+        asm volatile
+        (
+            "lock cmpxchg16b %1\n\t"
+            "setz %0"       // on gcc6 and later, use a flag output constraint instead
+            : "=q" ( result )
+            , "+m" ( *dest )
+            , "+d" ( cmp.hi )
+            , "+a" ( cmp.lo )
+            : "c" ( with.hi )
+            , "b" ( with.lo )
+            : "cc", "memory" // compile-time memory barrier.  Omit if you want memory_order_relaxed compile-time ordering.
+        );
+    }
+    return result; /* May need to use atomic fences later? */
 #else
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> g(mtx);
-
-    uint64_t cur_lo = *(reinterpret_cast<uint64_t*>(dest) + 0);
-    uint64_t cur_hi = *(reinterpret_cast<uint64_t*>(dest) + 1);
-    uint64_t exp_lo = *(reinterpret_cast<const uint64_t*>(expected) + 0);
-    uint64_t exp_hi = *(reinterpret_cast<const uint64_t*>(expected) + 1);
-
-    if (cur_lo == exp_lo && cur_hi == exp_hi) {
-        *(reinterpret_cast<uint64_t*>(dest) + 0) = *(reinterpret_cast<const uint64_t*>(desired) + 0);
-        *(reinterpret_cast<uint64_t*>(dest) + 1) = *(reinterpret_cast<const uint64_t*>(desired) + 1);
-        return true;
-    } else {
-        *reinterpret_cast<uint64_t*>(const_cast<void*>(expected)) = cur_lo;
-        *(reinterpret_cast<uint64_t*>(const_cast<void*>(expected)) + 1) = cur_hi;
-        return false;
-    }
+    std::atomic<__int128_t>* target = reinterpret_cast<std::atomic<__int128_t>*>(const_cast<void*>(dest));
+    target->compare_exchange_strong(*reinterpret_cast<__int128_t*>(expected),
+                                   *reinterpret_cast<const __int128_t*>(desired),
+                                   relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst);
 #endif
 }
 
-// Atomic store: *dest = *src (128 bits)
+// Atomic store: No memory fence/ordering!
 inline void atomic_store128(void* dest, const void* src) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
     FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
 
-#if HAVE_AVX512_128_ATOMIC_LOAD_STORE
-    __m128i v = _mm_load_si128(reinterpret_cast<const __m128i*>(src));
-    asm volatile("vmovdqa64 %1, %0"
-                 : "=m"(*(char(*)[16])dest)
-                 : "x"(v)
-                 : "memory");
-#elif HAVE_CMPXCHG16B
-    while (!compare_exchange128(dest, src, src)) {
+#if (defined(__DIVFTREE_ATOMIC128__) && (defined(__i386__) || defined(__x86_64__)))
+    _mm_store_si128((__m128i*)dest, *(const __m128i*)src);
+#elif defined(__DIVFTREE_CMPXCHG128__)
+    alignas(16) uint64_t expected[2];
+    std::memcpy(expected, src, 16);
+    while (!compare_exchange128(dest, expected, src)) {
         DIVFTREE_YIELD();
     }
 #else
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> g(mtx);
-    std::memcpy(dest, src, 16);
+    std::atomic<__int128_t>* target = reinterpret_cast<std::atomic<__int128_t>*>(dest);
+    target->store(*reinterpret_cast<const __int128_t*>(src), std::memory_order_relaxed);
 #endif
 }
 
-// Atomic load: out = *src (128 bits)
-inline void atomic_load128(void* out, const void* src) {
-    FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
+// Atomic load: No memory fence/ordering!
+inline void atomic_load128(const void* src, void* dest) {
     FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
 
-#if HAVE_AVX512_128_ATOMIC_LOAD_STORE
-    __m128i v;
-    asm volatile("vmovdqa64 %1, %0"
-                 : "=x"(v)
-                 : "m"(*(const char(*)[16])src)
-                 : "memory");
-    _mm_store_si128(reinterpret_cast<__m128i*>(out), v);
-#elif HAVE_CMPXCHG16B
-    uint8_t expected_buf[16] __attribute__((aligned(16)));
-    uint8_t desired_buf[16] __attribute__((aligned(16)));
-    // expected = src's current value
-    std::memcpy(expected_buf, src, 16);
-    std::memcpy(desired_buf, expected_buf, 16);
-    while (!compare_exchange128(const_cast<void*>(src), expected_buf, desired_buf)) {
-        // expected_buf updated with observed value on failure
-        std::memcpy(desired_buf, expected_buf, 16);
-    }
-    std::memcpy(out, expected_buf, 16);
+#if (defined(__DIVFTREE_ATOMIC128__) && (defined(__i386__) || defined(__x86_64__)))
+    (__m128i*)dest = _mm_load_si128((const __m128i*)src);
+#elif defined(__DIVFTREE_CMPXCHG128__)
+    std::memcpy(dest, src, 16);
+    compare_exchange128(const_cast<void*>(src), dest, dest);
 #else
-    static std::mutex mtx;
-    std::lock_guard<std::mutex> g(mtx);
-    std::memcpy(out, src, 16);
+    std::memcpy(dest, reinterpret_cast<const std::atomic<__int128_t>*>(src)->load(std::memory_order_relaxed),
+                16);
 #endif
 }
 

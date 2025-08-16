@@ -1,6 +1,8 @@
 #ifndef THREAD_H_
 #define THREAD_H_
 
+#include "configs/support.h"
+
 #include <thread>
 #include <cstdint>
 

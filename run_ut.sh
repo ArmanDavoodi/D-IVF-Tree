@@ -1,9 +1,10 @@
 #!/bin/bash
+ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-rm -r ut/out/cores
-rm -r ut/out/logs
-mkdir -p ut/out/cores
-mkdir -p ut/out/logs
+rm -r $ROOT/ut/out/cores
+rm -r $ROOT/ut/out/logs
+mkdir -p $ROOT/ut/out/cores
+mkdir -p $ROOT/ut/out/logs
 # ulimit -c unlimited
 
 # export CORE_DUMP_DIR=ut/out/cores/core.$(date +%Y_%m_%d_%H_%M_%S).$(pidof -s your_executable)
@@ -12,14 +13,14 @@ mkdir -p ut/out/logs
 
 # ./ut/build/bin/$1 > ut/out/logs/$1.log
 
-directory="ut/build/bin"
+directory="$ROOT/ut/build/bin"
 all_success=1
 for file in "$directory"/*; do
   if [ -f "$file" ]; then
     # Check if the file is executable
     if [ -x "$file" ]; then
       file_name=$(basename "$file")
-      ./"$file" $* > ut/out/logs/"$file_name".log
+      ./"$file" $* > $ROOT/ut/out/logs/"$file_name".log
       retcode=$?
       if [ $retcode -ne 0 ]; then
         all_success=0

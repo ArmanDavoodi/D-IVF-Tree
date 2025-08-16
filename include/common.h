@@ -1,6 +1,8 @@
 #ifndef DIVFTREE_COMMON_H_
 #define DIVFTREE_COMMON_H_
 
+#include "configs/support.h"
+
 #include <vector>
 #include <cstdint>
 #include <cstring>
@@ -13,18 +15,6 @@
 #include "debug.h"
 
 namespace divftree {
-
-#if defined(__AVX512F__)
-    #define HAVE_ATOMIC_128_LOAD_STORE 1
-#else
-    #define HAVE_ATOMIC_128_LOAD_STORE 0
-#endif
-
-#if defined(__x86_64__) && defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_16)
-    #define HAVE_CMPXCHG16B 1
-#else
-    #define HAVE_CMPXCHG16B 0
-#endif
 
 struct RetStatus {
     enum {

@@ -3,8 +3,9 @@
 # todo adding necessary flags for gdb at least when mode is debug
 # todo changing the core location after making gdb work
 
-ROOT = ..
+ROOT := $(CURDIR)
 DIVFTREE_PATH = $(ROOT)/include
+INCLUDE_PATHS = -I$(DIVFTREE_PATH) -I$(ROOT)
 
 BUILD_DIR = $(ROOT)/ut/build
 OBJ_DIR := $(BUILD_DIR)/obj
@@ -14,7 +15,7 @@ SRC_DIR = $(ROOT)/ut
 
 CXX = g++
 IGNORE_WARNING = -Wno-pedantic -Wno-write-strings -Wno-pointer-arith
-CXXFLAGS = -std=c++20 -I$(DIVFTREE_PATH) -I$(ROOT) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic $(IGNORE_WARNING)
+CXXFLAGS = -std=c++20 $(INCLUDE_PATHS) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic $(IGNORE_WARNING)
 
 # Add custom defines if they are provided
 ifneq ($(filter -D%,$(DEFINES)),)
