@@ -23,7 +23,6 @@ enum VersionUpdateType {
 
 struct VersionUpdateInfo {
     VersionUpdateType type;
-    std::experimental::atomic_shared_ptr<BufferVectorEntry> a;
     union {
 
         struct {
@@ -41,17 +40,60 @@ struct VersionUpdateInfo {
     };
 }
 
-struct BufferVectorEntry {
-    const uint64_t version; // version of the vector
-    const std::atomic<Address> container_address; // valid if not root: the address of the cluster containing the vector
-    const std::atomic<uint16_t> entry_offset; // valid if not root: offset of the cluster entry in the vertex containing the vector
-    const Address cluster_address; // If it is a centroid -> is the address of the cluster with that id/ if a vector, address of the container leaf
+union alignas(16) VectorAddress {
+    struct {
+        std::atomic<Address> container_address;
+        std::atomic<uint16_t> entry_offset;
+        std::atomic<uint32_t> container_version;
+    };
+    __int128_t raw;
+};
 
-    /* We also need to know what happend in the previous version i.e if splitted to which nodes with which versions? if merged who was the parent and version */
-    std::atomic<BufferVectorEntry*> previous_version;
-    /* todo: should I use shared_ptr instead and do not have a list of previous versions? */
-    std::atomic<uint64_t> pin; // as long as this entry is the head of the list, it will have at least 1 pin
-    std::atomic<bool> deleted;
+  /* 1) BufferEntry:
+  *     1.1) SXLock
+  *     1.2) CondVar
+  *     1.3) Container: VectorID -> 64bit
+  *     1.4) EntryOffset: 16bit
+  *     1.5) State: 16bit? -> same as the state in the cluster
+  *     1.5) ContainerVersion 32bit
+  *     1.6) SXSpinLock
+  *     1.7) ReaderPin: 64bit
+  *     1.8) Ptr: Cluster* -> 64bit
+  *     1.9) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
+  *             has a 32bit head and a 32bit tail. when a new element is added,
+  *             if tail+1 == head(list is full), both head and tail are advanced by 1
+  *             and oldest version is overwritten. else tail is advanced by 1.
+  *
+  */
+
+constexpr uint8_t BUFFER_UPDATE_LOG_SIZE = 10;
+constexpr uint8_t BUFFER_OLD_VERSION_LIST_SIZE = 3;
+
+struct BufferVectorEntry {
+    VectorAddress address;
+};
+
+struct BufferVertexEntryData {
+    VectorAddress centroid_address;
+    DIVFTreeVertexInterface* cluster; // can only be changed if both cluster and header locks are held in exclusive mode
+}
+
+struct BufferVertexEntryState {
+    uint8_t major_update_in_progress : 1;
+    uint8_t unused : 7; // reserved for future use
+};
+
+struct BufferVertexEntry {
+    BufferVertexEntryData data;
+    SXSpinLock header_lock;
+    SXLock cluster_lock;
+    CondVar cond_var;
+    std::atomic<uint64_t> pin;
+    BufferVertexEntryState state;
+    uint8_t num_cached_versions;
+    uint8_t num_logs;
+    BufferVertexEntryData previous_versions[BUFFER_OLD_VERSION_LIST_SIZE];
+    VersionUpdateInfo update_logs[BUFFER_UPDATE_LOG_SIZE];
 
     BufferVectorEntry(uint64_t ver, Address cont_addr, uint16_t entry_offs, Address clust_addr,
                       BufferVectorEntry* prev_version = nullptr, bool empty = false)

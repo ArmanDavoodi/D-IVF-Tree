@@ -18,8 +18,8 @@ namespace divftree {
 inline bool compare_exchange128(volatile void* dest, void* expected, const void* desired,
                                 bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
-    // FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
-    // FatalAssert(TYPE_ALIGNED(desired, 16), LOG_TAG_BASIC, "Desired pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
+    FatalAssert(TYPE_ALIGNED(desired, 16), LOG_TAG_BASIC, "Desired pointer is not 16-byte aligned");
 
 #ifdef __DIVFTREE_CMPXCHG128__
     bool result;

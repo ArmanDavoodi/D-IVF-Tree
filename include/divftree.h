@@ -41,6 +41,19 @@
  */
 
  /*
+  *
+  * new design:
+  * 1) Memory nodes are the cluster owners
+  * 2) For search queries compute nodes read clusters and search
+  * 3) For insert queries, compute nodes read clusters and find the leaf to insert then send an insertion
+  *    query to the memory node. the memory node inserts the data and then sends notification to all CNs.
+  *    if cluster is full, the MN will first try to compact and if still not enough space, it will ask a
+  *    CN to do the split.
+  * 4) CNs will also check during searches and sometimes create BGMigrationCheck tasks. BGThreads at CNs
+  *    then check these clusters and request Migration for vectors if needed to MN.
+  */
+
+ /*
   * Data Structures:
   * // May have a differnet BufferEntry for non-centroid vectors as they do not need spinlock, readerPin, clusterPtr, ...
   * 1) BufferEntry:
