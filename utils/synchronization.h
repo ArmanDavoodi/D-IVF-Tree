@@ -15,7 +15,7 @@
 
 namespace divftree {
 
-inline bool compare_exchange128(void* dest, void* expected, const void* desired,
+inline bool compare_exchange128(volatile void* dest, void* expected, const void* desired,
                                 bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
     // FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
@@ -63,36 +63,68 @@ inline bool compare_exchange128(void* dest, void* expected, const void* desired,
 }
 
 // Atomic store: No memory fence/ordering!
-inline void atomic_store128(void* dest, const void* src) {
+inline void atomic_store128(volatile void* dest, const void* src, bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
     FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
 
-#if (defined(__DIVFTREE_ATOMIC128__) && (defined(__i386__) || defined(__x86_64__)))
-    _mm_store_si128((__m128i*)dest, *(const __m128i*)src);
+#if defined(__DIVFTREE_ATOMIC128__)
+    if (relaxed) {
+        asm volatile (
+            "movdqu %1, %0"
+            : "=m" (*dest)
+            : "x" (*src)
+            : "xmm0"
+        );
+    }
+    else {
+        asm volatile (
+            "movdqu %1, %0"
+            : "=m" (*dest)
+            : "x" (*src)
+            : "xmm0", "memory"
+        );
+    }
 #elif defined(__DIVFTREE_CMPXCHG128__)
     alignas(16) uint64_t expected[2];
     std::memcpy(expected, src, 16);
-    while (!compare_exchange128(dest, expected, src)) {
+    while (!compare_exchange128(dest, expected, src, relaxed)) {
         DIVFTREE_YIELD();
     }
 #else
-    std::atomic<__int128_t>* target = reinterpret_cast<std::atomic<__int128_t>*>(dest);
-    target->store(*reinterpret_cast<const __int128_t*>(src), std::memory_order_relaxed);
+    std::atomic<__int128_t>* target = reinterpret_cast<std::atomic<__int128_t>*>(const_cast<void*>(dest));
+    target->store(*reinterpret_cast<const __int128_t*>(src), relaxed ? std::memory_order_relaxed :
+                                                                       std::memory_order_seq_cst);
 #endif
 }
 
 // Atomic load: No memory fence/ordering!
-inline void atomic_load128(const void* src, void* dest) {
+inline void atomic_load128(const void* src, volatile void* dest, bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
 
-#if (defined(__DIVFTREE_ATOMIC128__) && (defined(__i386__) || defined(__x86_64__)))
-    (__m128i*)dest = _mm_load_si128((const __m128i*)src);
+#if defined(__DIVFTREE_ATOMIC128__)
+    if (relaxed) {
+        asm volatile (
+            "movdqu %1, %0"
+            : "=x" (*dest)
+            : "m" (*src)
+            : "xmm0"
+        );
+    }
+    else {
+        asm volatile (
+            "movdqu %1, %0"
+            : "=x" (*dest)
+            : "m" (*src)
+            : "xmm0", "memory"
+        );
+    }
 #elif defined(__DIVFTREE_CMPXCHG128__)
     // std::memcpy(dest, src, 16);
-    compare_exchange128(const_cast<void*>(src), dest, dest);
+    compare_exchange128(const_cast<void*>(src), dest, dest, relaxed);
 #else
-    std::memcpy(dest, reinterpret_cast<const std::atomic<__int128_t>*>(src)->load(std::memory_order_relaxed),
+    std::memcpy(dest, reinterpret_cast<const std::atomic<__int128_t>*>(src)->load(relaxed ? std::memory_order_relaxed :
+                                                                                            std::memory_order_seq_cst),
                 16);
 #endif
 }
