@@ -60,6 +60,7 @@ struct RetStatus {
 };
 
 constexpr uint64_t INVALID_VECTOR_ID = UINT64_MAX;
+constexpr uint16_t INVALID_OFFSET = UINT16_MAX;
 
 union VectorID {
     uint64_t _id;
@@ -121,6 +122,8 @@ union VectorID {
         return _id != ID;
     }
 };
+
+typedef uint32_t Version;
 
 typedef void* Address;
 typedef const void* AddressToConst;

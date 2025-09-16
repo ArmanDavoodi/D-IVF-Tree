@@ -9,44 +9,52 @@
 
 namespace divftree {
 
-enum VersionUpdateType {
-    UPDATE_COMPACT, // compaction
-    UPDATE_MERGE, // merge and may also have compaction. parent was node ? with version
-    UPDATE_SPLIT, // split into nodes[] with versions[]
+// enum VersionUpdateType {
+//     UPDATE_COMPACT, // compaction
+//     UPDATE_MERGE, // merge and may also have compaction. parent was node ? with version
+//     UPDATE_SPLIT, // split into nodes[] with versions[]
 
-    // Todo: should we even create new entries for these cases or should we just use pin to delete them?
-    UPDATE_RELOCATE, // migration to cluster id with version to cluster id with version
-    UPDATE_DELETE,
+//     // Todo: should we even create new entries for these cases or should we just use pin to delete them?
+//     UPDATE_RELOCATE, // migration to cluster id with version to cluster id with version
+//     UPDATE_DELETE,
 
-    NUM_VERSION_UPDATE_TYPES
-}
+//     NUM_VERSION_UPDATE_TYPES
+// }
 
-struct VersionUpdateInfo {
-    VersionUpdateType type;
-    union {
+// struct VersionUpdateInfo {
+//     VersionUpdateType type;
+//     union {
 
-        struct {
-            std::shared_ptr<BufferVectorEntry> parent; // new entry that is created after split/merge
-        } merge;
+//         struct {
+//             std::shared_ptr<BufferVectorEntry> parent; // new entry that is created after split/merge
+//         } merge;
 
-        struct {
-            std::vector<std::shared_ptr<BufferVectorEntry>> vertices;
-        } split;
+//         struct {
+//             std::vector<std::shared_ptr<BufferVectorEntry>> vertices;
+//         } split;
 
-        struct {
-            VectorID from_cluster_id; // cluster id from which the vector was migrated
-            VectorID to_cluster_id; // cluster id to which the vector was migrated
-        } relocate;
-    };
-}
+//         struct {
+//             VectorID from_cluster_id; // cluster id from which the vector was migrated
+//             VectorID to_cluster_id; // cluster id to which the vector was migrated
+//         } relocate;
+//     };
+// }
 
-union alignas(16) VectorAddress {
+union alignas(16) VectorLocation {
     struct {
-        std::atomic<Address> container_address;
-        std::atomic<uint16_t> entry_offset;
-        std::atomic<uint32_t> container_version;
+        std::atomic<VectorID> containerId;
+        std::atomic<uint32_t> containerVersion;
+        std::atomic<uint16_t> entryOffset;
     };
-    __int128_t raw;
+    atomic_data128 raw;
+};
+
+struct BufferVectorEntry {
+    VectorLocation location;
+
+    BufferVectorEntry() : location{.containerId = INVALID_VECTOR_ID,
+                                   .containerVersion = 0,
+                                   .entryOffset = INVALID_OFFSET} {}
 };
 
   /* 1) BufferEntry:
@@ -66,66 +74,74 @@ union alignas(16) VectorAddress {
   *
   */
 
-constexpr uint8_t BUFFER_UPDATE_LOG_SIZE = 10;
-constexpr uint8_t BUFFER_OLD_VERSION_LIST_SIZE = 3;
+// constexpr uint8_t BUFFER_UPDATE_LOG_SIZE = 10;
+// constexpr uint8_t BUFFER_OLD_VERSION_LIST_SIZE = 3;
 
-struct BufferVectorEntry {
-    VectorAddress address;
+enum BufferVertexEntryState : uint8_t {
+    CLUSTER_INVALID = 0,
+    CLUSTER_STABLE = 1,
+    CLUSTER_FULL = 2,
+    CLUSTER_DELETE_IN_PROGRESS = 3
 };
 
-struct BufferVertexEntryData {
-    VectorAddress centroid_address;
-    DIVFTreeVertexInterface* cluster; // can only be changed if both cluster and header locks are held in exclusive mode
-}
-
-struct BufferVertexEntryState {
-    uint8_t major_update_in_progress : 1;
-    uint8_t unused : 7; // reserved for future use
+/*
+ * This needs to be prtected byt the header lock because we do not have 16Bytes FAA. As a result, if we
+ * if we want to do this without locking, we have to use 16Byte CAS which causes a lot of contention on the
+ * pin.
+ */
+struct ClusterPtr {
+    std::atomic<uint64_t> pin;
+    DIVFTreeVertexInterface* clusterPtr;
+};
+struct VersionedClusterPtr {
+    std::atomic<uint64_t> versionPin;
+    ClusterPtr clusterPtr;
 };
 
 struct BufferVertexEntry {
-    BufferVertexEntryData data;
-    SXSpinLock header_lock;
-    SXLock cluster_lock;
-    CondVar cond_var;
-    std::atomic<uint64_t> pin;
-    BufferVertexEntryState state;
-    uint8_t num_cached_versions;
-    uint8_t num_logs;
-    BufferVertexEntryData previous_versions[BUFFER_OLD_VERSION_LIST_SIZE];
-    VersionUpdateInfo update_logs[BUFFER_UPDATE_LOG_SIZE];
+    BufferVectorEntry centroidMeta;
+    std::atomic<BufferVertexEntryState> state;
+    SXSpinLock headerLock;
+    SXLock clusterLock;
+    CondVar condVar;
+    Version currentVersion;
+    std::unordered_map<Version, VersionedClusterPtr> oldVersions;
 
-    BufferVectorEntry(uint64_t ver, Address cont_addr, uint16_t entry_offs, Address clust_addr,
-                      BufferVectorEntry* prev_version = nullptr, bool empty = false)
-        : version(ver), container_address(cont_addr), entry_offset(entry_offs), cluster_address(clust_addr),
-          previous_version(prev_version), pin(1), deleted(empty) {}
+    BufferVertexEntry(DIVFTreeVertexInterface* cluster) : centroidMeta(), state(CLUSTER_INVALID), currentVersion(0) {
+        oldVersions[0] = VersionedClusterPtr{1, ClusterPtr{0, cluster}};
+        /*
+         * set version pin to 1 as BufferVertexEntry is referencing it with currentVersion and
+         * set pin to 0 as no one is using it yet
+         */
+    }
 };
+
 class BufferManager : public BufferManagerInterface {
 // TODO: reuse deleted IDs
 public:
     ~BufferManager() override {
-        if (!directory.empty()) {
+        if (!clusterDirectory.empty()) {
             Shutdown();
         }
     }
 
-    RetStatus Init() override {
-        FatalAssert(directory.empty(), LOG_TAG_BUFFER, "Buffer already initialized");
+    DIVFTreeVertexInterface *AllocateMemoryForVertex(uint8_t level) {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "AllocateMemoryForVertex not implemented");
+        return nullptr;
+    }
 
-        /* Create the vector level -> level 0 */
-        directory.emplace_back();
+    RetStatus Init() override {
+        FatalAssert(clusterDirectory.empty(), LOG_TAG_BUFFER, "Buffer already initialized");
+        clusterDirectory.emplace_back();
         return RetStatus::Success();
     }
 
     RetStatus Shutdown() override {
-        FatalAssert(!directory.empty(), LOG_TAG_BUFFER, "Buffer not initialized");
-        for (size_t level = directory.size() - 1; level > 0; --level) {
-            for (VectorInfo& vec : directory[level]) {
-                if (vec.cluster_address != INVALID_ADDRESS) {
-                    static_cast<DIVFTreeVertexInterface*>(vec.cluster_address)->~DIVFTreeVertexInterface();
-                    free(vec.cluster_address);
-                    vec.cluster_address = INVALID_ADDRESS;
-                }
+        FatalAssert(!clusterDirectory.empty(), LOG_TAG_BUFFER, "Buffer not initialized");
+        // TODO: nobody should be accessing the buffer or any clusters/pages at this point!!!
+        for (size_t level = clusterDirectory.size() - 1; level > 0; --level) {
+            for (BufferVertexEntry& entry : directory[level]) {
+                entry.clusterLock.Lock(SX_EXCLUSIVE);
             }
             directory[level].clear();
         }
@@ -285,6 +301,7 @@ public:
     }
 
 protected:
+    /* bufferM */
     VectorID NextID(uint8_t level) {
         FatalAssert(directory.size() > 0, LOG_TAG_BUFFER, "tree should be initialized");
         FatalAssert(!directory.back().empty() || (level == 1 && directory.size() == 1), LOG_TAG_BUFFER,
@@ -310,7 +327,9 @@ protected:
         return _id;
     }
 
-    std::vector<std::vector<std::atomic<BufferVectorEntry*>>> directory;
+    SXSpinLock bufferMgrLock;
+    std::vector<BufferVectorEntry> vectorDirectory;
+    std::vector<std::vector<BufferVertexEntry>> clusterDirectory;
 
 TESTABLE;
 };

@@ -15,7 +15,23 @@
 
 namespace divftree {
 
-inline bool compare_exchange128(volatile void* dest, void* expected, const void* desired,
+// TODO: need to recheck atomic load and store for 128 bit data since we may not be able to
+// pass the same pointer as two arguments to compare_exchange128.
+
+union alignas(16) atomic_data128 {
+    struct {
+#if defined(__DIVFTREE_ATOMIC128__) || defined(__DIVFTREE_CMPXCHG128__)
+        std::atomic<uint64_t> lo;
+        std::atomic<uint64_t> hi;
+#else
+        std::atomic<__int128_t> raw_atomic;
+#endif
+    };
+    __int128_t raw;
+};
+
+
+inline bool compare_exchange128(atomic_data128* dest, atomic_data128* expected, const atomic_data128* desired,
                                 bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
     FatalAssert(TYPE_ALIGNED(expected, 16), LOG_TAG_BASIC, "Expected pointer is not 16-byte aligned");
@@ -23,8 +39,6 @@ inline bool compare_exchange128(volatile void* dest, void* expected, const void*
 
 #ifdef __DIVFTREE_CMPXCHG128__
     bool result;
-    uint64_t* cmp = reinterpret_cast<uint64_t*>(expected);
-    uint64_t* with = reinterpret_cast<uint64_t*>(desired);
     if (relaxed) {
         asm volatile
         (
@@ -32,10 +46,10 @@ inline bool compare_exchange128(volatile void* dest, void* expected, const void*
             "setz %0"       // on gcc6 and later, use a flag output constraint instead
             : "=q" ( result )
             , "+m" ( *dest )
-            , "+d" ( cmp[1] )
-            , "+a" ( cmp[0] )
-            : "c" ( with[1] )
-            , "b" ( with[0] )
+            , "+d" ( expected->hi )
+            , "+a" ( expected->lo )
+            : "c" ( desired->hi )
+            , "b" ( desired->lo )
             : "cc"
         );
     }
@@ -46,24 +60,22 @@ inline bool compare_exchange128(volatile void* dest, void* expected, const void*
             "setz %0"       // on gcc6 and later, use a flag output constraint instead
             : "=q" ( result )
             , "+m" ( *dest )
-            , "+d" ( cmp.hi )
-            , "+a" ( cmp.lo )
-            : "c" ( with.hi )
-            , "b" ( with.lo )
+            , "+d" ( expected->hi )
+            , "+a" ( expected->lo )
+            : "c" ( desired->hi )
+            , "b" ( desired->lo )
             : "cc", "memory" // compile-time memory barrier.  Omit if you want memory_order_relaxed compile-time ordering.
         );
     }
     return result; /* May need to use atomic fences later? */
 #else
-    std::atomic<__int128_t>* target = reinterpret_cast<std::atomic<__int128_t>*>(const_cast<void*>(dest));
-    target->compare_exchange_strong(*reinterpret_cast<__int128_t*>(expected),
-                                   *reinterpret_cast<const __int128_t*>(desired),
-                                   relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst);
+    dest->raw_atomic.compare_exchange_strong(expected->raw, desired->raw,
+                                             relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst);
 #endif
 }
 
 // Atomic store: No memory fence/ordering!
-inline void atomic_store128(volatile void* dest, const void* src, bool relaxed = false) {
+inline void atomic_store128(atomic_data128* dest, const atomic_data128* src, bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
     FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
 
@@ -85,20 +97,18 @@ inline void atomic_store128(volatile void* dest, const void* src, bool relaxed =
         );
     }
 #elif defined(__DIVFTREE_CMPXCHG128__)
-    alignas(16) uint64_t expected[2];
-    std::memcpy(expected, src, 16);
-    while (!compare_exchange128(dest, expected, src, relaxed)) {
+    atomic_data128 expected;
+    std::memcpy(&expected, src, 16);
+    while (!compare_exchange128(dest, &expected, src, relaxed)) {
         DIVFTREE_YIELD();
     }
 #else
-    std::atomic<__int128_t>* target = reinterpret_cast<std::atomic<__int128_t>*>(const_cast<void*>(dest));
-    target->store(*reinterpret_cast<const __int128_t*>(src), relaxed ? std::memory_order_relaxed :
-                                                                       std::memory_order_seq_cst);
+    dest->raw_atomic.store(src->raw, relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst);
 #endif
 }
 
 // Atomic load: No memory fence/ordering!
-inline void atomic_load128(const void* src, volatile void* dest, bool relaxed = false) {
+inline void atomic_load128(const atomic_data128* src, atomic_data128* dest, bool relaxed = false) {
     FatalAssert(TYPE_ALIGNED(src, 16), LOG_TAG_BASIC, "Source pointer is not 16-byte aligned");
     FatalAssert(TYPE_ALIGNED(dest, 16), LOG_TAG_BASIC, "Destination pointer is not 16-byte aligned");
 
@@ -121,24 +131,11 @@ inline void atomic_load128(const void* src, volatile void* dest, bool relaxed = 
     }
 #elif defined(__DIVFTREE_CMPXCHG128__)
     // std::memcpy(dest, src, 16);
-    compare_exchange128(const_cast<void*>(src), dest, dest, relaxed);
+    compare_exchange128(const_cast<atomic_data128*>(src), dest, src, relaxed);
 #else
-    std::memcpy(dest, reinterpret_cast<const std::atomic<__int128_t>*>(src)->load(relaxed ? std::memory_order_relaxed :
-                                                                                            std::memory_order_seq_cst),
+    std::memcpy(dest, src->raw_atomic.load(relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst),
                 16);
 #endif
-}
-
-enum LockMode {
-    SX_SHARED, SX_EXCLUSIVE
-};
-
-String LockModeToString(LockMode mode) {
-    switch (mode) {
-        case SX_SHARED: return "SHARED";
-        case SX_EXCLUSIVE: return "EXCLUSIVE";
-        default: return "INVALIDE";
-    }
 }
 
 /* Todo: a more efficent implementation */
@@ -148,6 +145,7 @@ public:
     ~SXLock() = default;
 
     void Lock(LockMode mode) {
+        threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
             _m.lock_shared();
             FatalAssert(_mode != SX_EXCLUSIVE, LOG_TAG_BASIC,
@@ -162,18 +160,23 @@ public:
                         LOG_TAG_BASIC, "Cannot lock in SX_EXCLUSIVE mode when there are shared holders!");
             _mode = SX_EXCLUSIVE;
         }
+        threadSelf->AcquireLockSanityLog(this, mode);
     }
 
     void Unlock() {
         if (_mode == SX_SHARED) {
+            threadSelf->SanityCheckLockHeldByMe(this, SX_SHARED);
             FatalAssert(_num_shared_holders.load() > 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
+            threadSelf->ReleaseLockSanityLog(this, SX_SHARED);
             _num_shared_holders.fetch_sub(1);
             _m.unlock_shared();
         } else {
+            threadSelf->SanityCheckLockHeldInModeByMe(this, SX_EXCLUSIVE);
             FatalAssert(_mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
             FatalAssert(_num_shared_holders.load() == 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when there are shared holders!");
+            threadSelf->ReleaseLockSanityLog(this, SX_EXCLUSIVE);
             _mode = SX_SHARED;
             _m.unlock();
         }
@@ -181,12 +184,14 @@ public:
 
     bool TryLock(LockMode mode) {
         bool locked = false;
+        threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
             locked = _m.try_lock_shared();
             if (locked) {
                 FatalAssert(_mode != SX_EXCLUSIVE, LOG_TAG_BASIC,
                             "Cannot lock in SX_SHARED mode when already in SX_EXCLUSIVE mode!");
                 _num_shared_holders.fetch_add(1);
+                threadSelf->AcquireLockSanityLog(this, mode);
             }
         } else {
             FatalAssert(mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Non Shared Lock should be exclusive!");
@@ -197,24 +202,25 @@ public:
                 FatalAssert(_num_shared_holders.load() == 0,
                             LOG_TAG_BASIC, "Cannot lock in SX_EXCLUSIVE mode when there are shared holders!");
                 _mode = SX_EXCLUSIVE;
+                threadSelf->AcquireLockSanityLog(this, mode);
             }
         }
         return locked;
     }
 
     /* better naming */
-    bool LockWithBlockCheck(LockMode mode) {
-        bool blocked = !(TryLock(mode));
-        if (blocked) {
-            Lock(mode);
-        }
-        return blocked;
-    }
+    // bool LockWithBlockCheck(LockMode mode) {
+    //     bool blocked = !(TryLock(mode));
+    //     if (blocked) {
+    //         Lock(mode);
+    //     }
+    //     return blocked;
+    // }
 
-    void SleepTillSignalled(LockMode mode) {
-        _signal.store(false);
-        _signal.wait(false);
-    }
+    // void SleepTillSignalled(LockMode mode) {
+    //     _signal.store(false);
+    //     _signal.wait(false);
+    // }
 
     inline String ToString() const {
         return String("<LockMode=%s, SharedHolders=%lu>",
@@ -224,7 +230,7 @@ protected:
     LockMode _mode;
     std::atomic<uint64_t> _num_shared_holders;
     std::shared_mutex _m;
-    std::atomic<bool> _signal;
+    // std::atomic<bool> _signal;
 };
 
 class SXSpinLock {
@@ -233,6 +239,7 @@ public:
     ~SXSpinLock() = default;
 
     void Lock(LockMode mode) {
+        threadSelf->SanityCheckLockNotHeldByMe(this);
         do {
             while (_lock._data._exclusive_flag.load(std::memory_order_acquire) == LOCKED) {
                 DIVFTREE_YIELD();
@@ -263,19 +270,24 @@ public:
                 break;
             }
         } while(true);
+        threadSelf->AcquireLockSanityLog(this, mode);
     }
 
     void Unlock() {
         if (_mode == SX_SHARED) {
+            threadSelf->SanityCheckLockHeldByMe(this, SX_SHARED);
             FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) > 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
+            threadSelf->ReleaseLockSanityLog(this, SX_SHARED);
             _lock._data._shared_counter.fetch_sub(1, std::memory_order_release);
         } else {
+            threadSelf->SanityCheckLockHeldInModeByMe(this, SX_EXCLUSIVE);
             FatalAssert(_mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
             FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) == 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when there are shared holders!");
             FatalAssert(_lock._data._exclusive_flag.load(std::memory_order_acquire) == LOCKED,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
+            threadSelf->ReleaseLockSanityLog(this, SX_EXCLUSIVE);
             _mode = SX_SHARED;
             _lock._data._exclusive_flag.store(0, std::memory_order_release);
         }
@@ -283,6 +295,7 @@ public:
 
     /* May return false negative for exclusive lock as we might cas sooner than a FAA but see the result of FAA */
     bool TryLock(LockMode mode) {
+        threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
             non_atomic_lock res{0};
             res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
@@ -291,6 +304,7 @@ public:
                 return false;
             }
             FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+            threadSelf->AcquireLockSanityLog(this, mode);
             return true;
         }
         else {
@@ -307,6 +321,7 @@ public:
 
             FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
             _mode = SX_EXCLUSIVE;
+            threadSelf->AcquireLockSanityLog(this, mode);
             return true;
         }
     }

@@ -54,6 +54,7 @@ enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_DIVFTREE_BIT,
     LOG_TAG_CLUSTERING_BIT,
     LOG_TAG_MEMORY_BIT,
+    LOG_TAG_LOCK_BIT,
     LOG_TAG_NOT_IMPLEMENTED_BIT,
     LOG_TAG_TEST_BIT,
     NUM_TAGS
@@ -67,6 +68,8 @@ enum LOG_TAG_BITS : uint64_t {
 #define LOG_TAG_DIVFTREE (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_DIVFTREE_BIT))
 #define LOG_TAG_CLUSTERING (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_CLUSTERING_BIT))
 #define LOG_TAG_MEMORY (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_MEMORY_BIT))
+// this is used for all thread locks so do not use it for logs regarding locking and unlocking as it will mess with the tag filter
+#define LOG_TAG_LOCK (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_LOCK_BIT))
 #define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
 #define LOG_TAG_TEST (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_TEST_BIT))
 
@@ -262,7 +265,7 @@ namespace divftree {
 
 using thread_id = unsigned long;
 #define THREAD_ID ((divftree::thread_id)(OS_THREAD_ID))
-#define DIVF_THREAD_ID ((const divftree::DIVFThreadID)(_cur_thread_id))
+#define DIVF_THREAD_ID ((threadSelf != nullptr ? threadSelf->ID() : INVALID_DIVF_THREAD_ID))
 
 #define TYPE_ALIGNED(ptr, alignment) \
     ((((uintptr_t)(ptr)) % (alignment)) == 0)
@@ -383,6 +386,8 @@ inline const char* tagtostr(uint64_t tag)
         return "     Core      ";
     case LOG_TAG_MEMORY:
         return "    Memory     ";
+    case LOG_TAG_LOCK:
+        return "     Lock      ";
     case LOG_TAG_NOT_IMPLEMENTED:
         return "Not Implemented";
     case LOG_TAG_TEST:

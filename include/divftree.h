@@ -54,7 +54,9 @@
   */
 
  /*
-  * Data Structures:
+  * Data Structures: -> this is for single node and for multi C 1 M we may need two simpler datastructures
+  * we may also need to rename the current bufferpool to cluster directory as bufferpool should only exist
+  * at CNs and it only caches/returns/handles access to cached clusters
   * // May have a differnet BufferEntry for non-centroid vectors as they do not need spinlock, readerPin, clusterPtr, ...
   * 1) BufferEntry:
   *     1.1) SXLock
@@ -62,11 +64,11 @@
   *     1.3) Container: VectorID -> 64bit
   *     1.4) EntryOffset: 16bit
   *     1.5) State: 16bit? -> same as the state in the cluster
-  *     1.5) ContainerVersion 32bit
-  *     1.6) SXSpinLock
-  *     1.7) ReaderPin: 64bit
-  *     1.8) Ptr: Cluster* -> 64bit
-  *     1.9) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
+  *     1.6) ContainerVersion 32bit
+  *     1.7) SXSpinLock
+  *     1.8) ReaderPin: 64bit
+  *     1.9) Ptr: Cluster* -> 64bit
+  *     1.10) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
   *             has a 32bit head and a 32bit tail. when a new element is added,
   *             if tail+1 == head(list is full), both head and tail are advanced by 1
   *             and oldest version is overwritten. else tail is advanced by 1.
@@ -150,9 +152,12 @@
   *     7.1) newCluster = new cluster(version++)
   *     7.2) for i in [0, filled_size):
   *         7.2.1) if vector[i] is not valid -> continue
-  *         7.2.2) newCluster.insert(vector[i]) && directory[vector[i]].atomicStore64(EntryOffset, containerVersion)
+  *         7.2.2) newCluster.insert(vector[i])
   *     7.3) for newVectors -> cluster.insert(vectors) and update their bufferEntry
-  *     7.4) Unlock()
+  *     7.4) Update self cluster to newCluster and update version
+  *     7.5) directory[vector[i]].atomicStore64(EntryOffset, containerVersion)
+  *          for each vector in newCluster which existed in oldCluster
+  *     7.6) Unlock()
   *
   * 8) Split:
   *     8.1) newClusters = clustering(c, newVectors)
