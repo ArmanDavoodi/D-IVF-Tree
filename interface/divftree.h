@@ -73,9 +73,8 @@ public:
     virtual ~DIVFTreeVertexInterface() = default;
     virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
-    /* should be handled by the buffer not index */
-    // virtual void Pin() = 0;
-    // virtual void Unpin() = 0;
+    virtual void MarkForRecycle(uint64_t pinCount) = 0;
+    virtual void Unpin() = 0;
 
     virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
 

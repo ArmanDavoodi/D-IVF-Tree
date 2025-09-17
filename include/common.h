@@ -33,10 +33,12 @@ struct RetStatus {
         VERTEX_NEEDS_MERGE, /* may be solved with a single compaction? */
         VERTEX_NOT_ENOUGH_SPACE, /* returned when there is not enough space but someone else is splitting */
 
+        FAILED_TO_CAS_ENTRY_STATE,
+
         FAIL
     } stat;
 
-    const char* message;
+    const char* message = nullptr;
 
     static inline RetStatus Success() {
         return RetStatus{SUCCESS, "OK"};
