@@ -64,6 +64,17 @@ struct RetStatus {
 constexpr uint64_t INVALID_VECTOR_ID = UINT64_MAX;
 constexpr uint16_t INVALID_OFFSET = UINT16_MAX;
 
+/*
+ * we should not need more than 10 levels even if we have 1 petabyte of raw vector data with each vector being 128 in
+ * dimention and having 4 byte per element, then we would have 3.5*10^13 vectors and even if each cluster contains
+ * 64 vectors at most, we would only need 8 levels.
+ *
+ * We can also look at it this way: if each container contains 64 vectors, then with 10 levels we can support up to
+ * 10^18 vectors and even if each vector takes 1 byte of memory, then 10 levels can support up to 1 ZB of
+ * raw vector data.
+ */
+constexpr uint8_t MAX_TREE_HIGHT = 10;
+
 union VectorID {
     uint64_t _id;
     struct {

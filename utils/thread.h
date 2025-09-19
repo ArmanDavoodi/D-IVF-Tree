@@ -56,6 +56,8 @@ public:
     }
 
     inline void AcquireLockSanityLog(void* lockAddr, LockMode mode) {
+        UNUSED_VARIABLE(lockAddr);
+        UNUSED_VARIABLE(mode);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldByMe(lockAddr);
         if (mode == SX_EXCLUSIVE) {
@@ -69,6 +71,7 @@ public:
     }
 
     inline void DowngradeLockSanityLog(void* lockAddr) {
+        UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         SanityCheckLockHeldInModeByMe(lockAddr, SX_EXCLUSIVE);
         heldExclusive.erase(lockAddr);
@@ -78,6 +81,7 @@ public:
     }
 
     inline void UpgradeLockSanityLog(void* lockAddr) {
+        UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         SanityCheckLockHeldInModeByMe(lockAddr, SX_SHARED);
         heldShared.erase(lockAddr);
@@ -87,6 +91,8 @@ public:
     }
 
     inline void ReleaseLockSanityLog(void* lockAddr, LockMode mode) {
+        UNUSED_VARIABLE(lockAddr);
+        UNUSED_VARIABLE(mode);
 #ifdef LOCK_DEBUG
         SanityCheckLockHeldInModeByMe(lockAddr, mode);
         if (mode == SX_EXCLUSIVE) {
@@ -100,6 +106,7 @@ public:
     }
 
     inline void SanityCheckLockNotHeldInBothModesByMe(void* lockAddr) {
+        UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         FatalAssert((heldExclusive.find(lockAddr) == heldExclusive.end()) ||
                     (heldShared.find(lockAddr) == heldShared.end()),
@@ -108,6 +115,7 @@ public:
     }
 
     inline void SanityCheckLockHeldByMe(void* lockAddr) {
+        UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         FatalAssert((heldExclusive.find(lockAddr) != heldExclusive.end()) ||
@@ -117,6 +125,8 @@ public:
     }
 
     inline void SanityCheckLockHeldInModeByMe(void* lockAddr, LockMode mode) {
+        UNUSED_VARIABLE(lockAddr);
+        UNUSED_VARIABLE(mode);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         if (mode == SX_EXCLUSIVE) {
@@ -132,6 +142,7 @@ public:
     }
 
     inline void SanityCheckLockNotHeldByMe(void* lockAddr) {
+        UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         FatalAssert(heldShared.find(lockAddr) == heldShared.end() &&
@@ -142,6 +153,8 @@ public:
     }
 
     inline void SanityCheckLockNotHeldInModeByMe(void* lockAddr, LockMode mode) {
+        UNUSED_VARIABLE(lockAddr);
+        UNUSED_VARIABLE(mode);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         if (mode == SX_EXCLUSIVE) {

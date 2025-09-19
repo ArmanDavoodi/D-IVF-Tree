@@ -9,36 +9,11 @@
 
 namespace divftree {
 
-// enum VersionUpdateType {
-//     UPDATE_COMPACT, // compaction
-//     UPDATE_MERGE, // merge and may also have compaction. parent was node ? with version
-//     UPDATE_SPLIT, // split into nodes[] with versions[]
-
-//     // Todo: should we even create new entries for these cases or should we just use pin to delete them?
-//     UPDATE_RELOCATE, // migration to cluster id with version to cluster id with version
-//     UPDATE_DELETE,
-
-//     NUM_VERSION_UPDATE_TYPES
-// }
-
-// struct VersionUpdateInfo {
-//     VersionUpdateType type;
-//     union {
-
-//         struct {
-//             std::shared_ptr<BufferVectorEntry> parent; // new entry that is created after split/merge
-//         } merge;
-
-//         struct {
-//             std::vector<std::shared_ptr<BufferVectorEntry>> vertices;
-//         } split;
-
-//         struct {
-//             VectorID from_cluster_id; // cluster id from which the vector was migrated
-//             VectorID to_cluster_id; // cluster id to which the vector was migrated
-//         } relocate;
-//     };
-// }
+struct ReleaseBufferEntryFlags {
+    uint8_t notifyAll : 1;
+    uint8_t stablize : 1;
+    uint8_t unused : 6;
+};
 
 union alignas(16) VectorLocation {
     struct {
@@ -56,28 +31,13 @@ struct BufferVectorEntry {
     const VectorID selfId;
     VectorLocation location;
 
+    /* The called has to handle pinVersion and UnpinVersion for the container clusters */
+    inline void UpdateVectorLocation(VectorLocation newLocation) {
+        atomic_store128(&location, &newLocation);
+    }
+
     BufferVectorEntry(VectorID id) : selfId(id), location(INVALID_VECTOR_LOCATION) {}
 };
-
-  /* 1) BufferEntry:
-  *     1.1) SXLock
-  *     1.2) CondVar
-  *     1.3) Container: VectorID -> 64bit
-  *     1.4) EntryOffset: 16bit
-  *     1.5) State: 16bit? -> same as the state in the cluster
-  *     1.5) ContainerVersion 32bit
-  *     1.6) SXSpinLock
-  *     1.7) ReaderPin: 64bit
-  *     1.8) Ptr: Cluster* -> 64bit
-  *     1.9) Log: fixed size list:<OldVersion, NewVersion, UpdateEntry>:
-  *             has a 32bit head and a 32bit tail. when a new element is added,
-  *             if tail+1 == head(list is full), both head and tail are advanced by 1
-  *             and oldest version is overwritten. else tail is advanced by 1.
-  *
-  */
-
-// constexpr uint8_t BUFFER_UPDATE_LOG_SIZE = 10;
-// constexpr uint8_t BUFFER_OLD_VERSION_LIST_SIZE = 3;
 
 enum BufferVertexEntryState : uint8_t {
     CLUSTER_INVALID = 0,
@@ -205,83 +165,255 @@ struct BufferVertexEntry {
 class BufferManager : public BufferManagerInterface {
 // TODO: reuse deleted IDs
 public:
+    BufferManager(uint64_t internalSize, uint64_t leafSize) : internalVertexSize(internalSize),
+                                                              leafVertexSize(leafSize),
+                                                              currentRootId(INVALID_VECTOR_ID) override {
+        FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
+    }
+
     ~BufferManager() override {
-        if (!clusterDirectory.empty()) {
-            Shutdown();
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+
+        for (size_t level = MAX_TREE_HIGHT - 1; level > 0; --level) {
+            for (BufferVertexEntry* entry : clusterDirectory[level]) {
+                if (entry == nullptr) {
+                    continue;
+                }
+                entry->clusterLock.Lock(SX_EXCLUSIVE);
+                entry->headerLock.Lock(SX_EXCLUSIVE);
+                for (auto& mvccClus : entry->liveVersions) {
+                    mvccClus.second.versionPin = 0;
+                    uint64_t readerPins = mvccClus.second.clusterPtr.pin.load(std::memory_order_relaxed);
+                    DIVFTreeVertexInterface* clusterPtr = mvccClus.second.clusterPtr.clusterPtr;
+                    mvccClus.second.clusterPtr.pin.store(0, std::memory_order_relaxed);
+                    mvccClus.second.clusterPtr.clusterPtr = nullptr;
+                    clusterPtr->MarkForRecycle(readerPins);
+                }
+                entry->liveVersions.clear();
+                entry->currentVersion = 0;
+                entry->state.store(CLUSTER_INVALID);
+                VectorLocation invalidLocation = INVALID_VECTOR_LOCATION;
+                atomic_store128(&entry->centroidMeta.location, &invalidLocation, true);
+                entry->headerLock.Unlock();
+                entry->clusterLock.Unlock();
+            }
         }
-    }
 
-    BufferManager *GetInstance() {
-        return bufferMgrInstance;
-    }
+        for (BufferVertexEntry* entry : clusterDirectory[0]) {
+            if (entry == nullptr) {
+                continue;
+            }
+            entry->clusterLock.Lock(SX_EXCLUSIVE);
+            entry->headerLock.Lock(SX_EXCLUSIVE);
+            for (auto& mvccClus : entry->liveVersions) {
+                mvccClus.second.versionPin = 0;
+                uint64_t readerPins = mvccClus.second.clusterPtr.pin.load(std::memory_order_relaxed);
+                DIVFTreeVertexInterface* clusterPtr = mvccClus.second.clusterPtr.clusterPtr;
+                mvccClus.second.clusterPtr.pin.store(0, std::memory_order_relaxed);
+                mvccClus.second.clusterPtr.clusterPtr = nullptr;
+                clusterPtr->MarkForRecycle(readerPins);
+            }
+            entry->liveVersions.clear();
+            entry->currentVersion = 0;
+            entry->state.store(CLUSTER_INVALID);
+            VectorLocation invalidLocation = INVALID_VECTOR_LOCATION;
+            atomic_store128(&entry->centroidMeta.location, &invalidLocation, true);
+            entry->headerLock.Unlock();
+            entry->clusterLock.Unlock();
+        }
 
-    DIVFTreeVertexInterface *AllocateMemoryForVertex(uint8_t level) {
-        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "AllocateMemoryForVertex not implemented");
-        return nullptr;
-    }
+        for (BufferVectorEntry* entry : vectorDirectory) {
+            if (entry == nullptr) {
+                continue;
+            }
+            VectorLocation invalidLocation = INVALID_VECTOR_LOCATION;
+            atomic_store128(&entry->location, &invalidLocation, true);
+        }
 
-    // RetStatus BatchCreateBufferEntry(size_t num_required, uint8_t level)
+        sleep(10);
 
-    RetStatus Init() override {
-        FatalAssert(clusterDirectory.empty(), LOG_TAG_BUFFER, "Buffer already initialized");
-        clusterDirectory.emplace_back();
-        return RetStatus::Success();
-    }
-
-    RetStatus Shutdown() override {
-        FatalAssert(!clusterDirectory.empty(), LOG_TAG_BUFFER, "Buffer not initialized");
-        // TODO: nobody should be accessing the buffer or any clusters/pages at this point!!!
-        for (size_t level = clusterDirectory.size() - 1; level > 0; --level) {
-            for (BufferVertexEntry& entry : directory[level]) {
-                entry.clusterLock.Lock(SX_EXCLUSIVE);
-                entry.headerLock.Lock(SX_EXCLUSIVE);
-                // todo
+        for (size_t level = MAX_TREE_HIGHT - 1; level > 0; --level) {
+            for (BufferVertexEntry* entry : clusterDirectory[level]) {
+                if (entry != nullptr) {
+                    delete entry;
+                    entry = nullptr;
+                }
             }
             clusterDirectory[level].clear();
         }
-        directory[0].clear();
-        directory.clear();
+
+        for (BufferVertexEntry* entry : clusterDirectory[0]) {
+            if (entry != nullptr) {
+                delete entry;
+                entry = nullptr;
+            }
+        }
+        clusterDirectory[0].clear();
+
+        for (BufferVectorEntry* entry : vectorDirectory) {
+            if (entry != nullptr) {
+                delete entry;
+                entry = nullptr;
+            }
+        }
+        vectorDirectory.clear();
+    }
+
+    /*
+     * vertexMetaDataSize should be sizeof(Vertex)
+     * which includes all variables in vertex structure and Cluster Header
+     *
+     * will return the rootEntry in the INVALID state and locked in exclusive mode!
+     */
+    inline static RetStatus Init(uint64_t vertexMetaDataSize, uint16_t cap, uint16_t dim, BufferVertexEntry*& rootEntry) {
+        FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
+        uint64_t internalVertexSize = ALLIGNED_SIZE(ALLIGNED_SIZE(vertexMetaDataSize) +
+                                                    Cluster::DataBytes(false, cap, dim));
+        uint64_t leafVertexSize = ALLIGNED_SIZE(ALLIGNED_SIZE(vertexMetaDataSize) +
+                                                Cluster::DataBytes(true, cap, dim));
+        bufferMgrInstance = new BufferManager(internalVertexSize, leafVertexSize);
+        rootEntry = nullptr;
+        bufferMgrInstance->BatchCreateBufferEntry(1, VectorID::LEAF_LEVEL, &rootEntry);
         return RetStatus::Success();
     }
 
+    /*
+     * Note: No thread should be calling any functions from the bufferMgr the moment
+     * shutdown is called or some resources may not be cleaned properly
+     */
+    inline static RetStatus Shutdown() {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        delete bufferMgrInstance;
+        bufferMgrInstance = nullptr;
+        return RetStatus::Success();
+    }
+
+    inline static BufferManager* GetInstance() {
+        return bufferMgrInstance;
+    }
+
+    DIVFTreeVertexInterface* AllocateMemoryForVertex(uint8_t level) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        FatalAssert(MAX_TREE_HIGHT > VectorID::VECTOR_LEVEL && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+        return aligned_alloc(CACHE_LINE_SIZE,
+                             ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
+    }
+
+    void BatchCreateBufferEntry(size_t num_entries, uint8_t level, BufferVertexEntry** entries) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
+        FatalAssert(num_entries > 0, LOG_TAG_BUFFER, "number of entries cannot be 0!");
+        FatalAssert(MAX_TREE_HIGHT > VectorID::VECTOR_LEVEL && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+
+        bufferMgrLock.Lock(SX_EXCLUSIVE);
+        const uiont64_t nextVal = clusterDirectory[level].size();
+        for (size_t i = 0; i < num_entries; ++i) {
+            VectorID id = 0;
+            id._val = nextVal + i;
+            id._level = level;
+            id._creator_node_id = 0;
+
+            DIVFTreeVertexInterface* memLoc = AllocateMemoryForVertex(level)
+            CHECK_NOT_NULLPTR(memLoc, LOG_TAG_BUFFER);
+            entries[i] = new BufferVertexEntry(memLoc, id);
+            entries[i]->clusterLock.Lock(SX_EXCLUSIVE);
+
+            clusterDirectory[level].emplace_back(entries[i]);
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    void BatchCreateVectorEntry(size_t num_entries, BufferVectorEntry** entries) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
+        FatalAssert(num_entries > 0, LOG_TAG_BUFFER, "number of entries cannot be 0!");
+
+        bufferMgrLock.Lock(SX_EXCLUSIVE);
+        const uiont64_t nextVal = vectorDirectory.size();
+        for (size_t i = 0; i < num_entries; ++i) {
+            VectorID id = 0;
+            id._val = nextVal + i;
+            id._level = VectorID::LEAF_LEVEL;
+            id._creator_node_id = 0;
+
+            entries[i] = new BufferVectorEntry(id);
+            vectorDirectory.emplace_back(entries[i]);
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    void RecordRoot(VectorID newRootId) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        SANITY_CHECK(
+            bufferMgrLock.Lock(SX_SHARED);
+            BufferVertexEntry* newRootEntry = GetVertexEntry(newRootId, false);
+            UNUSED_VARIABLE(newRootEntry);
+            CHECK_NOT_NULLPTR(newRootEntry, LOG_TAG_BUFFER);
+            VectorID oldRootId = currentRootId.load();
+            if (oldRootId.IsValid()) {
+                BufferVertexEntry* oldRootEntry = GetVertexEntry(oldRootId, false);
+                CHECK_NOT_NULLPTR(oldRootEntry, LOG_TAG_BUFFER);
+                threadSelf->SanityCheckLockHeldInModeByMe(&oldRootEntry->clusterLock, SX_EXCLUSIVE);
+            }
+            /*
+            * the new root state can be deleted if it is deleted right now but has not been able
+            * to get the lock on the current root yet
+            */
+            FatalAssert(newRootEntry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER,
+                        "newRootState cannot be Invalid!");
+            bufferMgrLock.Unlock();
+        )
+        currentRootId.store(newRootId);
+    }
+
     VectorID GetCurrentRootId() const {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         return currentRootId.load();
     }
 
-    DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version) override {
-        CHECK_VECTORID_IS_VALID(vertexId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(vertexId, LOG_TAG_BUFFER);
-        uint64_t levelIdx = vertexId._level - 1;
-        FatalAssert(clusterDirectory.size() > levelIdx, LOG_TAG_BUFFER, "Level is out of bounds. VertexID="
-                    VECTORID_LOG_FMT ", max_level:%lu", VECTORID_LOG(vertexId), clusterDirectory.size());
-        FatalAssert(clusterDirectory[levelIdx].size() > vertexId._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
-                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(vertexId), clusterDirectory[levelIdx].size());
-        FatalAssert(clusterDirectory[levelIdx][vertexId._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Vertex not found in the buffer. VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
+    inline BufferVectorEntry* GetVectorEntry(VectorID id) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_VECTOR(id, LOG_TAG_BUFFER);
+        bufferMgrLock.Lock(SX_SHARED);
+        FatalAssert(vectorDirectory.size() > id._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
+                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(id), vectorDirectory.size());
+        BufferVectorEntry* entry = vectorDirectory[id._val];
+        bufferMgrLock.Unlock();
+        return entry;
+    }
 
-        BufferVertexEntry& entry = clusterDirectory[vertexId._level][vertexId._val];
-        FatalAssert(entry.state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
-        FatalAssert(entry.centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
-                    VECTORID_LOG_FMT "EntryID = " VECTORID_LOG_FMT, VECTORID_LOG(vertexId),
-                    VECTORID_LOG(entry.centroidMeta.selfId));
-        if (entry.state.load() == CLUSTER_DELETED) {
+    DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version) override {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        BufferVertexEntry* entry = GetVertexEntry(vertexId);
+        if (entry == nullptr) {
             return nullptr;
         }
 
-        headerLock.Lock(SX_SHARED);
-        FatalAssert(version <= currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
+        FatalAssert(entry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
+                    VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
+        FatalAssert(entry->centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
+                    VECTORID_LOG_FMT "EntryID = " VECTORID_LOG_FMT, VECTORID_LOG(vertexId),
+                    VECTORID_LOG(entry->centroidMeta.selfId));
+        if (entry->state.load() == CLUSTER_DELETED) {
+            return nullptr;
+        }
+
+        entry->headerLock.Lock(SX_SHARED);
+        FatalAssert(version <= entry->currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
                     VECTORID_LOG_FMT ", latest version = %u, input version = %u",
-                    VECTORID_LOG(vertexId), currentVersion, version);
-        auto& it = liveVersions.find(version);
-        if (it == liveVersions.end() || it->second.versionPin.load() == 0) {
-            headerLock.Unlock();
+                    VECTORID_LOG(vertexId), entry->currentVersion, version);
+        auto& it = entry->liveVersions.find(version);
+        if (it == entry->liveVersions.end() || it->second.versionPin.load() == 0) {
+            entry->headerLock.Unlock();
             return nullptr;
         }
 
         it->second.clusterPtr.pin.fetch_add(1);
         DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
-        headerLock.Unlock();
+        entry->headerLock.Unlock();
         if (vertex == nullptr) {
             return vertex;
         }
@@ -291,257 +423,194 @@ public:
         return vertex;
     }
 
-    BufferVertexEntry& ReadBufferEntry(VectorID vertexId, LockMode mode, bool* blocked = nullptr) override {
-        CHECK_VECTORID_IS_VALID(vertexId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(vertexId, LOG_TAG_BUFFER);
-        uint64_t levelIdx = vertexId._level - 1;
-        FatalAssert(clusterDirectory.size() > levelIdx, LOG_TAG_BUFFER, "Level is out of bounds. VertexID="
-                    VECTORID_LOG_FMT ", max_level:%lu", VECTORID_LOG(vertexId), clusterDirectory.size());
-        FatalAssert(clusterDirectory[levelIdx].size() > vertexId._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
-                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(vertexId), clusterDirectory[levelIdx].size());
-        FatalAssert(clusterDirectory[levelIdx][vertexId._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Vertex not found in the buffer. VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
+    /*
+     * If we need to lock multiple clusters, then lower level clusters always take priority and
+     * are locked first(i.e root is locked the last). If we want to lock to clusters in the same level,
+     * the cluster with lower id.val should be locked first.
+     */
+    BufferVertexEntry* ReadBufferEntry(VectorID vertexId, LockMode mode, bool* blocked = nullptr) override {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        BufferVertexEntry* entry = GetVertexEntry(vertexId);
+        if (entry == nullptr) {
+            return nullptr;
+        }
 
-        BufferVertexEntry& entry = clusterDirectory[vertexId._level][vertexId._val];
-        FatalAssert(entry.state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
+        FatalAssert(entry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
                     VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
-        FatalAssert(entry.centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
+        FatalAssert(entry->centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
                     VECTORID_LOG_FMT "EntryID = " VECTORID_LOG_FMT, VECTORID_LOG(vertexId),
-                    VECTORID_LOG(entry.centroidMeta.selfId));
-        BufferVertexEntryState state = entry.state.load();
+                    VECTORID_LOG(entry->centroidMeta.selfId));
+        BufferVertexEntryState state = entry->state.load();
         while (state != CLUSTER_STABLE) {
-            entry.state.wait(state);
-            state = entry.state.load();
+            if (state == CLUSTER_DELETED) {
+                return nullptr;
+            }
+            entry->state.wait(state);
+            state = entry->state.load();
             if (blocked != nullptr) {
                 *blocked = true;
             }
         }
 
         if (blocked == nullptr || (*blocked)) {
-            entry.clusterLock.Lock(mode);
+            entry->clusterLock.Lock(mode);
         } else {
-            if (!entry.clusterLock.TryLock(mode)) {
+            if (!entry->clusterLock.TryLock(mode)) {
                 *blocked = true;
-                entry.clusterLock.Lock(mode);
+                entry->clusterLock.Lock(mode);
             } else {
                 *blocked = false;
             }
         }
 
-        if (entry.state.load() != CLUSTER_STABLE) {
+        state = entry->state.load();
+        if (state == CLUSTER_DELETED) {
+            entry->clusterLock.Unlock();
+            return nullptr;
+        }
+
+        if (state != CLUSTER_STABLE) {
             if (blocked != nullptr) {
                 *blocked = true;
             }
-            entry.condVar.Wait(LockWrapper<mode>{entry.clusterLock})
+            entry->condVar.Wait(LockWrapper<mode>{entry->clusterLock})
         }
 
-        FatalAssert(entry.state.load() == CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is not stable! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
+        state = entry->state.load();
+        if (state == CLUSTER_DELETED) {
+            entry->clusterLock.Unlock();
+            return nullptr;
+        }
+
+        FatalAssert(state == CLUSTER_STABLE, LOG_TAG_BUFFER,
+                    "BufferEntry state is not stable! VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
         return entry;
     }
 
     BufferVertexEntry* TryReadBufferEntry(VectorID vertexId, LockMode mode) override {
-        CHECK_VECTORID_IS_VALID(vertexId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(vertexId, LOG_TAG_BUFFER);
-        uint64_t levelIdx = vertexId._level - 1;
-        FatalAssert(clusterDirectory.size() > levelIdx, LOG_TAG_BUFFER, "Level is out of bounds. VertexID="
-                    VECTORID_LOG_FMT ", max_level:%lu", VECTORID_LOG(vertexId), clusterDirectory.size());
-        FatalAssert(clusterDirectory[levelIdx].size() > vertexId._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
-                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(vertexId), clusterDirectory[levelIdx].size());
-        FatalAssert(clusterDirectory[levelIdx][vertexId._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Vertex not found in the buffer. VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        BufferVertexEntry* entry = GetVertexEntry(vertexId);
+        if (entry == nullptr) {
+            return nullptr;
+        }
 
-        BufferVertexEntry& entry = clusterDirectory[vertexId._level][vertexId._val];
-        FatalAssert(entry.state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
+        FatalAssert(entry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
                     VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
-        FatalAssert(entry.centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
+        FatalAssert(entry->centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
                     VECTORID_LOG_FMT "EntryID = " VECTORID_LOG_FMT, VECTORID_LOG(vertexId),
-                    VECTORID_LOG(entry.centroidMeta.selfId));
-        if (entry.state.load() != CLUSTER_STABLE || !entry.clusterLock.TryLock(mode)) {
+                    VECTORID_LOG(entry->centroidMeta.selfId));
+        if (entry->state.load() != CLUSTER_STABLE || !entry->clusterLock.TryLock(mode)) {
             return nullptr;
         }
 
-        if (entry.state.load() != CLUSTER_STABLE) {
-            entry.clusterLock.Unlock();
+        if (entry->state.load() != CLUSTER_STABLE) {
+            entry->clusterLock.Unlock();
             return nullptr;
         }
 
-        FatalAssert(entry.state.load() == CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is not stable! VertexID="
+        FatalAssert(entry->state.load() == CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is not stable! VertexID="
                     VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
         return &entry;
     }
 
-    void ReleaseBufferEntry(BufferVertexEntry& entry, bool stableizeEntry = false) override {
-        CHECK_VECTORID_IS_VALID(entry.centroidMeta.selfId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(entry.centroidMeta.selfId, LOG_TAG_BUFFER);
-        FatalAssert(entry.state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(entry.centroidMeta.selfId));
-        if (stableizeEntry) {
-            FatalAssert(entry.state.load() != CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is Stable! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(entry.centroidMeta.selfId));
-            threadSelf->SanityCheckLockHeldInModeByMe(&entry.clusterLock, SX_EXCLUSIVE);
-            entry.state.store(CLUSTER_STABLE);
-            entry.condVar.NotifyAll();
-            entry.state.notify_all();
+    void ReleaseBufferEntry(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags) override {
+        CHECK_NOT_NULLPTR(entry, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_VALID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_CENTROID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
+        FatalAssert(entry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
+                    VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
+        if ((bool)(flags.notifyAll)) {
+            FatalAssert(entry->state.load() != CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is Stable! VertexID="
+                        VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
+            threadSelf->SanityCheckLockHeldInModeByMe(&entry->clusterLock, SX_EXCLUSIVE);
+            if ((bool)(flags.stablize)) {
+                entry->state.store(CLUSTER_STABLE);
+            } else {
+                FatalAssert(entry->state.load() == CLUSTER_DELETED, LOG_TAG_BUFFER, "BufferEntry state is not deleted! "
+                            "VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
+            }
+            entry->condVar.NotifyAll();
+            entry->state.notify_all();
         }
-        entry.clusterLock.Unlock();
+        entry->clusterLock.Unlock();
     }
 
-    RetStatus UpgradeAccessToExclusive(BufferVertexEntry& entry, BufferVertexEntryState& targetState,
+    RetStatus UpgradeAccessToExclusive(BufferVertexEntry* entry, BufferVertexEntryState& targetState,
                                        bool unlockOnFail = false) {
-        CHECK_VECTORID_IS_VALID(entry.centroidMeta.selfId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(entry.centroidMeta.selfId, LOG_TAG_BUFFER);
-        FatalAssert(entry.state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(entry.centroidMeta.selfId));
-        threadSelf->SanityCheckLockHeldInModeByMe(&entry.clusterLock, SX_SHARED);
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_NOT_NULLPTR(entry, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_VALID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_CENTROID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
+        FatalAssert(entry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
+                    VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
+        threadSelf->SanityCheckLockHeldInModeByMe(&entry->clusterLock, SX_SHARED);
         BufferVertexEntryState expected = CLUSTER_STABLE;
-        if (entry.state.compare_exchange_strong(expected, targetState)) {
-            entry.clusterLock.Unlock();
-            entry.clusterLock.Lock(SX_EXCLUSIVE);
+        if (entry->state.compare_exchange_strong(expected, targetState)) {
+            entry->clusterLock.Unlock();
+            entry->clusterLock.Lock(SX_EXCLUSIVE);
             return RetStatus::Success();
         } else {
-            entry.condVar.Wait(LockWrapper<SX_SHARED>{entry.clusterLock});
+            entry->condVar.Wait(LockWrapper<SX_SHARED>{entry->clusterLock});
             if (unlockOnFail) {
-                entry.clusterLock.Unlock();
+                entry->clusterLock.Unlock();
             }
             targetState = expected;
             return RetStatus{.stat=RetStatus::FAILED_TO_CAS_ENTRY_STATE, .message=""};
         }
     }
 
-    RetStatus DowngradeAccessToShared(BufferVertexEntry& entry) {
-        CHECK_VECTORID_IS_VALID(entry.centroidMeta.selfId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(entry.centroidMeta.selfId, LOG_TAG_BUFFER);
-        FatalAssert(entry.state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(entry.centroidMeta.selfId));
-        FatalAssert(entry.state.load() != CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is Stable! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(entry.centroidMeta.selfId));
-        threadSelf->SanityCheckLockHeldInModeByMe(&entry.clusterLock, SX_EXCLUSIVE);
-        entry.clusterLock.Unlock();
-        entry.clusterLock.Lock(SX_SHARED);
-        entry.state.store(CLUSTER_STABLE);
-        entry.condVar.NotifyAll();
-        entry.state.notify_all();
+    RetStatus DowngradeAccessToShared(BufferVertexEntry* entry) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_NOT_NULLPTR(entry, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_VALID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_CENTROID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
+        FatalAssert(entry->state.load() != CLUSTER_INVALID, LOG_TAG_BUFFER, "BufferEntry state is Invalid! VertexID="
+                    VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
+        FatalAssert(entry->state.load() != CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is Stable! VertexID="
+                    VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
+        threadSelf->SanityCheckLockHeldInModeByMe(&entry->clusterLock, SX_EXCLUSIVE);
+        entry->clusterLock.Unlock();
+        entry->clusterLock.Lock(SX_SHARED);
+        entry->state.store(CLUSTER_STABLE);
+        entry->condVar.NotifyAll();
+        entry->state.notify_all();
     }
 
-    DIVFTreeVertexInterface* GetVertex(VectorID vertexId) override {
-        CHECK_VECTORID_IS_VALID(vertexId, LOG_TAG_BUFFER);
-        CHECK_VECTORID_IS_CENTROID(vertexId, LOG_TAG_BUFFER);
-        uint64_t levelIdx = vertexId._level - 1;
-        FatalAssert(clusterDirectory.size() > levelIdx, LOG_TAG_BUFFER, "Level is out of bounds. VertexID="
-                    VECTORID_LOG_FMT ", max_level:%lu", VECTORID_LOG(vertexId), clusterDirectory.size());
-        FatalAssert(clusterDirectory[levelIdx].size() > vertexId._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
-                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(vertexId), clusterDirectory[levelIdx].size());
-        FatalAssert(clusterDirectory[levelIdx][vertexId._val].cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Vertex not found in the buffer. VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
-
-        DIVFTreeVertexInterface* vertex = static_cast<DIVFTreeVertexInterface*>
-                                        (clusterDirectory[vertexId._level][vertexId._val].cluster_address);
-        FatalAssert(vertex->CentroidID() == vertexId, LOG_TAG_BUFFER, "Mismatch in ID. BaseID=" VECTORID_LOG_FMT
-                    ", Found ID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId), VECTORID_LOG(vertex->CentroidID()));
-
-        return vertex;
-    }
-
-    Vector GetVector(VectorID id) {
-        CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
-        FatalAssert(directory.size() > id._level, LOG_TAG_BUFFER, "Level is out of bounds. " VECTORID_LOG_FMT
-                    ", max_level=%lu", VECTORID_LOG(id), directory.size());
-        FatalAssert(directory[id._level].size() > id._val, LOG_TAG_BUFFER, "Val is out of bounds. " VECTORID_LOG_FMT
-                    ", max_val:%lu", VECTORID_LOG(id), directory[id._level].size());
-        FatalAssert(directory[id._level][id._val].vector_address != INVALID_ADDRESS , LOG_TAG_BUFFER,
-                    "Vector not found in the buffer. VectorID=" VECTORID_LOG_FMT, VECTORID_LOG(id));
-
-        return Vector(directory[id._level][id._val].vector_address);
-    }
-
-    bool InBuffer(VectorID id) {
-        CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
-        if (directory.size() <= id._level || directory[id._level].size() <= id._val) {
-            return false;
-        }
-
-        return true;
-    }
-
-    VectorID RecordRoot() {
-        FatalAssert(directory.size() > 0, LOG_TAG_BUFFER, "tree should be initialized");
-        FatalAssert(((directory.size() == 1) || !(directory.back().empty())), LOG_TAG_BUFFER,
-                    "last level cannot be empty");
-        VectorID _id = NextID(directory.size());
-        directory.emplace_back();
-        directory[_id._level].emplace_back(nullptr);
-        return _id;
-    }
-
-    // todo batch record
-    VectorID RecordVector(uint8_t level) {
-        FatalAssert(directory.size() >= 2, LOG_TAG_BUFFER, "Tree should have a height of at least 2");
-        FatalAssert(directory.size() - 1 >= level, LOG_TAG_BUFFER, "Level is out of bounds. level=%hhu, max_level:%lu",
-                    level, directory.size());
-        FatalAssert(((level == 0) || (!directory[level - 1].empty())), LOG_TAG_BUFFER, "last level cannot be empty");
-        VectorID _id = NextID(level);
-        directory[level].emplace_back(nullptr);
-        return _id;
-    }
-
-    RetStatus UpdateVectorInfo(VectorID id, Address cont_addr, Address entry_addr, Address clust_addr) {
-        RetStatus rs = RetStatus::Success();
-        CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
-        directory[id._level][id._val].compare_exchange_strong()
-        return rs;
-    }
-
-    RetStatus UpdateClusterAddress(VectorID id, Address cluster_address) {
-        RetStatus rs = RetStatus::Success();
-        CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
-        FatalAssert(cluster_address != INVALID_ADDRESS, LOG_TAG_BUFFER,
-                    "Invalidating cluster address. VectorID=" VECTORID_LOG_FMT, VECTORID_LOG(id));
-        FatalAssert(InBuffer(id), LOG_TAG_BUFFER, "Vector does not exist in the buffer. VectorID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(id));
-        directory[id._level][id._val].cluster_address = cluster_address;
-        return rs;
-    }
-
-    // // todo batch update
-    // RetStatus Update(VectorID id, Address vector_address, Address cluster_address) {
-    //     RetStatus rs = RetStatus::Success();
-    //     rs = UpdateVectorAddress(id, vector_address);
-    //     if (!rs.IsOK()) {
-    //         return rs;
-    //     }
-    //     rs = UpdateClusterAddress(id, cluster_address); // todo: revert change of vector address if rs fails here
-    //     return rs;
-    // }
-
-    // void Evict(VectorID id) {
-    //     // todo
-    //     FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Eviction is not implemented");
-    // }
-
-    // void Erase(VectorID id) {
-    //     // todo
-    //     FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Erase is not implemented");
-    // }
-
-    uint64_t GetHeight() {
-        return directory.size();
+    uint64_t GetHeight() const {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        return currentRootId.load()._level + 1;
     }
 
     String ToString() {
-        String str = "<Height: " + std::to_string(directory.size()) + ", ";
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Not Implemented!");
+        /*
+         * Todo: we cannot get any other locks when we get the bufferMgr lock but if we do not get the
+         * BufferMgr lock the directory may change! Moreover, we may have multiple versions and printing all versions
+         * seem to be too much! Can we do anything about this?
+         */
+        if (bufferMgrInstance == nullptr) {
+            return String("NULL");
+        }
+
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        bufferMgrLock.Lock(SX_SHARED);
+        uint64_t height = GetHeight();
+        String str = "<Height: " + std::to_string(height) + ", ";
         str += "Directory:[";
-        for (size_t i = 0; i < directory.size(); ++i) {
-            str += "Level" + std::to_string(i) + ":[";
-            for (size_t j = 0; j < directory[i].size(); ++j) {
-                str += "{VectorID:(" + std::to_string(i) + ", ?, " + std::to_string(j) + "), Info:";
-                VectorInfo& vec_info = directory[i][j];
-                str += String("(%p, %p)}", vec_info.vector_address, vec_info.cluster_address);
-                if (j != directory[i].size() - 1) {
+        for (size_t i = 0; i < height; ++i) {
+            str += "Level: " + std::to_string(i) + ":[";
+            for (BufferVertexEntry *entry : clusterDirectory[i]) {
+                if (entry == nullptr) {
+                    str += "{NULL}";
+                } else {
+                    str += String("{VectorID:" VECTORID_LOG_FMT ", Info:", VECTORID_LOG(entry->centroidMeta.selfId));
+                    str += entry->
+                }
+                if (j != clusterDirectory[i].size() - 1) {
                     str += ", ";
                 }
             }
-            if (i != directory.size() - 1) {
+            if (i != height - 1) {
                 str += "], ";
             }
             else {
@@ -549,42 +618,39 @@ public:
             }
             str += ">";
         }
+        bufferMgrLock.Unlock();
         return str;
     }
 
 protected:
-    /* bufferM */
-    VectorID NextID(uint8_t level) {
-        FatalAssert(directory.size() > 0, LOG_TAG_BUFFER, "tree should be initialized");
-        FatalAssert(!directory.back().empty() || (level == 1 && directory.size() == 1), LOG_TAG_BUFFER,
-                    "last level cannot be empty");
-        FatalAssert(level <= directory.size(),
-                    LOG_TAG_BUFFER, "Input level(%hhu) should be non-zero and less than or equal to "
-                    "the height of the tree(%hhu).",level, directory.size());
-
-        VectorID _id = 0;
-        _id._creator_vertex_id = 0; // todo for disaggregated
-        _id._level = level;
-        if (level == directory.size()) {
-            _id._val = 0;
+    inline BufferVertexEntry* GetVertexEntry(VectorID id, bool needLock = true) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_BUFFER);
+        uint64_t levelIdx = id._level - 1;
+        FatalAssert(MAX_TREE_HIGHT > levelIdx, LOG_TAG_BUFFER, "Level is out of bounds. VertexID=" VECTORID_LOG_FMT,
+                    VECTORID_LOG(id));
+        if (needLock) {
+            bufferMgrLock.Lock(SX_SHARED);
         }
-        else {
-            if (directory[level].size() >= VectorID::MAX_ID_PER_LEVEL - 1) {
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_BUFFER, "level %hhu is full.", level);
-            }
-            _id._val = directory[level].size();
+        threadSelf->SanityCheckLockHeldByMe(&bufferMgrLock);
+        FatalAssert(clusterDirectory[levelIdx].size() > id._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
+                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(id), clusterDirectory[levelIdx].size());
+        BufferVertexEntry* entry = clusterDirectory[levelIdx][id._val];
+        if (needLock) {
+            bufferMgrLock.Unlock();
         }
-
-        CHECK_VECTORID_IS_VALID(_id, LOG_TAG_BUFFER);
-        return _id;
+        return entry;
     }
 
+    const uint64_t internalVertexSize;
+    const uint64_t leafVertexSize;
     SXSpinLock bufferMgrLock;
     std::atomic<VectorID> currentRootId;
-    std::vector<BufferVectorEntry> vectorDirectory;
-    std::vector<std::vector<BufferVertexEntry>> clusterDirectory;
+    std::vector<BufferVectorEntry*> vectorDirectory;
+    std::vector<BufferVertexEntry*> clusterDirectory[MAX_TREE_HIGHT];
 
-    static BufferManager *bufferMgrInstance = nullptr;
+    inline static BufferManager *bufferMgrInstance = nullptr;
 
 TESTABLE;
 };

@@ -529,6 +529,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
 
 // todo add unlikely to assert conditions
 #ifdef ENABLE_ASSERTS
+#define SANITY_CHECK(codeBlock) codeBlock
 #define FatalAssert(cond, tag, msg, ...) \
     do {\
         if (!(cond)){\
@@ -591,6 +592,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     } while(0)
 
 #else
+#define SANITY_CHECK(codeBlock)
 #define FatalAssert(cond, tag, msg, ...)
 #define ErrorAssert(cond, tag, msg, ...)
 #define FaultAssert(statement, tag, msg, ...)
