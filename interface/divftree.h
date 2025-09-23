@@ -70,39 +70,39 @@ struct DIVFTreeAttributes {
 
 class DIVFTreeVertexInterface {
 public:
-    virtual ~DIVFTreeVertexInterface() = default;
-    virtual RetStatus AssignParent(VectorID parent_id) = 0;
+    // virtual ~DIVFTreeVertexInterface() = default;
+    // virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
     virtual void MarkForRecycle(uint64_t pinCount) = 0;
     virtual void Unpin() = 0;
 
-    virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
+    // virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
 
-    virtual RetStatus Search(const Vector& query, size_t k,
-                             std::vector<std::pair<VectorID, DTYPE>>& neighbours) = 0;
+    // virtual RetStatus Search(const Vector& query, size_t k,
+    //                          std::vector<std::pair<VectorID, DTYPE>>& neighbours) = 0;
 
-    virtual VectorID CentroidID() const = 0;
-    virtual VectorID ParentID() const = 0;
+    // virtual VectorID CentroidID() const = 0;
+    // virtual VectorID ParentID() const = 0;
     // virtual uint16_t Size() const = 0;
 
     // virtual bool IsFull() const = 0;
     // virtual bool IsAlmostEmpty() const = 0;
     // virtual bool Contains(VectorID id) const = 0;
 
-    virtual bool IsLeaf() const = 0;
-    virtual uint8_t Level() const = 0;
+    // virtual bool IsLeaf() const = 0;
+    // virtual uint8_t Level() const = 0;
 
-    virtual Vector ComputeCurrentCentroid() const = 0;
+    // virtual Vector ComputeCurrentCentroid() const = 0;
 
-    virtual uint16_t MinSize() const = 0;
-    virtual uint16_t MaxSize() const = 0;
-    virtual uint16_t VectorDimension() const = 0;
+    // virtual uint16_t MinSize() const = 0;
+    // virtual uint16_t MaxSize() const = 0;
+    // virtual uint16_t VectorDimension() const = 0;
 
-    /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-    virtual VPairComparator GetSimilarityComparator(bool reverese) const = 0;
-    virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
+    // /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
+    // virtual VPairComparator GetSimilarityComparator(bool reverese) const = 0;
+    // virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
-    virtual String ToString(bool detailed = false) const = 0;
+    // virtual String ToString(bool detailed = false) const = 0;
 };
 
 class DIVFTreeInterface {

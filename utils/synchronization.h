@@ -28,6 +28,10 @@ union alignas(16) atomic_data128 {
 #endif
     };
     __int128_t raw;
+
+    atomic_data128(__int128_t data) : raw{data} {}
+
+    atomic_data128() : raw{0} {}
 };
 
 

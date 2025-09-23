@@ -305,14 +305,14 @@ inline String VectorStateToString(VectorState state) {
 /* todo: we may need to use packed attrbite for these in the multi node setup to save network bandwidth */
 struct VectorMetaData {
     VectorID id;
-    VectorState state;
+    std::atomic<VectorState> state;
 };
 
 /* todo: we may need to use packed attrbite for these in the multi node setup to save network bandwidth */
 struct CentroidMetaData {
     VectorID id;
     Version version;
-    VectorState state;
+    std::atomic<VectorState> state;
 };
 
 /*
@@ -320,99 +320,106 @@ struct CentroidMetaData {
  *
  * todo: put const variables in the vertex class to avoid reading them
  * each time and to avoid using too much memory in the local system
+ *
+ * todo: we may need to put this reserved_size, etc in a cache line of its own as unlike vertex header
+ * it is read from remote + it is different from cluster data unless we do a single read/write for this and
+ * combine it with the first block -> for read we have to read the header first in a seperate RDMA to avoid
+ * out of order reads between header and data.
  */
 struct ClusterHeader {
-    const bool is_leaf;
-    const uint16_t block_size;
-    const uint16_t capacity;
-    const uint16_t dimension;
-    std::atomic<uint16_t> reserved_size;
+    std::atomic<uint16_t> reserved_size; // todo: do we need reserved_size in compute nodes?
     std::atomic<uint16_t> visible_size;
-    std::atomic<uint16_t> num_deleted;
-    std::atomic<uint64_t> reader_pin;
+    std::atomic<uint16_t> num_deleted; // todo: do we need num deleted in compute nodes?
 };
 class Cluster {
 public:
+    inline static size_t NumBlocks(uint16_t block_size, uint16_t cap) {
+        return (cap + block_size - 1) / block_size;
+    }
+
     inline static size_t DataBytes(bool is_leaf_vertex, uint16_t block_size, uint16_t cap, uint16_t dim) {
-        const uint16_t num_blocks = (cap + block_size - 1) / block_size;
         const uint64_t header_bytes = (is_leaf_vertex ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
         const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dim;
-        return ((num_blocks - 1) * ALLIGNED_SIZE(block_size * (header_bytes + data_bytes))) +
+        return ((NumBlocks(block_size, cap) - 1) * ALLIGNED_SIZE(block_size * (header_bytes + data_bytes))) +
                ALLIGNED_SIZE(cap % block_size * (header_bytes + data_bytes));
     }
 
     Cluster(bool is_leaf_vertex, uint16_t block_cap, uint16_t cap, uint16_t dim, bool set_zero = true) :
-            header{is_leaf_vertex, block_cap, cap, dim, 0, 0, 0, 0} {
+            header{0, 0, 0} {
         FatalAssert(block_cap > 0, LOG_TAG_CLUSTER, "Block size must be greater than 0. block_size=%hu", block_cap);
         FatalAssert(cap > 0, LOG_TAG_CLUSTER, "Capacity must be greater than 0. capacity=%hu", cap);
         FatalAssert(dim > 0, LOG_TAG_CLUSTER, "Dimension must be greater than 0. dimension=%hu", dim);
         if (set_zero) {
-            memset(blocks, 0, DataBytes(header.is_leaf, header.block_size, header.capacity, header.dimension));
+            memset(blocks, 0, DataBytes(is_leaf_vertex, block_cap, cap, dim));
         }
     }
 
-    inline const void* MetaData(uint16_t offset) const {
-        FatalAssert(offset < header.capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
-                    offset, header.capacity);
-        const uint16_t block_number = offset / header.block_size;
-        const uint16_t block_offset = offset % header.block_size;
-        const uint64_t header_bytes = (header.is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
-        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)header.dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(header.block_size * (header_bytes + data_bytes));
+    inline AddressToConst MetaData(uint16_t offset, bool is_leaf, uint16_t block_size,
+                                uint16_t capacity, uint16_t dimension) const {
+        FatalAssert(offset < capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
+                    offset, capacity);
+        const uint16_t block_number = offset / block_size;
+        const uint16_t block_offset = offset % block_size;
+        const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
+        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
+        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
-                    "block_number=%hu, block_size=%hu", offset, block_number, header.block_size);
-        return reinterpret_cast<const void*>(blocks +
-                                             block_number * block_bytes + block_offset * header_bytes);
+                    "block_number=%hu, block_size=%hu", offset, block_number, block_size);
+        return reinterpret_cast<AddressToConst>(blocks +
+                                                block_number * block_bytes + block_offset * header_bytes);
     }
 
-    inline void* MetaData(uint16_t offset) {
-        FatalAssert(offset < header.capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
-                    offset, header.capacity);
-        const uint16_t block_number = offset / header.block_size;
-        const uint16_t block_offset = offset % header.block_size;
-        const uint64_t header_bytes = (header.is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
-        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)header.dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(header.block_size * (header_bytes + data_bytes));
+    inline Address MetaData(uint16_t offset, bool is_leaf, uint16_t block_size,
+                          uint16_t capacity, uint16_t dimension) {
+        FatalAssert(offset < capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
+                    offset, capacity);
+        const uint16_t block_number = offset / block_size;
+        const uint16_t block_offset = offset % block_size;
+        const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
+        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
+        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
-                    "block_number=%hu, block_size=%hu", offset, block_number, header.block_size);
-        return reinterpret_cast<void*>(blocks +
-                                       block_number * block_bytes + block_offset * header_bytes);
+                    "block_number=%hu, block_size=%hu", offset, block_number, block_size);
+        return reinterpret_cast<Address>(blocks +
+                                         block_number * block_bytes + block_offset * header_bytes);
     }
 
-    inline const VTYPE* Data(uint16_t offset) const {
-        FatalAssert(offset < header.capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
-                    offset, header.capacity);
-        const uint16_t block_number = offset / header.block_size;
-        const uint16_t block_offset = offset % header.block_size;
-        const uint64_t header_bytes = (header.is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
-        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)header.dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(header.block_size * (header_bytes + data_bytes));
-        const uint16_t meta_data_bytes = (block_number == (header.block_size - 1) ?
-                                          header.capacity % header.block_size : header.block_size) *
+    inline const VTYPE* Data(uint16_t offset, bool is_leaf, uint16_t block_size,
+                             uint16_t capacity, uint16_t dimension) const {
+        FatalAssert(offset < capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
+                    offset, capacity);
+        const uint16_t block_number = offset / block_size;
+        const uint16_t block_offset = offset % block_size;
+        const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
+        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
+        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
+        const uint16_t meta_data_bytes = (block_number == (block_size - 1) ?
+                                          capacity % block_size : block_size) *
                                           header_bytes;
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
-                    "block_number=%hu, block_size=%hu", offset, block_number, header.block_size);
+                    "block_number=%hu, block_size=%hu", offset, block_number, block_size);
         return reinterpret_cast<const VTYPE*>(blocks +
                                               block_number * block_bytes + meta_data_bytes + block_offset * data_bytes);
     }
 
-    inline VTYPE* Data(uint16_t offset) {
-        FatalAssert(offset < header.capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
-                    offset, header.capacity);
-        const uint16_t block_number = offset / header.block_size;
-        const uint16_t block_offset = offset % header.block_size;
-        const uint64_t header_bytes = (header.is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
-        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)header.dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(header.block_size * (header_bytes + data_bytes));
-        const uint16_t meta_data_bytes = (block_number == (header.block_size - 1) ?
-                                          header.capacity % header.block_size : header.block_size) *
+    inline VTYPE* Data(uint16_t offset, bool is_leaf, uint16_t block_size,
+                       uint16_t capacity, uint16_t dimension) {
+        FatalAssert(offset < capacity, LOG_TAG_CLUSTER, "Offset is out of bounds. offset=%hu, capacity=%hu",
+                    offset, capacity);
+        const uint16_t block_number = offset / block_size;
+        const uint16_t block_offset = offset % block_size;
+        const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
+        const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
+        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
+        const uint16_t meta_data_bytes = (block_number == (block_size - 1) ?
+                                          capacity % block_size : block_size) *
                                           header_bytes;
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
-                    "block_number=%hu, block_size=%hu", offset, block_number, header.block_size);
+                    "block_number=%hu, block_size=%hu", offset, block_number, block_size);
         return reinterpret_cast<VTYPE*>(blocks +
                                         block_number * block_bytes + meta_data_bytes + block_offset * data_bytes);
     }

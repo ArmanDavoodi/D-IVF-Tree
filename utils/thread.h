@@ -30,8 +30,12 @@
 #endif
 namespace divftree {
 
-enum LockMode {
+enum LockMode : uint8_t  {
     SX_SHARED, SX_EXCLUSIVE
+};
+
+enum LockHeld : uint8_t {
+    LOCKED, UNLOCKED, LOCK_CHECK_DISABLED
 };
 
 String LockModeToString(LockMode mode) {
@@ -114,12 +118,39 @@ public:
 #endif
     }
 
+    inline LockHeld LockHeldByMe(void* lockAddr) {
+        UNUSED_VARIABLE(lockAddr);
+#ifdef LOCK_DEBUG
+        SanityCheckLockNotHeldInBothModesByMe(lockAddr);
+        if (heldExclusive.find(lockAddr) != heldExclusive.end()) || (heldShared.find(lockAddr) != heldShared.end()) {
+            return LockHeld::LOCKED;
+        } else {
+            return LockHeld::UNLOCKED;
+        }
+#endif
+        return LockHeld::LOCK_CHECK_DISABLED;
+    }
+
+    inline LockHeld LockHeldInModeByMe(void* lockAddr, LockMode mode) {
+        UNUSED_VARIABLE(lockAddr);
+        UNUSED_VARIABLE(mode);
+#ifdef LOCK_DEBUG
+        SanityCheckLockNotHeldInBothModesByMe(lockAddr);
+        if (((mode == LockMode::SX_EXCLUSIVE) && (heldExclusive.find(lockAddr) != heldExclusive.end())) ||
+            ((mode == LockMode::SX_SHARED) && (heldShared.find(lockAddr) != heldShared.end()))) {
+            return LockHeld::LOCKED;
+        } else {
+            return LockHeld::UNLOCKED;
+        }
+#endif
+        return LockHeld::LOCK_CHECK_DISABLED;
+    }
+
     inline void SanityCheckLockHeldByMe(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
-        FatalAssert((heldExclusive.find(lockAddr) != heldExclusive.end()) ||
-                    (heldShared.find(lockAddr) != heldShared.end()),
+        FatalAssert(LockHeldByMe(lockAddr) == LockHeld::LOCKED,
                     LOG_TAG_LOCK, "Lock %p is not held by thread %lu", lockAddr, _id);
 #endif
     }
@@ -129,15 +160,8 @@ public:
         UNUSED_VARIABLE(mode);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
-        if (mode == SX_EXCLUSIVE) {
-            FatalAssert(heldExclusive.find(lockAddr) != heldExclusive.end(),
-                        LOG_TAG_LOCK, "Lock %p is not held in EXCLUSIVE mode by thread %lu",
-                        lockAddr, _id);
-        } else {
-            FatalAssert(heldShared.find(lockAddr) != heldShared.end(),
-                        LOG_TAG_LOCK, "Lock %p is not held in SHARED mode by thread %lu",
-                        lockAddr, _id);
-        }
+        FatalAssert(LockHeldInModeByMe(lockAddr, mode) == LockHeld::LOCKED,
+                    LOG_TAG_LOCK, "Lock %p is not held by thread %lu in mode %hhu", lockAddr, _id, (uint8_t)(mode));
 #endif
     }
 
@@ -145,10 +169,8 @@ public:
         UNUSED_VARIABLE(lockAddr);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
-        FatalAssert(heldShared.find(lockAddr) == heldShared.end() &&
-                    heldExclusive.find(lockAddr) == heldExclusive.end(),
-                    LOG_TAG_LOCK, "Lock %p is held by thread %lu",
-                    lockAddr, _id);
+        FatalAssert(LockHeldByMe(lockAddr) == LockHeld::UNLOCKED,
+                    LOG_TAG_LOCK, "Lock %p is held by thread %lu", lockAddr, _id);
 #endif
     }
 
@@ -157,15 +179,8 @@ public:
         UNUSED_VARIABLE(mode);
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
-        if (mode == SX_EXCLUSIVE) {
-            FatalAssert(heldExclusive.find(lockAddr) == heldExclusive.end(),
-                        LOG_TAG_LOCK, "Lock %p is held in EXCLUSIVE mode by thread %lu",
-                        lockAddr, _id);
-        } else {
-            FatalAssert(heldShared.find(lockAddr) == heldShared.end(),
-                        LOG_TAG_LOCK, "Lock %p is held in SHARED mode by thread %lu",
-                        lockAddr, _id);
-        }
+        FatalAssert(LockHeldInModeByMe(lockAddr, mode) == LockHeld::UNLOCKED,
+                    LOG_TAG_LOCK, "Lock %p is held by thread %lu in mode %hhu", lockAddr, _id, (uint8_t)(mode));
 #endif
     }
 protected:

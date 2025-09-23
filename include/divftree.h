@@ -195,210 +195,318 @@
 
 namespace divftree {
 
+struct VectorBatch {
+    VTYPE* data;
+    VectorID* id;
+    Version* version;
+    uint16_t size;
+};
+
 class DIVFTreeVertex : public DIVFTreeVertexInterface {
 public:
-    static inline size_t AlignedBytes(uint16_t dim, uint16_t max_size) {
-        return ALLIGNED_SIZE(sizeof(DIVFTreeVertex)) + Cluster::AllignedDataBytes(dim, max_size);
+    DIVFTreeVertex() : _clusteringAlg{ClusteringType::InvalidC}, _distanceAlg{DistanceType::InvalidD},
+                       _similarityComparator{nullptr}, _reverseSimilarityComparator{nullptr},
+                       _centroid_id{INVALID_VECTOR_ID}, _version{0}, _min_size{0}, _cap{0}, _block_size{0}, _dim{0},
+                       _unpinCount{0}, _cluster(false, 0, 0, 0) {
+        FatalAssert(false, LOG_TAG_DIVFTREE_VERTEX, "not implemented");
+    }
+
+    inline void Unpin() override {
+        if (_unpinCount.fetch_add(1) == UINT64_MAX) {
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT,
+                 VECTORID_LOG(_centroid_id));
+            /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
+            delete this;
+        }
+        else {
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin vertex " VECTORID_LOG_FMT,
+                 VECTORID_LOG(_centroid_id));
+        }
+    }
+
+    inline void MarkForRecycle(uint64_t pinCount) override {
+        FatalAssert(pinCount >= _unpinCount.load(), LOG_TAG_DIVFTREE_VERTEX,
+                    "The cluster was unpinned more times than it was pinned. pinCount=%lu, unpinCount=%lu",
+                    pinCount, _unpinCount.load());
+        uint64_t newPin = _unpinCount.fetch_sub(pinCount) - pinCount;
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Mark vertex " VECTORID_LOG_FMT
+            " for recycle with pin count %lu", VECTORID_LOG(_centroid_id), pinCount);
+        if (newPin == 0) {
+            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT,
+                 VECTORID_LOG(_centroid_id));
+            /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
+            delete this;
+            return;
+        }
+    }
+
+    /* todo: make sure the vertex is locked in shared/exclusive mode when calling this function! */
+    RetStatus BatchInsert(VectorBatch batch, uint16_t marked_for_update = INVALID_OFFSET) {
+        // CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+        FatalAssert(batch.size > 0, LOG_TAG_DIVFTREE_VERTEX,
+                    "Batch size must be greater than zero.");
+        FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE_VERTEX,
+                    "Batch data must not be null.");
+        FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE_VERTEX,
+                    "Batch id must not be null.");
+        uint16_t offset = _cluster.header.reserved_size.fetch_add(batch.size);
+        FatalAssert(offset < _cluster.header.reserved_size.load(), LOG_TAG_DIVFTREE_VERTEX, "Overflow detected!");
+        if (offset + batch.size > _cap) {
+            _cluster.header.reserved_size.fetch_sub(batch.size);
+            return RetStatus{.stat = RetStatus::VERTEX_NOT_ENOUGH_SPACE, .message=nullptr};
+        }
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE_VERTEX,
+                    "BufferManager is not initialized.");
+        VTYPE* dest = _cluster.Data(offset, _centroid_id.IsLeaf(), _block_size, _cap, _dim);
+        memcpy(dest, batch.data, batch.size * _dim * sizeof(VTYPE));
+        Address meta = _cluster.MetaData(offset, _centroid_id.IsLeaf(), _block_size, _cap, _dim);
+        for (uint16_t i = 0; i < batch.size; ++i) {
+            if (_centroid_id.IsLeaf()) {
+                VectorMetaData* vmd = reinterpret_cast<VectorMetaData*>(meta);
+                vmd[i].id = batch.id[i];
+                FatalAssert(vmd[i].state.load(std::memory_order_relaxed) == VECTOR_STATE_INVALID,
+                            LOG_TAG_DIVFTREE_VERTEX, "Reserved space at offset %hu is not in INVALID state.",
+                            offset + i);
+                vmd[i].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
+            } else {
+                FatalAssert(batch.version != nullptr, LOG_TAG_DIVFTREE_VERTEX,
+                            "Batch version must not be null for centroid insertion.");
+                CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(meta);
+                vmd[i].id = batch.id[i];
+                bufferMgr->PinVertexVersion(batch.id[i], batch.version[i]);
+                vmd[i].version = batch.version[i];
+                FatalAssert(vmd[i].state.load(std::memory_order_relaxed) == VECTOR_STATE_INVALID,
+                            LOG_TAG_DIVFTREE_VERTEX, "Reserved space at offset %hu is not in INVALID state.",
+                            offset + i);
+                vmd[i].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
+            }
+        }
+
+        _cluster.header.visible_size.fetch_add(batch.size);
+
+        for (uint16_t i = 0; i < batch.size; ++i) {
+            bufferMgr->
+                UpdateVectorLocation(batch.id[i], VectorLocation{.containerId = _centroid_id,
+                                                                 .containerVersion = _version,
+                                                                 .entryOffset = offset + i});
+        }
+
+        if (marked_for_update != INVALID_OFFSET) {
+            FatalAssert(marked_for_update < offset, LOG_TAG_DIVFTREE_VERTEX,
+                        "Marked for update offset %hu is not less than the start of newly inserted batch %hu.",
+                        marked_for_update, offset);
+            FatalAssert(_centroid_id.IsInternalVertex(), LOG_TAG_DIVFTREE_VERTEX,
+                        "Marked for update offset can only be set for internal vertices.");
+            CentroidMetaData* markedMeta = reinterpret_cast<CentroidMetaData*>(
+                _cluster.MetaData(marked_for_update, _centroid_id.IsLeaf(), _block_size, _cap, _dim));
+            markedMeta->state.store(VECTOR_STATE_OUTDATED);
+            _cluster.header.num_deleted.fetch_add(1);
+            /* todo: can we unpin version here??? or should we do it in the destructor? */
+            bufferMgr->UnpinVertexVersion(markedMeta->id, markedMeta->version);
+        }
+
+        return RetStatus::Success();
     }
 
     /* adds padding to the end of cluster and packs vertex header with  */
-    static inline DIVFTreeVertex* CreateNewVertex(DIVFTreeVertexAttributes attr) {
-        DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(
-                                    std::aligned_alloc(CACHE_LINE_SIZE,
-                                                       AlignedBytes(attr.core.dimension, attr.max_size)));
-        FatalAssert(vertex != nullptr, LOG_TAG_TEST, "Failed to allocate memory for DIVFTreeVertex.");
-        new (vertex) DIVFTreeVertex(attr);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Vertex: %s",
-             vertex->ToString().ToCStr());
-        return vertex;
-    }
+    // static inline DIVFTreeVertex* CreateNewVertex(DIVFTreeVertexAttributes attr) {
+    //     DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(
+    //                                 std::aligned_alloc(CACHE_LINE_SIZE,
+    //                                                    AlignedBytes(attr.core.dimension, attr.max_size)));
+    //     FatalAssert(vertex != nullptr, LOG_TAG_TEST, "Failed to allocate memory for DIVFTreeVertex.");
+    //     new (vertex) DIVFTreeVertex(attr);
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Vertex: %s",
+    //          vertex->ToString().ToCStr());
+    //     return vertex;
+    // }
 
-    ~DIVFTreeVertex() override = default;
+    // ~DIVFTreeVertex() override = default;
 
-    /* should probably hold the vertex lock in shared mode */
-    RetStatus AssignParent(VectorID parent_id) override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        FatalAssert(parent_id._level == _cluster._centroid_id._level + 1, LOG_TAG_DIVFTREE_VERTEX,
-                    "Level mismatch between parent and self. parent=" VECTORID_LOG_FMT
-                    " self=%s.", VECTORID_LOG(parent_id), ToString().ToCStr());
+    // /* should probably hold the vertex lock in shared mode */
+    // RetStatus AssignParent(VectorID parent_id) override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     FatalAssert(parent_id._level == _cluster._centroid_id._level + 1, LOG_TAG_DIVFTREE_VERTEX,
+    //                 "Level mismatch between parent and self. parent=" VECTORID_LOG_FMT
+    //                 " self=%s.", VECTORID_LOG(parent_id), ToString().ToCStr());
 
-        _cluster._parent_id = parent_id;
-        return RetStatus::Success();
-    }
+    //     _cluster._parent_id = parent_id;
+    //     return RetStatus::Success();
+    // }
 
-    RetStatus BatchUpdate(BatchVertexUpdate& updates) override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        FatalAssert(updates.target_cluster == _cluster._centroid_id, LOG_TAG_DIVFTREE_VERTEX,
-                    "Target cluster ID does not match vertex centroid ID. target=%s, centroid=%s",
-                    updates.target_cluster.ToString().ToCStr(), _cluster._centroid_id.ToString().ToCStr());
-        RetStatus rs = RetStatus::Success();
-        /* At this point this vertex should already pinned by the called/buffer */
-        if (_lock.LockWithBlockCheck(SX_SHARED)) {
-            _lock.Unlock();
-            return RetStatus{.stat = RetStatus::VERTEX_UPDATED};
-        }
-        /* todo: handle urgent flag */
-        /* first apply all moves and deletes */
-        uint16_t filled_size = _cluster.FilledSize();
-        VectorState state;
-        /* Todo add some asserts */
-        for (uint16_t i = 0; i < filled_size; ++i) {
-            if (!_cluster[i].IsValid()) {
-                continue;
-            }
-            std::map<divftree::VectorID, divftree::BatchVertexUpdateEntry>::iterator it;
-            it = updates.updates[VERTEX_DELETE].find(_cluster[i].id);
-            if (it != updates.updates[VERTEX_DELETE].end()) {
-                /* this might happen due to lock-free synchronization between minor updates */
-                if (!_cluster[i].Delete(state)) {
-                    CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                         "Failed to delete vector with ID " VECTORID_LOG_FMT " and state %s in vertex %s.",
-                         VECTORID_LOG(_cluster[i].id), state.ToString().ToCStr(), ToString().ToCStr());
-                    it->second.result->stat = RetStatus::VECTOR_IS_INVALID;
-                }
-                else {
-                    it->second.result->stat = RetStatus::SUCCESS;
-                }
-                updates.updates[VERTEX_DELETE].erase(it);
-                continue;
-            }
+    // RetStatus BatchUpdate(BatchVertexUpdate& updates) override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     FatalAssert(updates.target_cluster == _cluster._centroid_id, LOG_TAG_DIVFTREE_VERTEX,
+    //                 "Target cluster ID does not match vertex centroid ID. target=%s, centroid=%s",
+    //                 updates.target_cluster.ToString().ToCStr(), _cluster._centroid_id.ToString().ToCStr());
+    //     RetStatus rs = RetStatus::Success();
+    //     /* At this point this vertex should already pinned by the called/buffer */
+    //     if (_lock.LockWithBlockCheck(SX_SHARED)) {
+    //         _lock.Unlock();
+    //         return RetStatus{.stat = RetStatus::VERTEX_UPDATED};
+    //     }
+    //     /* todo: handle urgent flag */
+    //     /* first apply all moves and deletes */
+    //     uint16_t filled_size = _cluster.FilledSize();
+    //     VectorState state;
+    //     /* Todo add some asserts */
+    //     for (uint16_t i = 0; i < filled_size; ++i) {
+    //         if (!_cluster[i].IsValid()) {
+    //             continue;
+    //         }
+    //         std::map<divftree::VectorID, divftree::BatchVertexUpdateEntry>::iterator it;
+    //         it = updates.updates[VERTEX_DELETE].find(_cluster[i].id);
+    //         if (it != updates.updates[VERTEX_DELETE].end()) {
+    //             /* this might happen due to lock-free synchronization between minor updates */
+    //             if (!_cluster[i].Delete(state)) {
+    //                 CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //                      "Failed to delete vector with ID " VECTORID_LOG_FMT " and state %s in vertex %s.",
+    //                      VECTORID_LOG(_cluster[i].id), state.ToString().ToCStr(), ToString().ToCStr());
+    //                 it->second.result->stat = RetStatus::VECTOR_IS_INVALID;
+    //             }
+    //             else {
+    //                 it->second.result->stat = RetStatus::SUCCESS;
+    //             }
+    //             updates.updates[VERTEX_DELETE].erase(it);
+    //             continue;
+    //         }
 
-            it = updates.updates[VERTEX_MIGRATION_MOVE].find(_cluster[i].id);
-            if (it != updates.updates[VERTEX_MIGRATION_MOVE].end()) {
-                /* this might happen due to lock-free synchronization between minor updates */
-                if(!_cluster[i].Move(state)) {
-                    if (!state.IsValid()) {
-                        CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                            "Failed to migrate invalid vector with ID " VECTORID_LOG_FMT " in vertex %s.",
-                            VECTORID_LOG(_cluster[i].id), ToString().ToCStr());
-                        it->second.result->stat = RetStatus::VECTOR_IS_INVALID;
-                    }
-                    else {
-                        FatalAssert(state.IsMoving(), LOG_TAG_DIVFTREE,
-                                    "If migration fails for valid vector, it has to be already migrated!");
-                        CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                            "Failed to migrate moved vector with ID " VECTORID_LOG_FMT " in vertex %s.",
-                            VECTORID_LOG(_cluster[i].id), ToString().ToCStr());
-                        it->second.result->stat = RetStatus::VECTOR_IS_MIGRATED;
-                    }
-                }
-                else {
-                    it->second.result->stat = RetStatus::SUCCESS;
-                }
-                updates.updates[VERTEX_MIGRATION_MOVE].erase(it);
-                continue;
-            }
+    //         it = updates.updates[VERTEX_MIGRATION_MOVE].find(_cluster[i].id);
+    //         if (it != updates.updates[VERTEX_MIGRATION_MOVE].end()) {
+    //             /* this might happen due to lock-free synchronization between minor updates */
+    //             if(!_cluster[i].Move(state)) {
+    //                 if (!state.IsValid()) {
+    //                     CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //                         "Failed to migrate invalid vector with ID " VECTORID_LOG_FMT " in vertex %s.",
+    //                         VECTORID_LOG(_cluster[i].id), ToString().ToCStr());
+    //                     it->second.result->stat = RetStatus::VECTOR_IS_INVALID;
+    //                 }
+    //                 else {
+    //                     FatalAssert(state.IsMoving(), LOG_TAG_DIVFTREE,
+    //                                 "If migration fails for valid vector, it has to be already migrated!");
+    //                     CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //                         "Failed to migrate moved vector with ID " VECTORID_LOG_FMT " in vertex %s.",
+    //                         VECTORID_LOG(_cluster[i].id), ToString().ToCStr());
+    //                     it->second.result->stat = RetStatus::VECTOR_IS_MIGRATED;
+    //                 }
+    //             }
+    //             else {
+    //                 it->second.result->stat = RetStatus::SUCCESS;
+    //             }
+    //             updates.updates[VERTEX_MIGRATION_MOVE].erase(it);
+    //             continue;
+    //         }
 
-            it = updates.updates[VERTEX_INPLACE_UPDATE].find(_cluster[i].id);
-            /* Todo this should not happen when we do not have an exclusive lock */
-            if (it != updates.updates[VERTEX_INPLACE_UPDATE].end()) {
-                FatalAssert(*it->second.inplace_update_args.vector_data != nullptr, LOG_TAG_DIVFTREE,
-                            "Inplace update vector data cannot be null.");
-                memcpy(_cluster[i].vector, it->second.inplace_update_args.vector_data,
-                       _cluster._dimension * sizeof(VTYPE));
-                if (!_cluster[i].IsVisible()) {
-                    CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                         "Inplace update for vector with ID " VECTORID_LOG_FMT " in vertex %s is not visible.",
-                         VECTORID_LOG(_cluster[i].id), ToString().ToCStr());
-                    it->second.result->stat = RetStatus::VECTOR_IS_INVISIBLE;
-                }
-                else {
-                    it->second.result->stat = RetStatus::SUCCESS;
-                }
-            }
-        }
+    //         it = updates.updates[VERTEX_INPLACE_UPDATE].find(_cluster[i].id);
+    //         /* Todo this should not happen when we do not have an exclusive lock */
+    //         if (it != updates.updates[VERTEX_INPLACE_UPDATE].end()) {
+    //             FatalAssert(*it->second.inplace_update_args.vector_data != nullptr, LOG_TAG_DIVFTREE,
+    //                         "Inplace update vector data cannot be null.");
+    //             memcpy(_cluster[i].vector, it->second.inplace_update_args.vector_data,
+    //                    _cluster._dimension * sizeof(VTYPE));
+    //             if (!_cluster[i].IsVisible()) {
+    //                 CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //                      "Inplace update for vector with ID " VECTORID_LOG_FMT " in vertex %s is not visible.",
+    //                      VECTORID_LOG(_cluster[i].id), ToString().ToCStr());
+    //                 it->second.result->stat = RetStatus::VECTOR_IS_INVISIBLE;
+    //             }
+    //             else {
+    //                 it->second.result->stat = RetStatus::SUCCESS;
+    //             }
+    //         }
+    //     }
 
-        /* check if there are any non insertion updates missing */
-        for (auto& update_pair : updates.updates[VERTEX_DELETE]) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "Batch update contains delete operation for vector with ID " VECTORID_LOG_FMT
-                 " but it was not found in the vertex %s.",
-                 VECTORID_LOG(update_pair.first), ToString().ToCStr());
-            update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
-        }
-        for (auto& update_pair : updates.updates[VERTEX_MIGRATION_MOVE]) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "Batch update contains migrate operation for vector with ID " VECTORID_LOG_FMT
-                 " but it was not found in the vertex %s.",
-                 VECTORID_LOG(update_pair.first), ToString().ToCStr());
-            update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
-        }
-        for (auto& update_pair : updates.updates[VERTEX_INPLACE_UPDATE]) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "Batch update contains inplace update operation for vector with ID " VECTORID_LOG_FMT
-                 " but it was not found in the vertex %s.",
-                 VECTORID_LOG(update_pair.first), ToString().ToCStr());
-            update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
-        }
+    //     /* check if there are any non insertion updates missing */
+    //     for (auto& update_pair : updates.updates[VERTEX_DELETE]) {
+    //         CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //              "Batch update contains delete operation for vector with ID " VECTORID_LOG_FMT
+    //              " but it was not found in the vertex %s.",
+    //              VECTORID_LOG(update_pair.first), ToString().ToCStr());
+    //         update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
+    //     }
+    //     for (auto& update_pair : updates.updates[VERTEX_MIGRATION_MOVE]) {
+    //         CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //              "Batch update contains migrate operation for vector with ID " VECTORID_LOG_FMT
+    //              " but it was not found in the vertex %s.",
+    //              VECTORID_LOG(update_pair.first), ToString().ToCStr());
+    //         update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
+    //     }
+    //     for (auto& update_pair : updates.updates[VERTEX_INPLACE_UPDATE]) {
+    //         CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+    //              "Batch update contains inplace update operation for vector with ID " VECTORID_LOG_FMT
+    //              " but it was not found in the vertex %s.",
+    //              VECTORID_LOG(update_pair.first), ToString().ToCStr());
+    //         update_pair.second.result->stat = RetStatus::VECTOR_NOT_FOUND;
+    //     }
 
-        /* now apply all inserts */
-        rs = _cluster.BatchInsert(updates.updates[VERTEX_INSERT]);
-        if (rs.stat == RetStatus::VERTEX_NOT_ENOUGH_SPACE) {
-            bool expected = false;
-            if (_change_in_progress.compare_exchange_strong(expected, true)) {
-                CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
-                     "Vertex %s is full. Need to split it.", ToString().ToCStr());
-                rs.stat = RetStatus::VERTEX_NEEDS_SPLIT;
-            }
-            else {
-                CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
-                     "Vertex %s is full but another thread is already splitting it.", ToString().ToCStr());
-                _cond_var.Wait(LockWrapper<SX_SHARED>(_lock));
-                rs.stat = RetStatus::VERTEX_UPDATED;
-            }
-        }
-        else if (rs.stat != RetStatus::SUCCESS) {
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                 "Batch update failed with status: %s in vertex %s.",
-                 rs.Msg(), ToString().ToCStr());
-        }
+    //     /* now apply all inserts */
+    //     rs = _cluster.BatchInsert(updates.updates[VERTEX_INSERT]);
+    //     if (rs.stat == RetStatus::VERTEX_NOT_ENOUGH_SPACE) {
+    //         bool expected = false;
+    //         if (_change_in_progress.compare_exchange_strong(expected, true)) {
+    //             CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
+    //                  "Vertex %s is full. Need to split it.", ToString().ToCStr());
+    //             rs.stat = RetStatus::VERTEX_NEEDS_SPLIT;
+    //         }
+    //         else {
+    //             CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
+    //                  "Vertex %s is full but another thread is already splitting it.", ToString().ToCStr());
+    //             _cond_var.Wait(LockWrapper<SX_SHARED>(_lock));
+    //             rs.stat = RetStatus::VERTEX_UPDATED;
+    //         }
+    //     }
+    //     else if (rs.stat != RetStatus::SUCCESS) {
+    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
+    //              "Batch update failed with status: %s in vertex %s.",
+    //              rs.Msg(), ToString().ToCStr());
+    //     }
 
-        _lock.Unlock();
-        return rs;
-    }
+    //     _lock.Unlock();
+    //     return rs;
+    // }
 
-    RetStatus Search(const Vector& query, size_t k,
-                     std::vector<std::pair<VectorID, DTYPE>>& neighbours) override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        FatalAssert(k > 0, LOG_TAG_DIVFTREE_VERTEX, "Number of neighbours should not be 0");
-        FatalAssert(neighbours.size() <= k, LOG_TAG_DIVFTREE_VERTEX,
-                    "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
+    // RetStatus Search(const Vector& query, size_t k,
+    //                  std::vector<std::pair<VectorID, DTYPE>>& neighbours) override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     FatalAssert(k > 0, LOG_TAG_DIVFTREE_VERTEX, "Number of neighbours should not be 0");
+    //     FatalAssert(neighbours.size() <= k, LOG_TAG_DIVFTREE_VERTEX,
+    //                 "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX,
-                 "Search: Cluster=%s", _cluster.ToString().ToCStr());
-        PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours before search");
-        uint16_t curr_size = _cluster.FilledSize();
-        for (uint16_t i = 0; i < curr_size; ++i) {
-            if (!_cluster[i].IsVisible()) {
-                continue;
-            }
-            DTYPE distance = Distance(query, Vector(_cluster[i].vector));
-            neighbours.emplace_back(_cluster[i].id, distance);
-            std::push_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
-            if (neighbours.size() > k) {
-                std::pop_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
-                neighbours.pop_back();
-            }
-            PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours after checking vector "
-                                    VECTORID_LOG_FMT, VECTORID_LOG(vectorPair.id));
-        }
-        PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours after search");
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX,
+    //              "Search: Cluster=%s", _cluster.ToString().ToCStr());
+    //     PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours before search");
+    //     uint16_t curr_size = _cluster.FilledSize();
+    //     for (uint16_t i = 0; i < curr_size; ++i) {
+    //         if (!_cluster[i].IsVisible()) {
+    //             continue;
+    //         }
+    //         DTYPE distance = Distance(query, Vector(_cluster[i].vector));
+    //         neighbours.emplace_back(_cluster[i].id, distance);
+    //         std::push_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
+    //         if (neighbours.size() > k) {
+    //             std::pop_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
+    //             neighbours.pop_back();
+    //         }
+    //         PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours after checking vector "
+    //                                 VECTORID_LOG_FMT, VECTORID_LOG(vectorPair.id));
+    //     }
+    //     PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours after search");
 
-        FatalAssert(neighbours.size() <= k, LOG_TAG_DIVFTREE_VERTEX,
-            "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
+    //     FatalAssert(neighbours.size() <= k, LOG_TAG_DIVFTREE_VERTEX,
+    //         "Nummber of neighbours cannot be larger than k. # neighbours=%lu, k=%lu", neighbours.size(), k);
 
-        return RetStatus::Success();
-    }
+    //     return RetStatus::Success();
+    // }
 
-    VectorID CentroidID() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._centroid_id;
-    }
+    // VectorID CentroidID() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._centroid_id;
+    // }
 
-    VectorID ParentID() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._parent_id;
-    }
+    // VectorID ParentID() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._parent_id;
+    // }
 
     // uint16_t Size() const override {
     //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
@@ -420,58 +528,58 @@ public:
     //     return _cluster.Contains(id);
     // }
 
-    bool IsLeaf() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._centroid_id.IsLeaf();
-    }
+    // bool IsLeaf() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._centroid_id.IsLeaf();
+    // }
 
-    uint8_t Level() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._centroid_id._level;
-    }
+    // uint8_t Level() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._centroid_id._level;
+    // }
 
-    /* Should be only called when only a single thread has access to memory */
-    Vector ComputeCurrentCentroid() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, true);
-        return ComputeCentroid(_cluster._entry, _cluster.FilledSize(), _cluster._dim, _distanceAlg);
-    }
+    // /* Should be only called when only a single thread has access to memory */
+    // Vector ComputeCurrentCentroid() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, true);
+    //     return ComputeCentroid(_cluster._entry, _cluster.FilledSize(), _cluster._dim, _distanceAlg);
+    // }
 
-    inline uint16_t MinSize() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._min_size;
-    }
-    inline uint16_t MaxSize() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._max_size;
-    }
-    inline uint16_t VectorDimension() const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return _cluster._dim;
-    }
+    // inline uint16_t MinSize() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._min_size;
+    // }
+    // inline uint16_t MaxSize() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._max_size;
+    // }
+    // inline uint16_t VectorDimension() const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return _cluster._dim;
+    // }
 
-    inline VPairComparator GetSimilarityComparator(bool reverese) const override {
-        CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
-        return (reverese ? _reverseSimilarityComparator : _similarityComparator);
-    }
+    // inline VPairComparator GetSimilarityComparator(bool reverese) const override {
+    //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return (reverese ? _reverseSimilarityComparator : _similarityComparator);
+    // }
 
-    inline DTYPE Distance(const Vector& a, const Vector& b) const override {
-        switch (_distanceAlg)
-        {
-        case DistanceType::L2Distance:
-            return L2::Distance(a, b, VectorDimension());
-        default:
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX,
-                 "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
-        }
-        return 0; // Return 0 if the distance type is invalid
-    }
+    // inline DTYPE Distance(const Vector& a, const Vector& b) const override {
+    //     switch (_distanceAlg)
+    //     {
+    //     case DistanceType::L2Distance:
+    //         return L2::Distance(a, b, VectorDimension());
+    //     default:
+    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX,
+    //              "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[_distanceAlg]);
+    //     }
+    //     return 0; // Return 0 if the distance type is invalid
+    // }
 
-    String ToString(bool detailed = false) const override {
-        return String("{clustering algorithm=%s, distance=%s, centroid_copy=%s, LockState=%s, Cluster=",
-                      CLUSTERING_TYPE_NAME[_clusteringAlg], DISTANCE_TYPE_NAME[_distanceAlg],
-                      _centroid_copy.ToString(_cluster._dim).ToCStr(), lock.ToString().ToCStr()) +
-               _cluster.ToString(detailed) + String("}");
-    }
+    // String ToString(bool detailed = false) const override {
+    //     return String("{clustering algorithm=%s, distance=%s, centroid_copy=%s, LockState=%s, Cluster=",
+    //                   CLUSTERING_TYPE_NAME[_clusteringAlg], DISTANCE_TYPE_NAME[_distanceAlg],
+    //                   _centroid_copy.ToString(_cluster._dim).ToCStr(), lock.ToString().ToCStr()) +
+    //            _cluster.ToString(detailed) + String("}");
+    // }
 
     // static inline size_t Bytes(uint16_t dim, uint16_t capacity) {
     //     return sizeof(DIVFTreeVertex) + Cluster::DataBytes(dim, capacity);
@@ -482,26 +590,29 @@ protected:
     const DistanceType _distanceAlg;
     const VPairComparator _similarityComparator;
     const VPairComparator _reverseSimilarityComparator;
-    const Vector _centroid_copy;
-    std::atomic<bool> _change_in_progress;
-    SXLock _lock;
-    CondVar _cond_var;
+    const VectorID _centroid_id;
+    const Version _version;
+    const uint16_t _min_size; // todo: do we need this at compute nodes?
+    const uint16_t _cap;
+    const uint16_t _block_size;
+    const uint16_t _dim;
+    std::atomic<uint64_t> _unpinCount;
     Cluster _cluster;
 
-    DIVFTreeVertex(const DIVFTreeVertexAttributes& attr) : _clusteringAlg(attr.core.clusteringAlg),
-                                                           _distanceAlg(attr.core.distanceAlg),
-                                                           _similarityComparator(attr.similarityComparator),
-                                                           _reverseSimilarityComparator(attr.reverseSimilarityComparator),
-                                                           _centroid_copy(attr.centroid_copy, attr.core.dimension),
-                                                           _change_in_progress(false) {
-        CHECK_VERTEX_ATTRIBUTES(attr, LOG_TAG_DIVFTREE_VERTEX);
+    // DIVFTreeVertex(const DIVFTreeVertexAttributes& attr) : _clusteringAlg(attr.core.clusteringAlg),
+    //                                                        _distanceAlg(attr.core.distanceAlg),
+    //                                                        _similarityComparator(attr.similarityComparator),
+    //                                                        _reverseSimilarityComparator(attr.reverseSimilarityComparator),
+    //                                                        _centroid_copy(attr.centroid_copy, attr.core.dimension),
+    //                                                        _change_in_progress(false) {
+    //     CHECK_VERTEX_ATTRIBUTES(attr, LOG_TAG_DIVFTREE_VERTEX);
 
-        new (&_cluster) Cluster(sizeof(DIVFTreeVertex), attr.version, attr.centroid_id, attr.min_size,
-                                attr.max_size, attr.core.dimension, attr.cluster_owner,
-                                NUM_COMPUTE_NODES);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Vertex: this=%p, cluster=%s",
-             this, _cluster.ToString().ToCStr());
-    }
+    //     new (&_cluster) Cluster(sizeof(DIVFTreeVertex), attr.version, attr.centroid_id, attr.min_size,
+    //                             attr.max_size, attr.core.dimension, attr.cluster_owner,
+    //                             NUM_COMPUTE_NODES);
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Vertex: this=%p, cluster=%s",
+    //          this, _cluster.ToString().ToCStr());
+    // }
 
 TESTABLE;
 friend class DIVFTree;
@@ -509,262 +620,262 @@ friend class DIVFTree;
 
 class DIVFTree : public DIVFTreeInterface {
 public:
-    DIVFTree(DIVFTreeAttributes attr) : core_attr(attr.core), leaf_min_size(attr.leaf_min_size),
-                                         leaf_max_size(attr.leaf_max_size),
-                                         internal_min_size(attr.internal_min_size),
-                                         internal_max_size(attr.internal_max_size),
-                                         split_internal(attr.split_internal), split_leaf(attr.split_leaf),
-                                         _similarityComparator(
-                                            GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
-                                         _reverseSimilarityComparator(
-                                            GetDistancePairSimilarityComparator(attr.core.distanceAlg, true)),
-                                         _size(0), _root(INVALID_VECTOR_ID), _levels(2) {
-        RetStatus rs = RetStatus::Success();
-        rs = _bufmgr.Init();
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to init buffer manager.");
-        _root = _bufmgr.RecordRoot();
-        FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "root should be a centroid: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        FatalAssert(_root.IsLeaf(), LOG_TAG_DIVFTREE, "first root should be a leaf: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
+    // DIVFTree(DIVFTreeAttributes attr) : core_attr(attr.core), leaf_min_size(attr.leaf_min_size),
+    //                                      leaf_max_size(attr.leaf_max_size),
+    //                                      internal_min_size(attr.internal_min_size),
+    //                                      internal_max_size(attr.internal_max_size),
+    //                                      split_internal(attr.split_internal), split_leaf(attr.split_leaf),
+    //                                      _similarityComparator(
+    //                                         GetDistancePairSimilarityComparator(attr.core.distanceAlg, false)),
+    //                                      _reverseSimilarityComparator(
+    //                                         GetDistancePairSimilarityComparator(attr.core.distanceAlg, true)),
+    //                                      _size(0), _root(INVALID_VECTOR_ID), _levels(2) {
+    //     RetStatus rs = RetStatus::Success();
+    //     rs = _bufmgr.Init();
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to init buffer manager.");
+    //     _root = _bufmgr.RecordRoot();
+    //     FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID: " VECTORID_LOG_FMT, VECTORID_LOG(_root));
+    //     FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "root should be a centroid: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(_root));
+    //     FatalAssert(_root.IsLeaf(), LOG_TAG_DIVFTREE, "first root should be a leaf: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(_root));
 
-        rs = _bufmgr.UpdateClusterAddress(_root, CreateNewVertex(_root));
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for root: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(_root));
-        _levels = 2;
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE,
-             "Init DIVFTree Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
-             VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
-    }
+    //     rs = _bufmgr.UpdateClusterAddress(_root, CreateNewVertex(_root));
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for root: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(_root));
+    //     _levels = 2;
+    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE,
+    //          "Init DIVFTree Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
+    //          VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
+    // }
 
-    ~DIVFTree() override {
-        RetStatus rs = RetStatus::Success();
-        rs = _bufmgr.Shutdown();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
-    }
+    // ~DIVFTree() override {
+    //     RetStatus rs = RetStatus::Success();
+    //     rs = _bufmgr.Shutdown();
+    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
+    // }
 
-    RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) override {
-        FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID.");
-        FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "Invalid root ID -> root should be a centroid.");
-        FatalAssert(vec.IsValid(), LOG_TAG_DIVFTREE, "Invalid query vector.");
+    // RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) override {
+    //     FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID.");
+    //     FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "Invalid root ID -> root should be a centroid.");
+    //     FatalAssert(vec.IsValid(), LOG_TAG_DIVFTREE, "Invalid query vector.");
 
-        FatalAssert(vertex_per_layer > 0, LOG_TAG_DIVFTREE, "vertex_per_layer cannot be 0.");
-        FatalAssert(_levels > 1, LOG_TAG_DIVFTREE, "Height of the tree should be at least two but is %hhu.",
-                    _levels);
+    //     FatalAssert(vertex_per_layer > 0, LOG_TAG_DIVFTREE, "vertex_per_layer cannot be 0.");
+    //     FatalAssert(_levels > 1, LOG_TAG_DIVFTREE, "Height of the tree should be at least two but is %hhu.",
+    //                 _levels);
 
-        RetStatus rs = RetStatus::Success();
+    //     RetStatus rs = RetStatus::Success();
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
-             vec.ToString(core_attr.dimension).ToCStr(), _size, _levels);
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
+    //          vec.ToString(core_attr.dimension).ToCStr(), _size, _levels);
 
-        std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
-        upper_layer.emplace_back(_root, 0);
-        VectorID next = _root;
-        while (next.IsInternalVertex()) {
-            CHECK_VECTORID_IS_VALID(next, LOG_TAG_DIVFTREE);
-            // Get the next layer of vertices
-            rs = SearchVertexs(vec, upper_layer, lower_layer,
-                             (next._level - 1 == VectorID::LEAF_LEVEL) ? 1 : vertex_per_layer);
-            FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search vertices failed with error: %s", rs.Msg());
-            FatalAssert(!lower_layer.empty(), LOG_TAG_DIVFTREE, "Lower layer should not be empty.");
-            FatalAssert((next.IsInternalVertex() ? (lower_layer.size() <= vertex_per_layer) : (lower_layer.size() == 1)),
-                        LOG_TAG_DIVFTREE, "Lower layer size (%lu) is larger than %hu (%s).",
-                        lower_layer.size(), (next.IsInternalVertex() ? vertex_per_layer : 1),
-                        (next.IsInternalVertex() ? "internal k" : "leaf case"));
-            FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_DIVFTREE,
-                        "Lower layer first element level (%hhu) does not match expected level (%hhu).",
-                        lower_layer.front().first._level, next._level - 1);
-            next = lower_layer.front().first;
-            upper_layer.swap(lower_layer);
-        }
+    //     std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
+    //     upper_layer.emplace_back(_root, 0);
+    //     VectorID next = _root;
+    //     while (next.IsInternalVertex()) {
+    //         CHECK_VECTORID_IS_VALID(next, LOG_TAG_DIVFTREE);
+    //         // Get the next layer of vertices
+    //         rs = SearchVertexs(vec, upper_layer, lower_layer,
+    //                          (next._level - 1 == VectorID::LEAF_LEVEL) ? 1 : vertex_per_layer);
+    //         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search vertices failed with error: %s", rs.Msg());
+    //         FatalAssert(!lower_layer.empty(), LOG_TAG_DIVFTREE, "Lower layer should not be empty.");
+    //         FatalAssert((next.IsInternalVertex() ? (lower_layer.size() <= vertex_per_layer) : (lower_layer.size() == 1)),
+    //                     LOG_TAG_DIVFTREE, "Lower layer size (%lu) is larger than %hu (%s).",
+    //                     lower_layer.size(), (next.IsInternalVertex() ? vertex_per_layer : 1),
+    //                     (next.IsInternalVertex() ? "internal k" : "leaf case"));
+    //         FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_DIVFTREE,
+    //                     "Lower layer first element level (%hhu) does not match expected level (%hhu).",
+    //                     lower_layer.front().first._level, next._level - 1);
+    //         next = lower_layer.front().first;
+    //         upper_layer.swap(lower_layer);
+    //     }
 
-        DIVFTreeVertex* leaf = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(upper_layer.front().first));
-        CHECK_VERTEX_IS_VALID(leaf, LOG_TAG_DIVFTREE, false);
-        FatalAssert(leaf->IsLeaf(), LOG_TAG_DIVFTREE, "Next vertex should be a leaf but is " VECTORID_LOG_FMT,
-                    VECTORID_LOG(next));
+    //     DIVFTreeVertex* leaf = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(upper_layer.front().first));
+    //     CHECK_VERTEX_IS_VALID(leaf, LOG_TAG_DIVFTREE, false);
+    //     FatalAssert(leaf->IsLeaf(), LOG_TAG_DIVFTREE, "Next vertex should be a leaf but is " VECTORID_LOG_FMT,
+    //                 VECTORID_LOG(next));
 
-        if (leaf->IsFull()) {
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Leaf is full.");
-        }
+    //     if (leaf->IsFull()) {
+    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Leaf is full.");
+    //     }
 
-        vec_id = RecordInto(vec, leaf);
-        if (vec_id.IsValid()) {
-            ++_size;
-            if (leaf->IsFull()) {
-                Split(leaf); // todo background job?
-                // todo assert success
-            }
-        }
-        else {
-            rs = RetStatus::Fail(""); //todo
-        }
+    //     vec_id = RecordInto(vec, leaf);
+    //     if (vec_id.IsValid()) {
+    //         ++_size;
+    //         if (leaf->IsFull()) {
+    //             Split(leaf); // todo background job?
+    //             // todo assert success
+    //         }
+    //     }
+    //     else {
+    //         rs = RetStatus::Fail(""); //todo
+    //     }
 
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Insert failed with error: %s", rs.Msg());
-        FatalAssert(_levels == _bufmgr.GetHeight(), LOG_TAG_DIVFTREE,
-                    "Levels mismatch: _levels=%hhu, _bufmgr.directory.size()=%lu", _levels, _bufmgr.GetHeight());
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Insert failed with error: %s", rs.Msg());
+    //     FatalAssert(_levels == _bufmgr.GetHeight(), LOG_TAG_DIVFTREE,
+    //                 "Levels mismatch: _levels=%hhu, _bufmgr.directory.size()=%lu", _levels, _bufmgr.GetHeight());
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Insert END: Vector=%s, vec_id=" VECTORID_LOG_FMT ", _size=%lu, _levels=%hhu",
-             vec.ToString(core_attr.dimension).ToCStr(), VECTORID_LOG(vec_id), _size, _levels);
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Insert END: Vector=%s, vec_id=" VECTORID_LOG_FMT ", _size=%lu, _levels=%hhu",
+    //          vec.ToString(core_attr.dimension).ToCStr(), VECTORID_LOG(vec_id), _size, _levels);
 
-        return rs;
-    }
+    //     return rs;
+    // }
 
-    RetStatus Delete(VectorID vec_id) override {
-        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Delete not implemented");
-        UNUSED_VARIABLE(vec_id);
-        RetStatus rs = RetStatus::Success();
-        return rs;
-    }
+    // RetStatus Delete(VectorID vec_id) override {
+    //     FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Delete not implemented");
+    //     UNUSED_VARIABLE(vec_id);
+    //     RetStatus rs = RetStatus::Success();
+    //     return rs;
+    // }
 
-    RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
-                                            uint16_t _internal_k, uint16_t _leaf_k,
-                                            std::vector<std::pair<VectorID, DTYPE>>& neighbours,
-                                            bool sort = true, bool sort_from_more_similar_to_less = true) override {
+    // RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
+    //                                         uint16_t _internal_k, uint16_t _leaf_k,
+    //                                         std::vector<std::pair<VectorID, DTYPE>>& neighbours,
+    //                                         bool sort = true, bool sort_from_more_similar_to_less = true) override {
 
-        FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID.");
-        FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "Invalid root ID -> root should be a centroid.");
-        FatalAssert(query.IsValid(), LOG_TAG_DIVFTREE, "Invalid query vector.");
-        FatalAssert(k > 0, LOG_TAG_DIVFTREE, "Number of neighbours cannot be 0.");
-        FatalAssert(_levels > 1, LOG_TAG_DIVFTREE, "Height of the tree should be at least two but is %hhu.",
-                    _levels);
+    //     FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID.");
+    //     FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "Invalid root ID -> root should be a centroid.");
+    //     FatalAssert(query.IsValid(), LOG_TAG_DIVFTREE, "Invalid query vector.");
+    //     FatalAssert(k > 0, LOG_TAG_DIVFTREE, "Number of neighbours cannot be 0.");
+    //     FatalAssert(_levels > 1, LOG_TAG_DIVFTREE, "Height of the tree should be at least two but is %hhu.",
+    //                 _levels);
 
-        FatalAssert(_internal_k > 0, LOG_TAG_DIVFTREE, "Number of internal vertex neighbours cannot be 0.");
-        FatalAssert(_leaf_k > 0, LOG_TAG_DIVFTREE, "Number of leaf neighbours cannot be 0.");
+    //     FatalAssert(_internal_k > 0, LOG_TAG_DIVFTREE, "Number of internal vertex neighbours cannot be 0.");
+    //     FatalAssert(_leaf_k > 0, LOG_TAG_DIVFTREE, "Number of leaf neighbours cannot be 0.");
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
-             "num_levels=%hhu", query.ToString(core_attr.dimension).ToCStr(), k, _internal_k,
-             _leaf_k, _size, _levels);
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
+    //          "num_levels=%hhu", query.ToString(core_attr.dimension).ToCStr(), k, _internal_k,
+    //          _leaf_k, _size, _levels);
 
-        RetStatus rs = RetStatus::Success();
-        neighbours.clear();
+    //     RetStatus rs = RetStatus::Success();
+    //     neighbours.clear();
 
-        std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
-        upper_layer.emplace_back(_root, 0);
-        VectorID next = _root;
-        while (next.IsCentroid()) {
-            CHECK_VECTORID_IS_VALID(next, LOG_TAG_DIVFTREE);
-            // Get the next layer of vertices
-            size_t search_n = (next.IsLeaf() ? k :
-                                               (next._level - 1 == VectorID::LEAF_LEVEL ? _leaf_k : _internal_k));
-            rs = SearchVertexs(query, upper_layer, lower_layer, search_n);
-            FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search vertices failed with error: %s", rs.Msg());
-            FatalAssert(!lower_layer.empty(), LOG_TAG_DIVFTREE, "Lower layer should not be empty.");
-            FatalAssert(lower_layer.size() <= search_n,
-                        LOG_TAG_DIVFTREE, "Lower layer size (%lu) is larger than %hu (%s).",
-                        lower_layer.size(), search_n,
-                        (next.IsLeaf() ? "vector case" : (next._level - 1 == VectorID::LEAF_LEVEL ?
-                                                                        "leaf case" : "internal case")));
-            FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_DIVFTREE,
-                        "Lower layer first element level (%hhu) does not match expected level (%hhu).",
-                        lower_layer.front().first._level, next._level - 1);
-            next = lower_layer.front().first;
-            upper_layer.swap(lower_layer);
-        }
+    //     std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
+    //     upper_layer.emplace_back(_root, 0);
+    //     VectorID next = _root;
+    //     while (next.IsCentroid()) {
+    //         CHECK_VECTORID_IS_VALID(next, LOG_TAG_DIVFTREE);
+    //         // Get the next layer of vertices
+    //         size_t search_n = (next.IsLeaf() ? k :
+    //                                            (next._level - 1 == VectorID::LEAF_LEVEL ? _leaf_k : _internal_k));
+    //         rs = SearchVertexs(query, upper_layer, lower_layer, search_n);
+    //         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search vertices failed with error: %s", rs.Msg());
+    //         FatalAssert(!lower_layer.empty(), LOG_TAG_DIVFTREE, "Lower layer should not be empty.");
+    //         FatalAssert(lower_layer.size() <= search_n,
+    //                     LOG_TAG_DIVFTREE, "Lower layer size (%lu) is larger than %hu (%s).",
+    //                     lower_layer.size(), search_n,
+    //                     (next.IsLeaf() ? "vector case" : (next._level - 1 == VectorID::LEAF_LEVEL ?
+    //                                                                     "leaf case" : "internal case")));
+    //         FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_DIVFTREE,
+    //                     "Lower layer first element level (%hhu) does not match expected level (%hhu).",
+    //                     lower_layer.front().first._level, next._level - 1);
+    //         next = lower_layer.front().first;
+    //         upper_layer.swap(lower_layer);
+    //     }
 
-        neighbours.swap(upper_layer);
-        if (sort) {
-            std::sort_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
-            if (!sort_from_more_similar_to_less) {
-                std::reverse(neighbours.begin(), neighbours.end());
-            }
-        }
+    //     neighbours.swap(upper_layer);
+    //     if (sort) {
+    //         std::sort_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
+    //         if (!sort_from_more_similar_to_less) {
+    //             std::reverse(neighbours.begin(), neighbours.end());
+    //         }
+    //     }
 
-        PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE, "ApproximateKNearestNeighbours End: neighbours=");
+    //     PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE, "ApproximateKNearestNeighbours End: neighbours=");
 
-        return rs;
-    }
+    //     return rs;
+    // }
 
-    size_t Size() const override {
-        return _size;
-    }
+    // size_t Size() const override {
+    //     return _size;
+    // }
 
-    inline DTYPE Distance(const Vector& a, const Vector& b) const override {
-        switch (core_attr.distanceAlg)
-        {
-        case DistanceType::L2Distance:
-            return L2::Distance(a, b, core_attr.dimension);
-        default:
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX,
-                 "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
-        }
-        return 0; // Return 0 if the distance type is invalid
-    }
+    // inline DTYPE Distance(const Vector& a, const Vector& b) const override {
+    //     switch (core_attr.distanceAlg)
+    //     {
+    //     case DistanceType::L2Distance:
+    //         return L2::Distance(a, b, core_attr.dimension);
+    //     default:
+    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX,
+    //              "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
+    //     }
+    //     return 0; // Return 0 if the distance type is invalid
+    // }
 
-    inline size_t Bytes(bool is_internal_vertex) const override {
-        return DIVFTreeVertex::Bytes(core_attr.dimension, is_internal_vertex ? internal_max_size : leaf_max_size);
-    }
+    // inline size_t Bytes(bool is_internal_vertex) const override {
+    //     return DIVFTreeVertex::Bytes(core_attr.dimension, is_internal_vertex ? internal_max_size : leaf_max_size);
+    // }
 
-    inline String ToString() override {
-        String out("{Attr=<Dim=%hu, ClusteringAlg=%s, DistanceAlg=%s, "
-                   "LeafMinSize=%hu, LeafMaxSize=%hu, InternalMinSize=%hu, InternalMaxSize=%hu, "
-                   "SplitInternal=%hu, SplitLeaf=%hu, Size=%lu, Levels=%lu>, RootID=" VECTORID_LOG_FMT
-                   ", Vertexs=[", core_attr.dimension, CLUSTERING_TYPE_NAME[core_attr.clusteringAlg],
-                   DISTANCE_TYPE_NAME[core_attr.distanceAlg], leaf_min_size, leaf_max_size,
-                   internal_min_size, internal_max_size, split_internal, split_leaf,
-                   _size, _levels, VECTORID_LOG(_root));
-        std::vector<VectorID> curr_level_stack, next_level_stack;
-        size_t seen = 0;
-        if (_root.IsValid()) {
-            curr_level_stack.push_back(_root);
-        }
-        bool go_to_next_level = true;
-        uint64_t curr_level = 0;
-        while (!curr_level_stack.empty()) {
-            VectorID curr_vertexId = curr_level_stack.back();
-            curr_level_stack.pop_back();
-            CHECK_VECTORID_IS_VALID(curr_vertexId, LOG_TAG_DIVFTREE);
-            if (go_to_next_level) {
-                curr_level = curr_vertexId._level;
-                out += String("Level %lu:{Size=%lu, Vertexs=[", curr_level, curr_level_stack.size() + 1);
-                go_to_next_level = false;
-            }
-            else {
-                FatalAssert(curr_vertexId._level == curr_level, LOG_TAG_DIVFTREE,
-                            "Current vertex level (%hhu) does not match expected level (%lu).",
-                            curr_vertexId._level, curr_level);
-            }
-            DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(curr_vertexId));
-            CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, false);
-            out += String("<VertexID=" VECTORID_LOG_FMT ", Bucket=%s>",
-                        VECTORID_LOG(curr_vertexId), vertex->BucketToString().ToCStr());
-            if (!vertex->IsLeaf()) {
-                for (uint16_t i = 0; i < vertex->Size(); ++i) {
-                    const VectorPair& vectorPair = vertex->_cluster[i];
-                    CHECK_VECTORID_IS_VALID(vectorPair.id, LOG_TAG_DIVFTREE);
-                    FatalAssert(vectorPair.id._level == curr_vertexId._level - 1, LOG_TAG_DIVFTREE,
-                                "VectorID level (%hhu) does not match current vertex level (%hhu).",
-                                vectorPair.id._level, curr_vertexId._level - 1);
-                    FatalAssert(vectorPair.vec.IsValid(), LOG_TAG_DIVFTREE,
-                                "Invalid vector in vertex %s at index %hu.", VECTORID_LOG(curr_vertexId), i);
-                    next_level_stack.emplace_back(vectorPair.id);
-                }
-            }
-            else {
-                seen += vertex->Size();
-            }
-            if (curr_level_stack.empty()) {
-                out += String("]}");
-                go_to_next_level = true;
-                next_level_stack.swap(curr_level_stack);
-                if (!curr_level_stack.empty()) {
-                    out += String(", ");
-                }
-                else {
-                    out += String("]}");
-                }
-            }
-            else {
-                out += String(", ");
-            }
-        }
-        FatalAssert(seen == _size, LOG_TAG_DIVFTREE,
-                    "Seen vertices (%lu) does not match expected size (%lu).", seen, _size);
-        return out;
-    }
+    // inline String ToString() override {
+    //     String out("{Attr=<Dim=%hu, ClusteringAlg=%s, DistanceAlg=%s, "
+    //                "LeafMinSize=%hu, LeafMaxSize=%hu, InternalMinSize=%hu, InternalMaxSize=%hu, "
+    //                "SplitInternal=%hu, SplitLeaf=%hu, Size=%lu, Levels=%lu>, RootID=" VECTORID_LOG_FMT
+    //                ", Vertexs=[", core_attr.dimension, CLUSTERING_TYPE_NAME[core_attr.clusteringAlg],
+    //                DISTANCE_TYPE_NAME[core_attr.distanceAlg], leaf_min_size, leaf_max_size,
+    //                internal_min_size, internal_max_size, split_internal, split_leaf,
+    //                _size, _levels, VECTORID_LOG(_root));
+    //     std::vector<VectorID> curr_level_stack, next_level_stack;
+    //     size_t seen = 0;
+    //     if (_root.IsValid()) {
+    //         curr_level_stack.push_back(_root);
+    //     }
+    //     bool go_to_next_level = true;
+    //     uint64_t curr_level = 0;
+    //     while (!curr_level_stack.empty()) {
+    //         VectorID curr_vertexId = curr_level_stack.back();
+    //         curr_level_stack.pop_back();
+    //         CHECK_VECTORID_IS_VALID(curr_vertexId, LOG_TAG_DIVFTREE);
+    //         if (go_to_next_level) {
+    //             curr_level = curr_vertexId._level;
+    //             out += String("Level %lu:{Size=%lu, Vertexs=[", curr_level, curr_level_stack.size() + 1);
+    //             go_to_next_level = false;
+    //         }
+    //         else {
+    //             FatalAssert(curr_vertexId._level == curr_level, LOG_TAG_DIVFTREE,
+    //                         "Current vertex level (%hhu) does not match expected level (%lu).",
+    //                         curr_vertexId._level, curr_level);
+    //         }
+    //         DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(curr_vertexId));
+    //         CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, false);
+    //         out += String("<VertexID=" VECTORID_LOG_FMT ", Bucket=%s>",
+    //                     VECTORID_LOG(curr_vertexId), vertex->BucketToString().ToCStr());
+    //         if (!vertex->IsLeaf()) {
+    //             for (uint16_t i = 0; i < vertex->Size(); ++i) {
+    //                 const VectorPair& vectorPair = vertex->_cluster[i];
+    //                 CHECK_VECTORID_IS_VALID(vectorPair.id, LOG_TAG_DIVFTREE);
+    //                 FatalAssert(vectorPair.id._level == curr_vertexId._level - 1, LOG_TAG_DIVFTREE,
+    //                             "VectorID level (%hhu) does not match current vertex level (%hhu).",
+    //                             vectorPair.id._level, curr_vertexId._level - 1);
+    //                 FatalAssert(vectorPair.vec.IsValid(), LOG_TAG_DIVFTREE,
+    //                             "Invalid vector in vertex %s at index %hu.", VECTORID_LOG(curr_vertexId), i);
+    //                 next_level_stack.emplace_back(vectorPair.id);
+    //             }
+    //         }
+    //         else {
+    //             seen += vertex->Size();
+    //         }
+    //         if (curr_level_stack.empty()) {
+    //             out += String("]}");
+    //             go_to_next_level = true;
+    //             next_level_stack.swap(curr_level_stack);
+    //             if (!curr_level_stack.empty()) {
+    //                 out += String(", ");
+    //             }
+    //             else {
+    //                 out += String("]}");
+    //             }
+    //         }
+    //         else {
+    //             out += String(", ");
+    //         }
+    //     }
+    //     FatalAssert(seen == _size, LOG_TAG_DIVFTREE,
+    //                 "Seen vertices (%lu) does not match expected size (%lu).", seen, _size);
+    //     return out;
+    // }
 
 protected:
     const DIVFTreeCoreAttributes core_attr;
@@ -777,324 +888,597 @@ protected:
     const VPairComparator _similarityComparator;
     const VPairComparator _reverseSimilarityComparator;
     size_t _size;
-    BufferManager _bufmgr;
     VectorID _root;
     uint64_t _levels;
 
-    inline bool MoreSimilar(const DTYPE& a, const DTYPE& b) const {
-        switch (core_attr.distanceAlg) {
-        case DistanceType::L2Distance:
-            return L2::MoreSimilar(a, b);
-        default:
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                 "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
+    // inline bool MoreSimilar(const DTYPE& a, const DTYPE& b) const {
+    //     switch (core_attr.distanceAlg) {
+    //     case DistanceType::L2Distance:
+    //         return L2::MoreSimilar(a, b);
+    //     default:
+    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
+    //              "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
+    //     }
+    //     return false; // Return false if the distance type is invalid
+    // }
+
+    RetStatus CompactAndInsert(BufferVertexEntry* container_entry, VectorBatch batch,
+                               uint16_t marked_for_update = INVALID_OFFSET) {
+        CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+        FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
+        FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
+        FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
+        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        DIVFTreeVertex* compacted =
+            new(bufferMgr->AllocateMemoryForVertex(container_entry->centroidMeta.selfId._level))
+            DIVFTreeVertex();
+
+        DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
+
+        uint16_t size = current->_cluster.header.reserved_size.load(std::memory_order_relaxed);
+        const bool is_leaf = container_entry->centroidMeta.selfId.IsLeaf();
+        const uint16_t dim = current->_dim;
+        const uint16_t cap = current->_cap;
+        const uint16_t blckSize = current->_block_size;
+        /* Todo: this will not work if we have more than one block! */
+        FatalAssert(current->_cluster.NumBlocks(blckSize, cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
+
+        FatalAssert(!is_leaf || (batch.version != nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
+
+        Address srcMetaData = current->_cluster.MetaData(0, is_leaf, blckSize, cap, dim);
+        VTYPE* srcData = current->_cluster.Data(0, is_leaf, blckSize, cap, dim);
+        Address destMetaData = compacted->_cluster.MetaData(0, is_leaf, blckSize, cap, dim);
+        VTYPE* destData = compacted->_cluster.Data(0, is_leaf, blckSize, cap, dim);
+        uint16_t new_size = 0;
+        /*
+         * Note: During compaction, we will update vector locations but
+         * we haven't updated the container cluster ptr yet. As a result, a reader may see that offset mismatch
+         * caused by this. As long as we can get the container in S mode and we have ourself in X mode, our location
+         * should not change. so in cases where only offset has changed, we can simply reread the location to
+         * see the new one!
+         * This may be a bit funky for vectors though as they do not have any locks associated with them.
+         */
+        for (uint16_t i = 0; i < size; ++i) {
+            if (i == marked_for_update) {
+                continue;
+            }
+
+            if (is_leaf) {
+                VectorMetaData* src_vmd = reinterpret_cast<VectorMetaData*>(srcMetaData);
+                VectorMetaData* dest_vmd = reinterpret_cast<VectorMetaData*>(destMetaData);
+                VectorState vstate = src_vmd[i].state.load(std::memory_order_relaxed);
+                if (vstate == VECTOR_STATE_VALID) {
+                    memcpy(&destData[new_size * dim], &srcData[i * dim], dim * sizeof(VTYPE));
+                    dest_vmd[new_size].id = src_vmd[i].id;
+                    dest_vmd[new_size].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
+                    ++new_size;
+                } SANITY_CHECK( else if (vstate == VECTOR_STATE_MIGRATED) {
+                    VectorLocation outdatedLoc{.containerId = container_entry->centroidMeta.selfId,
+                                                .containerVersion = container_entry->currentVersion,
+                                                .entryOffset = i};
+                    FatalAssert(outdatedLoc != bufferMgr->LoadCurrentVectorLocation(src_vmd[i].id), LOG_TAG_DIVFTREE,
+                                "current location is migrated!");
+                })
+            } else {
+                CentroidMetaData* src_vmd = reinterpret_cast<CentroidMetaData*>(srcMetaData);
+                CentroidMetaData* dest_vmd = reinterpret_cast<CentroidMetaData*>(destMetaData);
+                VectorState vstate = src_vmd[i].state.load(std::memory_order_relaxed);
+                if (vstate == VECTOR_STATE_VALID) {
+                    memcpy(&destData[new_size * dim], &srcData[i * dim], dim * sizeof(VTYPE));
+                    dest_vmd[new_size].id = src_vmd[i].id;
+                    dest_vmd[new_size].version = src_vmd[i].version;
+                    dest_vmd[new_size].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
+                    ++new_size;
+                } SANITY_CHECK( else if (vstate == VECTOR_STATE_MIGRATED) {
+                    VectorLocation outdatedLoc{.containerId = container_entry->centroidMeta.selfId,
+                                                .containerVersion = container_entry->currentVersion,
+                                                .entryOffset = i};
+                    FatalAssert(outdatedLoc != bufferMgr->LoadCurrentVectorLocation(src_vmd[i].id), LOG_TAG_DIVFTREE,
+                                "current location is migrated!");
+                })
+            }
         }
-        return false; // Return false if the distance type is invalid
+        FatalAssert(current->_cluster.header.visible_size.load(std::memory_order_relaxed) ==
+                    current->_cluster.header.reserved_size.load(std::memory_order_relaxed), LOG_TAG_DIVFTREE,
+                    "not all updates went through!");
+        FatalAssert(new_size == current->_cluster.header.reserved_size.load(std::memory_order_relaxed) -
+                                current->_cluster.header.num_deleted.load(std::memory_order_relaxed),
+                    LOG_TAG_DIVFTREE, "not all deletes went through!");
+        FatalAssert(new_size + batch.size > new_size, LOG_TAG_DIVFTREE, "overflow detected!");
+        FatalAssert(new_size + batch.size < cap, LOG_TAG_DIVFTREE, "Cluster cannot contain all of these vectors!");
+
+        uint16_t old_reserved = new_size;
+
+        for (uint16_t i = 0; i < batch.size; ++i) {
+            memcpy(&destData[new_size * dim], &batch.data[i * dim], dim * sizeof(VTYPE));
+            if (is_leaf) {
+                VectorMetaData* dest_vmd = reinterpret_cast<VectorMetaData*>(destMetaData);
+                dest_vmd[new_size].id = batch.id[i];
+                dest_vmd[new_size].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
+            } else {
+                CentroidMetaData* dest_vmd = reinterpret_cast<CentroidMetaData*>(destMetaData);
+                dest_vmd[new_size].id = batch.id[i];
+                dest_vmd[new_size].version = batch.version[i];
+                dest_vmd[new_size].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
+                bufferMgr->PinVertexVersion(batch.id[i], batch.version[i]);
+            }
+
+            ++new_size;
+        }
+
+        compacted->_cluster.header.num_deleted.store(0, std::memory_order_relaxed);
+        compacted->_cluster.header.reserved_size.store(new_size, std::memory_order_relaxed);
+        compacted->_cluster.header.visible_size.store(new_size, std::memory_order_relaxed);
+
+        (void)container_entry->UpdateClusterPtr(compacted, false);
+        current = nullptr; // this is to make sure that we no longer access the current!
+
+        for (uint16_t i = 0; i < old_reserved; ++i) {
+            if (is_leaf) {
+                VectorMetaData* vmd = reinterpret_cast<VectorMetaData*>(destMetaData);
+                bufferMgr->UpdateVectorLocationOffset(vmd[i].id, i);
+            } else {
+                CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(destMetaData);
+                bufferMgr->UpdateVectorLocationOffset(vmd[i].id, i);
+            }
+        }
+
+        for (uint16_t i = old_reserved; i < new_size; ++i) {
+            if (is_leaf) {
+                VectorMetaData* vmd = reinterpret_cast<VectorMetaData*>(destMetaData);
+                bufferMgr->UpdateVectorLocation(vmd[i].id,
+                    VectorLocation{.containerId=container_entry->centroidMeta.selfId,
+                                   .containerVersion = container_entry->currentVersion,
+                                   .entryOffset=new_size});
+            } else {
+                CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(destMetaData);
+                bufferMgr->UpdateVectorLocation(vmd[i].id,
+                    VectorLocation{.containerId=container_entry->centroidMeta.selfId,
+                                   .containerVersion = container_entry->currentVersion,
+                                   .entryOffset=new_size});
+            }
+        }
+
+        return RetStatus::Success();
     }
 
-    RetStatus SearchVertexs(const Vector& query,
-                          const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
-                          std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) override {
-        FatalAssert(n > 0, LOG_TAG_DIVFTREE, "Number of vertices to search for should be greater than 0.");
-        FatalAssert(!upper_layer.empty(), LOG_TAG_DIVFTREE, "Upper layer should not be empty.");
-        FatalAssert(query.IsValid(), LOG_TAG_DIVFTREE, "Query vector is invalid.");
+    RetStatus SplitAndInsert(BufferVertexEntry* container_entry, VectorBatch batch,
+                             uint16_t marked_for_update = INVALID_OFFSET) {
+        CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+        FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
+        FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
+        FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
+        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Search_Vertexs BEGIN: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu",
-             query.ToString(core_attr.dimension).ToCStr(), n, upper_layer.size(), upper_layer.front().first._level);
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
+        DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
+
+        uint16_t size = current->_cluster.header.reserved_size.load(std::memory_order_relaxed);
+        const bool is_leaf = container_entry->centroidMeta.selfId.IsLeaf();
+        const uint16_t dim = current->_dim;
+        const uint16_t cap = current->_cap;
+        const uint16_t blckSize = current->_block_size;
+        /* Todo: this will not work if we have more than one block! */
+        FatalAssert(current->_cluster.NumBlocks(blckSize, cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
+
+        FatalAssert(!is_leaf || (batch.version != nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
+
+        /*
+         * Todo:
+         * 1) get number of clusters
+         * 2) allocate them and build the in the bufferMgr(they are now all locked in X)
+         * 3) execute clustering algorithm -> pass the marked offset to it
+         * 4) read parent if returned null we are the root so expand
+         * 5) else, call batchInsert into new parent -> if failed unlock parent
+         *    and retry as our vector location might have changed
+         * 6) updateClusterPtr and increment version
+         * 7) unlock parent
+         * 8) for each new cluster generated -> unlock them
+         */
+
+        return RetStatus::Success();
+    }
+
+    RetStatus BatchInsertInto(BufferVertexEntry* container_entry, VectorBatch batch, bool releaseEntry,
+                              uint16_t marked_for_update = INVALID_OFFSET) {
+        CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+        FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
+        FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
+        FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
         RetStatus rs = RetStatus::Success();
-        lower_layer.clear();
-        lower_layer.reserve(n);
-        uint16_t level = upper_layer.front().first._level;
-        for (const std::pair<VectorID, DTYPE>& vertex_data : upper_layer) {
-            VectorID vertex_id = vertex_data.first;
 
-            CHECK_VECTORID_IS_VALID(vertex_id, LOG_TAG_DIVFTREE);
-            CHECK_VECTORID_IS_CENTROID(vertex_id, LOG_TAG_DIVFTREE);
-            FatalAssert(vertex_id._level == level, LOG_TAG_DIVFTREE, "Vertex level mismatch: expected %hhu, got %hhu.",
-                        level, vertex_id._level);
-
-            DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(vertex_id));
-            CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, false);
-
-            if (vertex_id != _root) {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-                    "Search_Vertexs: vertex_id=" VECTORID_LOG_FMT ", vertex_centroid=%s, vertex_type=%s",
-                    VECTORID_LOG(vertex_id), _bufmgr.GetVector(vertex_id).ToString(core_attr.dimension).ToCStr(),
-                    ((vertex->IsLeaf()) ? "Leaf" : "Internal"));
-            }
-            else {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-                    "Search_Vertexs(root): vertex_id=" VECTORID_LOG_FMT ", vertex_type=%s",
-                    VECTORID_LOG(vertex_id), ((vertex->IsLeaf()) ? "Leaf" : "Internal"));
+        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
+        FatalAssert(container_entry->state.load() != CLUSTER_INVALID, LOG_TAG_DIVFTREE, "Container vertex is invalid.");
+        FatalAssert(container_entry->state.load() != CLUSTER_DELETED, LOG_TAG_DIVFTREE, "Container vertex is deleted.");
+        while (true) {
+            /*
+             * we do not need to pin the cluster here because the version pin should remain at least one as long as we
+             * have a lock on it.
+             */
+            DIVFTreeVertex* container_vertex =
+                static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+            CHECK_NOT_NULLPTR(container_vertex, LOG_TAG_DIVFTREE);
+            // CHECK_VERTEX_IS_VALID(container_vertex, LOG_TAG_DIVFTREE, RetStatus::FAIL);
+            rs = container_vertex->BatchInsert(batch);
+            if (rs.IsOK()) {
+                break;
             }
 
-            rs = vertex->Search(query, n, lower_layer);
-            FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search failed at vertex " VECTORID_LOG_FMT " with err(%s).",
-                        VECTORID_LOG(vertex_id), rs.Msg());
+            FatalAssert(rs.stat == RetStatus::VERTEX_NOT_ENOUGH_SPACE,
+                        LOG_TAG_DIVFTREE, "Batch insert failed with error: %s", rs.Msg());
+            BufferVertexEntryState state = CLUSTER_FULL;
+            rs = container_entry->UpgradeAccessToExclusive(state);
+            if (!rs.IsOK()) {
+                FatalAssert(rs.stat == RetStatus::FAILED_TO_CAS_ENTRY_STATE, LOG_TAG_DIVFTREE,
+                        "UpgradeAccessToExclusive failed with error: %s", rs.Msg());
+                switch(state) {
+                case BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS: /* Can this happen? */
+                case BufferVertexEntryState::CLUSTER_FULL:
+                case BufferVertexEntryState::CLUSTER_DELETED: /* Can this happen? */
+                    /* it is possible that the update was not applied though! */
+                    rs = RetStatus{.stat=RetStatus::VERTEX_UPDATED, .message=nullptr};
+                    break;
+                default:
+                    CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Invalid entry state!");
+                    rs = RetStatus::Fail("Invalid State!");
+                    break;
+                }
+                break;
+            }
+
+            FatalAssert((void*)(container_vertex) ==
+                        (void*)(container_entry->ReadLatestVersion(false)), LOG_TAG_DIVFTREE,
+                        "ClusterPtr has changed during the atomic upgrade from shared to exclusive!");
+            FatalAssert(container_vertex->_cluster.header.visible_size.load(std::memory_order_relaxed) ==
+                        container_vertex->_cluster.header.reserved_size.load(std::memory_order_relaxed),
+                        LOG_TAG_DIVFTREE, "Some updates did not go through!");
+            FatalAssert(container_vertex->_cluster.header.reserved_size.load(std::memory_order_relaxed) >
+                        container_vertex->_cluster.header.num_deleted.load(std::memory_order_relaxed),
+                        LOG_TAG_DIVFTREE, "More vectors are deleted than inserted!");
+            uint16_t reserved_size =
+                container_vertex->_cluster.header.reserved_size.load(std::memory_order_relaxed) + batch.size;
+            uint16_t real_size =
+                reserved_size - container_vertex->_cluster.header.num_deleted.load(std::memory_order_relaxed);
+            if ((float)real_size * COMPACTION_FACTOR <= (float)container_vertex->_cap) {
+                rs = CompactAndInsert(container_entry, batch);
+            } else if (reserved_size < container_vertex->_cap) {
+                container_entry->DowngradeAccessToShared();
+                continue;
+            } else {
+                rs = SplitAndInsert(container_entry, batch);
+            }
+
+            FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Major update failed!");
+            if (releaseEntry) {
+                BufferManager::GetInstance()->
+                    ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            } else {
+                container_entry->DowngradeAccessToShared();
+            }
+
+            return rs;
         }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Search_Vertexs END: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu, "
-             "lower_layer_size=%lu, lower_level=%hhu",
-             query.ToString(core_attr.dimension).ToCStr(), n, upper_layer.size(),
-             upper_layer.front().first._level, lower_layer.size(),
-             lower_layer.front().first._level);
-
+        if (releaseEntry) {
+            BufferManager::GetInstance()->
+                ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        }
         return rs;
     }
 
-    VectorID RecordInto(const Vector& vec, DIVFTreeVertexInterface* container_vertex,
-                        DIVFTreeVertexInterface* vertex = nullptr) override {
-        CHECK_VERTEX_IS_VALID(container_vertex, LOG_TAG_DIVFTREE, false);
-        FatalAssert(vertex == nullptr ||
-            (vertex->CentroidID().IsValid() && vertex->ParentID() == INVALID_VECTOR_ID),
-            LOG_TAG_DIVFTREE, "Input vertex should not have a parent assigned to it.");
-        FatalAssert(vec.IsValid(), LOG_TAG_DIVFTREE, "Invalid vector.");
+    // RetStatus SearchVertexs(const Vector& query,
+    //                       const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
+    //                       std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) override {
+    //     FatalAssert(n > 0, LOG_TAG_DIVFTREE, "Number of vertices to search for should be greater than 0.");
+    //     FatalAssert(!upper_layer.empty(), LOG_TAG_DIVFTREE, "Upper layer should not be empty.");
+    //     FatalAssert(query.IsValid(), LOG_TAG_DIVFTREE, "Query vector is invalid.");
 
-        RetStatus rs = RetStatus::Success();
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Search_Vertexs BEGIN: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu",
+    //          query.ToString(core_attr.dimension).ToCStr(), n, upper_layer.size(), upper_layer.front().first._level);
 
-        VectorID vector_id = INVALID_VECTOR_ID;
-        if (vertex != nullptr) {
-            vector_id = vertex->CentroidID();
-            rs = vertex->AssignParent(container_vertex->CentroidID());
-            FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed tp assign parent_id");
-        }
-        else {
-            vector_id = _bufmgr.RecordVector(container_vertex->Level() - 1);
-            CHECK_VECTORID_IS_VALID(vector_id, LOG_TAG_DIVFTREE);
-        }
+    //     RetStatus rs = RetStatus::Success();
+    //     lower_layer.clear();
+    //     lower_layer.reserve(n);
+    //     uint16_t level = upper_layer.front().first._level;
+    //     for (const std::pair<VectorID, DTYPE>& vertex_data : upper_layer) {
+    //         VectorID vertex_id = vertex_data.first;
 
-        Address vec_add = container_vertex->Insert(vec, vector_id);
-        FatalAssert(vec_add != INVALID_ADDRESS, LOG_TAG_DIVFTREE, "Failed to insert vector into parent.");
-        rs = _bufmgr.UpdateVectorAddress(vector_id, vec_add);
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update vector address for vector_id: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
-        return vector_id;
-    }
+    //         CHECK_VECTORID_IS_VALID(vertex_id, LOG_TAG_DIVFTREE);
+    //         CHECK_VECTORID_IS_CENTROID(vertex_id, LOG_TAG_DIVFTREE);
+    //         FatalAssert(vertex_id._level == level, LOG_TAG_DIVFTREE, "Vertex level mismatch: expected %hhu, got %hhu.",
+    //                     level, vertex_id._level);
 
-    RetStatus ExpandTree(DIVFTreeVertexInterface* root, const Vector& centroid) override {
-        CHECK_VERTEX_IS_VALID(root, LOG_TAG_DIVFTREE, false);
-        FatalAssert(root->CentroidID() == _root, LOG_TAG_DIVFTREE, "root should be the current root: input_root_id="
-                    VECTORID_LOG_FMT "current root id=" VECTORID_LOG_FMT,
-                    VECTORID_LOG(root->CentroidID()), VECTORID_LOG(_root));
-        RetStatus rs = RetStatus::Success();
-        VectorID new_root_id = _bufmgr.RecordRoot();
-        DIVFTreeVertex* new_root = static_cast<DIVFTreeVertex*>(CreateNewVertex(new_root_id));
-        rs = _bufmgr.UpdateClusterAddress(new_root_id, new_root);
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for new_root_id: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(new_root_id));
-        rs = _bufmgr.UpdateVectorAddress(_root, new_root->Insert(centroid, _root));
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update vector address for new_root_id: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(new_root_id));
-        _root = new_root_id;
-        rs = root->AssignParent(new_root_id);
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to AssignParent for new_root. new_root_id="
-                    VECTORID_LOG_FMT ", old_root_id=" VECTORID_LOG_FMT,
-                    VECTORID_LOG(new_root_id), VECTORID_LOG(root->CentroidID()));
-        ++_levels;
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Expand_Tree: New root created with id=" VECTORID_LOG_FMT ", previous root id= " VECTORID_LOG_FMT,
-             VECTORID_LOG(new_root_id), VECTORID_LOG(root->CentroidID()));
-        // todo assert success of every operation
-        return rs;
-    }
+    //         DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(vertex_id));
+    //         CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, false);
 
-    size_t FindClosestCluster(const std::vector<DIVFTreeVertexInterface*>& candidates, const Vector& vec) override {
-        FatalAssert(!candidates.empty(), LOG_TAG_DIVFTREE, "Candidates should not be empty.");
-        FatalAssert(vec.IsValid(), LOG_TAG_DIVFTREE, "Invalid vector.");
-        CHECK_VECTORID_IS_VALID(candidates[0]->CentroidID(), LOG_TAG_DIVFTREE);
+    //         if (vertex_id != _root) {
+    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //                 "Search_Vertexs: vertex_id=" VECTORID_LOG_FMT ", vertex_centroid=%s, vertex_type=%s",
+    //                 VECTORID_LOG(vertex_id), _bufmgr.GetVector(vertex_id).ToString(core_attr.dimension).ToCStr(),
+    //                 ((vertex->IsLeaf()) ? "Leaf" : "Internal"));
+    //         }
+    //         else {
+    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //                 "Search_Vertexs(root): vertex_id=" VECTORID_LOG_FMT ", vertex_type=%s",
+    //                 VECTORID_LOG(vertex_id), ((vertex->IsLeaf()) ? "Leaf" : "Internal"));
+    //         }
 
-        size_t best_idx = 0;
-        if (candidates.size() == 1) {
-            return best_idx; // only one candidate
-        }
+    //         rs = vertex->Search(query, n, lower_layer);
+    //         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search failed at vertex " VECTORID_LOG_FMT " with err(%s).",
+    //                     VECTORID_LOG(vertex_id), rs.Msg());
+    //     }
 
-        Vector target = _bufmgr.GetVector(candidates[0]->CentroidID());
-        FatalAssert(target.IsValid(), LOG_TAG_DIVFTREE, "Target vector is invalid for candidate 0: "
-                    VECTORID_LOG_FMT, VECTORID_LOG(candidates[0]->CentroidID()));
-        DTYPE best_dist = Distance(vec, target);
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Search_Vertexs END: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu, "
+    //          "lower_layer_size=%lu, lower_level=%hhu",
+    //          query.ToString(core_attr.dimension).ToCStr(), n, upper_layer.size(),
+    //          upper_layer.front().first._level, lower_layer.size(),
+    //          lower_layer.front().first._level);
 
-        for (size_t i = 1; i < candidates.size(); ++i) { // todo check for memory leaks and stuff
-            target.Unlink();
-            CHECK_VECTORID_IS_VALID(candidates[i]->CentroidID(), LOG_TAG_DIVFTREE);
-            target = _bufmgr.GetVector(candidates[i]->CentroidID());
-            FatalAssert(target.IsValid(), LOG_TAG_DIVFTREE, "Target vector is invalid for candidate %lu: "
-                        VECTORID_LOG_FMT, i, VECTORID_LOG(candidates[i]->CentroidID()));
-            DTYPE tmp_dist = Distance(vec, target);
-            if (MoreSimilar(tmp_dist, best_dist)) {
-                best_idx = i;
-                best_dist = tmp_dist;
-            }
-        }
+    //     return rs;
+    // }
 
-        return best_idx;
-    }
+    // VectorID RecordInto(const Vector& vec, DIVFTreeVertexInterface* container_vertex,
+    //                     DIVFTreeVertexInterface* vertex = nullptr) override {
+    //     CHECK_VERTEX_IS_VALID(container_vertex, LOG_TAG_DIVFTREE, false);
+    //     FatalAssert(vertex == nullptr ||
+    //         (vertex->CentroidID().IsValid() && vertex->ParentID() == INVALID_VECTOR_ID),
+    //         LOG_TAG_DIVFTREE, "Input vertex should not have a parent assigned to it.");
+    //     FatalAssert(vec.IsValid(), LOG_TAG_DIVFTREE, "Invalid vector.");
 
-    RetStatus Split(std::vector<DIVFTreeVertexInterface*>& candidates, size_t vertex_idx) override {
-        FatalAssert(candidates.size() > vertex_idx, LOG_TAG_DIVFTREE, "candidates should contain vertex.");
-        DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(candidates[vertex_idx]);
-        CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, true);
-        FatalAssert(vertex->IsFull(), LOG_TAG_DIVFTREE, "vertex should be full.");
+    //     RetStatus rs = RetStatus::Success();
 
-        RetStatus rs = RetStatus::Success();
-        size_t last_size = candidates.size();
-        std::vector<Vector> centroids;
+    //     VectorID vector_id = INVALID_VECTOR_ID;
+    //     if (vertex != nullptr) {
+    //         vector_id = vertex->CentroidID();
+    //         rs = vertex->AssignParent(container_vertex->CentroidID());
+    //         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed tp assign parent_id");
+    //     }
+    //     else {
+    //         vector_id = _bufmgr.RecordVector(container_vertex->Level() - 1);
+    //         CHECK_VECTORID_IS_VALID(vector_id, LOG_TAG_DIVFTREE);
+    //     }
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Split BEGIN: " VERTEX_LOG_FMT, VERTEX_PTR_LOG(vertex));
+    //     Address vec_add = container_vertex->Insert(vec, vector_id);
+    //     FatalAssert(vec_add != INVALID_ADDRESS, LOG_TAG_DIVFTREE, "Failed to insert vector into parent.");
+    //     rs = _bufmgr.UpdateVectorAddress(vector_id, vec_add);
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update vector address for vector_id: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+    //     return vector_id;
+    // }
 
-        rs = Clustering(candidates, vertex_idx, centroids, split_leaf);
-        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Clustering failed");
-        FatalAssert(centroids[0].IsValid(), LOG_TAG_DIVFTREE, "new centroid vector of base vertex is invalid");
-        FatalAssert(candidates.size() > last_size, LOG_TAG_DIVFTREE, "No new vertices were created.");
-        FatalAssert(candidates.size() - last_size == centroids.size() - 1, LOG_TAG_DIVFTREE, "Missmatch between number of created vertices and number of centroids. Number of created vertices:%lu, number of centroids:%lu",
-            candidates.size() - last_size, centroids.size());
+    // RetStatus ExpandTree(DIVFTreeVertexInterface* root, const Vector& centroid) override {
+    //     CHECK_VERTEX_IS_VALID(root, LOG_TAG_DIVFTREE, false);
+    //     FatalAssert(root->CentroidID() == _root, LOG_TAG_DIVFTREE, "root should be the current root: input_root_id="
+    //                 VECTORID_LOG_FMT "current root id=" VECTORID_LOG_FMT,
+    //                 VECTORID_LOG(root->CentroidID()), VECTORID_LOG(_root));
+    //     RetStatus rs = RetStatus::Success();
+    //     VectorID new_root_id = _bufmgr.RecordRoot();
+    //     DIVFTreeVertex* new_root = static_cast<DIVFTreeVertex*>(CreateNewVertex(new_root_id));
+    //     rs = _bufmgr.UpdateClusterAddress(new_root_id, new_root);
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for new_root_id: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(new_root_id));
+    //     rs = _bufmgr.UpdateVectorAddress(_root, new_root->Insert(centroid, _root));
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update vector address for new_root_id: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(new_root_id));
+    //     _root = new_root_id;
+    //     rs = root->AssignParent(new_root_id);
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to AssignParent for new_root. new_root_id="
+    //                 VECTORID_LOG_FMT ", old_root_id=" VECTORID_LOG_FMT,
+    //                 VECTORID_LOG(new_root_id), VECTORID_LOG(root->CentroidID()));
+    //     ++_levels;
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Expand_Tree: New root created with id=" VECTORID_LOG_FMT ", previous root id= " VECTORID_LOG_FMT,
+    //          VECTORID_LOG(new_root_id), VECTORID_LOG(root->CentroidID()));
+    //     // todo assert success of every operation
+    //     return rs;
+    // }
 
-        if (vertex->CentroidID() == _root) {
-            ExpandTree(vertex, centroids[0]);
-        }
-        else {
-            _bufmgr.GetVector(vertex->CentroidID()).CopyFrom(centroids[0], core_attr.dimension);
-        }
+    // size_t FindClosestCluster(const std::vector<DIVFTreeVertexInterface*>& candidates, const Vector& vec) override {
+    //     FatalAssert(!candidates.empty(), LOG_TAG_DIVFTREE, "Candidates should not be empty.");
+    //     FatalAssert(vec.IsValid(), LOG_TAG_DIVFTREE, "Invalid vector.");
+    //     CHECK_VECTORID_IS_VALID(candidates[0]->CentroidID(), LOG_TAG_DIVFTREE);
 
-        std::vector<DIVFTreeVertexInterface*> parents;
-        parents.push_back(_bufmgr.GetVertex(vertex->ParentID()));
+    //     size_t best_idx = 0;
+    //     if (candidates.size() == 1) {
+    //         return best_idx; // only one candidate
+    //     }
 
-        // we can skip vertex as at this point we only have one parent and we place it there for now
-        for (size_t vertex_it = 1; vertex_it < centroids.size(); ++vertex_it) {
-            FatalAssert(centroids[vertex_it].IsValid(), LOG_TAG_DIVFTREE, "Centroid vector is invalid.");
-            // find the best parent
-            size_t closest = FindClosestCluster(parents, centroids[vertex_it]);
+    //     Vector target = _bufmgr.GetVector(candidates[0]->CentroidID());
+    //     FatalAssert(target.IsValid(), LOG_TAG_DIVFTREE, "Target vector is invalid for candidate 0: "
+    //                 VECTORID_LOG_FMT, VECTORID_LOG(candidates[0]->CentroidID()));
+    //     DTYPE best_dist = Distance(vec, target);
 
-            if (parents[closest]->IsFull()) {
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Vertex is Full. Vertex=" VERTEX_LOG_FMT,
-                     VERTEX_PTR_LOG(parents[closest]));
-            }
+    //     for (size_t i = 1; i < candidates.size(); ++i) { // todo check for memory leaks and stuff
+    //         target.Unlink();
+    //         CHECK_VECTORID_IS_VALID(candidates[i]->CentroidID(), LOG_TAG_DIVFTREE);
+    //         target = _bufmgr.GetVector(candidates[i]->CentroidID());
+    //         FatalAssert(target.IsValid(), LOG_TAG_DIVFTREE, "Target vector is invalid for candidate %lu: "
+    //                     VECTORID_LOG_FMT, i, VECTORID_LOG(candidates[i]->CentroidID()));
+    //         DTYPE tmp_dist = Distance(vec, target);
+    //         if (MoreSimilar(tmp_dist, best_dist)) {
+    //             best_idx = i;
+    //             best_dist = tmp_dist;
+    //         }
+    //     }
 
-            RecordInto(centroids[vertex_it], parents[closest], candidates[vertex_it + last_size - 1]);
+    //     return best_idx;
+    // }
 
-            if (parents[closest]->CentroidID() != _root) {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-                    "Split: Put Vertex " VERTEX_LOG_FMT " Centroid:%s, into Parent " VERTEX_LOG_FMT
-                    " Parent_Centroid:%s", VERTEX_PTR_LOG(candidates[vertex_it + last_size - 1]),
-                    centroids[vertex_it].ToString(core_attr.dimension).ToCStr(), VERTEX_PTR_LOG(parents[closest]),
-                    _bufmgr.GetVector(parents[closest]->CentroidID()).ToString(core_attr.dimension).ToCStr());
-            }
-            else {
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-                    "Split: Put Vertex " VERTEX_LOG_FMT " Centroid:%s, into Parent(root) " VERTEX_LOG_FMT,
-                    VERTEX_PTR_LOG(candidates[vertex_it + last_size - 1]),
-                    centroids[vertex_it].ToString(core_attr.dimension).ToCStr(), VERTEX_PTR_LOG(parents[closest]));
-            }
+    // RetStatus Split(std::vector<DIVFTreeVertexInterface*>& candidates, size_t vertex_idx) override {
+    //     FatalAssert(candidates.size() > vertex_idx, LOG_TAG_DIVFTREE, "candidates should contain vertex.");
+    //     DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(candidates[vertex_idx]);
+    //     CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, true);
+    //     FatalAssert(vertex->IsFull(), LOG_TAG_DIVFTREE, "vertex should be full.");
 
-            // todo assert ok
-            if (parents[closest]->IsFull()) {
-                rs = Split(parents, closest); // todo background job?
-                FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "");
-            }
-        }
+    //     RetStatus rs = RetStatus::Success();
+    //     size_t last_size = candidates.size();
+    //     std::vector<Vector> centroids;
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-             "Split END: " VERTEX_LOG_FMT "Centroid:%s",
-             VERTEX_PTR_LOG(vertex),  _bufmgr.GetVector(vertex->CentroidID()).ToString(core_attr.dimension).ToCStr());
-        return rs;
-    }
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Split BEGIN: " VERTEX_LOG_FMT, VERTEX_PTR_LOG(vertex));
 
-    RetStatus Split(DIVFTreeVertexInterface* leaf) override {
-        std::vector<DIVFTreeVertexInterface*> candids;
-        candids.push_back(leaf);
-        return Split(candids, 0);
-    }
+    //     rs = Clustering(candidates, vertex_idx, centroids, split_leaf);
+    //     FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Clustering failed");
+    //     FatalAssert(centroids[0].IsValid(), LOG_TAG_DIVFTREE, "new centroid vector of base vertex is invalid");
+    //     FatalAssert(candidates.size() > last_size, LOG_TAG_DIVFTREE, "No new vertices were created.");
+    //     FatalAssert(candidates.size() - last_size == centroids.size() - 1, LOG_TAG_DIVFTREE, "Missmatch between number of created vertices and number of centroids. Number of created vertices:%lu, number of centroids:%lu",
+    //         candidates.size() - last_size, centroids.size());
 
-    inline DIVFTreeVertexInterface* CreateNewVertex(VectorID id) override {
-        CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_DIVFTREE_VERTEX);
+    //     if (vertex->CentroidID() == _root) {
+    //         ExpandTree(vertex, centroids[0]);
+    //     }
+    //     else {
+    //         _bufmgr.GetVector(vertex->CentroidID()).CopyFrom(centroids[0], core_attr.dimension);
+    //     }
 
-        const bool is_internal_vertex = id.IsInternalVertex();
-        DIVFTreeVertex* new_vertex = static_cast<DIVFTreeVertex*>(malloc(Bytes(is_internal_vertex)));
-        CHECK_NOT_NULLPTR(new_vertex, LOG_TAG_DIVFTREE_VERTEX);
+    //     std::vector<DIVFTreeVertexInterface*> parents;
+    //     parents.push_back(_bufmgr.GetVertex(vertex->ParentID()));
 
-        DIVFTreeVertexAttributes attr;
-        attr.core = core_attr;
-        attr.similarityComparator = _similarityComparator;
-        attr.reverseSimilarityComparator = _reverseSimilarityComparator;
-        if (is_internal_vertex) {
-            attr.max_size = internal_max_size;
-            attr.min_size = internal_min_size;
-        }
-        else {
-            attr.max_size = leaf_max_size;
-            attr.min_size = leaf_min_size;
-        }
+    //     // we can skip vertex as at this point we only have one parent and we place it there for now
+    //     for (size_t vertex_it = 1; vertex_it < centroids.size(); ++vertex_it) {
+    //         FatalAssert(centroids[vertex_it].IsValid(), LOG_TAG_DIVFTREE, "Centroid vector is invalid.");
+    //         // find the best parent
+    //         size_t closest = FindClosestCluster(parents, centroids[vertex_it]);
 
-        new (new_vertex) DIVFTreeVertex(id, attr);
-        CHECK_VERTEX_IS_VALID(new_vertex, LOG_TAG_DIVFTREE_VERTEX, false);
-        return new_vertex;
-    }
+    //         if (parents[closest]->IsFull()) {
+    //             CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Vertex is Full. Vertex=" VERTEX_LOG_FMT,
+    //                  VERTEX_PTR_LOG(parents[closest]));
+    //         }
 
-    inline RetStatus SimpleDivideClustering(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
-                                           std::vector<Vector>& centroids, uint16_t split_into) {
-        FatalAssert(vertices.size() > target_vertex_index, LOG_TAG_CLUSTERING, "vertices should contain vertex.");
-        DIVFTreeVertexInterface* target = vertices[target_vertex_index];
-        CHECK_VERTEX_IS_VALID(target, LOG_TAG_CLUSTERING, true);
-        FatalAssert(split_into > 0, LOG_TAG_CLUSTERING, "split_into should be greater than 0.");
+    //         RecordInto(centroids[vertex_it], parents[closest], candidates[vertex_it + last_size - 1]);
 
-        RetStatus rs = RetStatus::Success();
+    //         if (parents[closest]->CentroidID() != _root) {
+    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //                 "Split: Put Vertex " VERTEX_LOG_FMT " Centroid:%s, into Parent " VERTEX_LOG_FMT
+    //                 " Parent_Centroid:%s", VERTEX_PTR_LOG(candidates[vertex_it + last_size - 1]),
+    //                 centroids[vertex_it].ToString(core_attr.dimension).ToCStr(), VERTEX_PTR_LOG(parents[closest]),
+    //                 _bufmgr.GetVector(parents[closest]->CentroidID()).ToString(core_attr.dimension).ToCStr());
+    //         }
+    //         else {
+    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //                 "Split: Put Vertex " VERTEX_LOG_FMT " Centroid:%s, into Parent(root) " VERTEX_LOG_FMT,
+    //                 VERTEX_PTR_LOG(candidates[vertex_it + last_size - 1]),
+    //                 centroids[vertex_it].ToString(core_attr.dimension).ToCStr(), VERTEX_PTR_LOG(parents[closest]));
+    //         }
 
-        split_into = (target->MaxSize() / split_into < target->MinSize() ? target->MaxSize() / target->MinSize() :
-                                                                        split_into);
-        if (split_into < 2) {
-            split_into = 2;
-        }
+    //         // todo assert ok
+    //         if (parents[closest]->IsFull()) {
+    //             rs = Split(parents, closest); // todo background job?
+    //             FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "");
+    //         }
+    //     }
 
-        uint16_t num_vec_per_vertex = target->MaxSize() / split_into;
-        uint16_t num_vec_rem = target->MaxSize() % split_into;
-        vertices.reserve(vertices.size() + split_into - 1);
-        centroids.reserve(split_into);
-        centroids.emplace_back(nullptr);
-        for (uint16_t i = num_vec_per_vertex + num_vec_rem; i < target->MaxSize(); ++i) {
-            if ((i - num_vec_rem) % num_vec_per_vertex == 0) {
-                VectorID vector_id = _bufmgr.RecordVector(target->Level());
-                FatalAssert(vector_id.IsValid(), LOG_TAG_CLUSTERING, "Failed to record vector.");
-                DIVFTreeVertexInterface* new_vertex = CreateNewVertex(vector_id);
-                FatalAssert(new_vertex != nullptr, LOG_TAG_CLUSTERING, "Failed to create sibling vertex.");
-                vertices.emplace_back(new_vertex);
-                _bufmgr.UpdateClusterAddress(vector_id, vertices.back());
-            }
-            VectorUpdate update = target->MigrateLastVectorTo(vertices.back());
-            // todo check update is ok and everything is successfull
+    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+    //          "Split END: " VERTEX_LOG_FMT "Centroid:%s",
+    //          VERTEX_PTR_LOG(vertex),  _bufmgr.GetVector(vertex->CentroidID()).ToString(core_attr.dimension).ToCStr());
+    //     return rs;
+    // }
 
-            _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
-            if (update.vector_id.IsCentroid()) {
-                _bufmgr.GetVertex(update.vector_id)->AssignParent(vertices.back()->CentroidID());
-            }
+    // RetStatus Split(DIVFTreeVertexInterface* leaf) override {
+    //     std::vector<DIVFTreeVertexInterface*> candids;
+    //     candids.push_back(leaf);
+    //     return Split(candids, 0);
+    // }
 
-            if ((i + 1 - num_vec_rem) % num_vec_per_vertex == 0) {
-                centroids.emplace_back(vertices.back()->ComputeCurrentCentroid());
-                CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CLUSTERING,
-                    "Simple Cluster: Created Vertex " VERTEX_LOG_FMT " Centroid:%s",
-                    VERTEX_PTR_LOG(vertices.back()), centroids.back().ToString(target->VectorDimension()).ToCStr());
-            }
-        }
-        centroids[0] = target->ComputeCurrentCentroid();
+    // inline DIVFTreeVertexInterface* CreateNewVertex(VectorID id) override {
+    //     CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE_VERTEX);
+    //     CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_DIVFTREE_VERTEX);
 
-        return rs;
-    }
+    //     const bool is_internal_vertex = id.IsInternalVertex();
+    //     DIVFTreeVertex* new_vertex = static_cast<DIVFTreeVertex*>(malloc(Bytes(is_internal_vertex)));
+    //     CHECK_NOT_NULLPTR(new_vertex, LOG_TAG_DIVFTREE_VERTEX);
 
-    inline RetStatus Clustering(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
-                              std::vector<Vector>& centroids, uint16_t split_into) override {
-        switch (core_attr.clusteringAlg)
-        {
-        case ClusteringType::SimpleDivide:
-            return SimpleDivideClustering(vertices, target_vertex_index, centroids, split_into);
-        default:
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-                 "Cluster: Invalid clustering type: %s", CLUSTERING_TYPE_NAME[core_attr.clusteringAlg]);
-        }
-        return RetStatus::Fail("Invalid clustering type");
-    }
+    //     DIVFTreeVertexAttributes attr;
+    //     attr.core = core_attr;
+    //     attr.similarityComparator = _similarityComparator;
+    //     attr.reverseSimilarityComparator = _reverseSimilarityComparator;
+    //     if (is_internal_vertex) {
+    //         attr.max_size = internal_max_size;
+    //         attr.min_size = internal_min_size;
+    //     }
+    //     else {
+    //         attr.max_size = leaf_max_size;
+    //         attr.min_size = leaf_min_size;
+    //     }
+
+    //     new (new_vertex) DIVFTreeVertex(id, attr);
+    //     CHECK_VERTEX_IS_VALID(new_vertex, LOG_TAG_DIVFTREE_VERTEX, false);
+    //     return new_vertex;
+    // }
+
+    // inline RetStatus SimpleDivideClustering(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
+    //                                        std::vector<Vector>& centroids, uint16_t split_into) {
+    //     FatalAssert(vertices.size() > target_vertex_index, LOG_TAG_CLUSTERING, "vertices should contain vertex.");
+    //     DIVFTreeVertexInterface* target = vertices[target_vertex_index];
+    //     CHECK_VERTEX_IS_VALID(target, LOG_TAG_CLUSTERING, true);
+    //     FatalAssert(split_into > 0, LOG_TAG_CLUSTERING, "split_into should be greater than 0.");
+
+    //     RetStatus rs = RetStatus::Success();
+
+    //     split_into = (target->MaxSize() / split_into < target->MinSize() ? target->MaxSize() / target->MinSize() :
+    //                                                                     split_into);
+    //     if (split_into < 2) {
+    //         split_into = 2;
+    //     }
+
+    //     uint16_t num_vec_per_vertex = target->MaxSize() / split_into;
+    //     uint16_t num_vec_rem = target->MaxSize() % split_into;
+    //     vertices.reserve(vertices.size() + split_into - 1);
+    //     centroids.reserve(split_into);
+    //     centroids.emplace_back(nullptr);
+    //     for (uint16_t i = num_vec_per_vertex + num_vec_rem; i < target->MaxSize(); ++i) {
+    //         if ((i - num_vec_rem) % num_vec_per_vertex == 0) {
+    //             VectorID vector_id = _bufmgr.RecordVector(target->Level());
+    //             FatalAssert(vector_id.IsValid(), LOG_TAG_CLUSTERING, "Failed to record vector.");
+    //             DIVFTreeVertexInterface* new_vertex = CreateNewVertex(vector_id);
+    //             FatalAssert(new_vertex != nullptr, LOG_TAG_CLUSTERING, "Failed to create sibling vertex.");
+    //             vertices.emplace_back(new_vertex);
+    //             _bufmgr.UpdateClusterAddress(vector_id, vertices.back());
+    //         }
+    //         VectorUpdate update = target->MigrateLastVectorTo(vertices.back());
+    //         // todo check update is ok and everything is successfull
+
+    //         _bufmgr.UpdateVectorAddress(update.vector_id, update.vector_data);
+    //         if (update.vector_id.IsCentroid()) {
+    //             _bufmgr.GetVertex(update.vector_id)->AssignParent(vertices.back()->CentroidID());
+    //         }
+
+    //         if ((i + 1 - num_vec_rem) % num_vec_per_vertex == 0) {
+    //             centroids.emplace_back(vertices.back()->ComputeCurrentCentroid());
+    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_CLUSTERING,
+    //                 "Simple Cluster: Created Vertex " VERTEX_LOG_FMT " Centroid:%s",
+    //                 VERTEX_PTR_LOG(vertices.back()), centroids.back().ToString(target->VectorDimension()).ToCStr());
+    //         }
+    //     }
+    //     centroids[0] = target->ComputeCurrentCentroid();
+
+    //     return rs;
+    // }
+
+    // inline RetStatus Clustering(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
+    //                           std::vector<Vector>& centroids, uint16_t split_into) override {
+    //     switch (core_attr.clusteringAlg)
+    //     {
+    //     case ClusteringType::SimpleDivide:
+    //         return SimpleDivideClustering(vertices, target_vertex_index, centroids, split_into);
+    //     default:
+    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
+    //              "Cluster: Invalid clustering type: %s", CLUSTERING_TYPE_NAME[core_attr.clusteringAlg]);
+    //     }
+    //     return RetStatus::Fail("Invalid clustering type");
+    // }
 
 TESTABLE;
 };

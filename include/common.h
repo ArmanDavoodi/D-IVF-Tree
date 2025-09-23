@@ -74,6 +74,7 @@ constexpr uint16_t INVALID_OFFSET = UINT16_MAX;
  * raw vector data.
  */
 constexpr uint8_t MAX_TREE_HIGHT = 10;
+constexpr float COMPACTION_FACTOR = 1.15;
 
 union VectorID {
     uint64_t _id;
