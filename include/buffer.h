@@ -145,10 +145,10 @@ struct BufferVectorEntry {
             DIVFTreeVertexInterface* parent_vertex = parent->ReadLatestVersion(false);
             bool is_leaf = parent->centroidMeta.selfId.IsLeaf();
             void* meta = parent_vertex->GetCluster().MetaData(currentLocation.entryOffset, false,
-                                                                parent_vertex->GetAttributes().block_size,
-                                                                parent_vertex->GetAttributes().cap,
-                                                                parent_vertex->GetAttributes().index->
-                                                                GetAttributes().dimension);
+                                                              parent_vertex->GetAttributes().block_size,
+                                                              parent_vertex->GetAttributes().cap,
+                                                              parent_vertex->GetAttributes().index->
+                                                              GetAttributes().dimension);
             if (is_leaf) {
                 VectorMetaData* vmt = reinterpret_cast<VectorMetaData*>(meta);
                 FatalAssert(meta->id == selfId, LOG_TAG_BUFFER, "Corrupted location data!");
@@ -533,6 +533,32 @@ public:
             DIVFTreeVertexInterface* memLoc = AllocateMemoryForVertex(level)
             CHECK_NOT_NULLPTR(memLoc, LOG_TAG_BUFFER);
             entries[i] = new BufferVertexEntry(memLoc, id);
+            entries[i]->clusterLock.Lock(SX_EXCLUSIVE);
+
+            clusterDirectory[level].emplace_back(entries[i]);
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    void BatchCreateBufferEntry(size_t num_entries, uint8_t level, DIVFTreeVertexInterface** clusters,
+                                BufferVertexEntry** entries) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
+        CHECK_NOT_NULLPTR(clusters, LOG_TAG_BUFFER);
+        FatalAssert(num_entries > 0, LOG_TAG_BUFFER, "number of entries cannot be 0!");
+        FatalAssert(MAX_TREE_HIGHT > VectorID::VECTOR_LEVEL && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+
+        bufferMgrLock.Lock(SX_EXCLUSIVE);
+        const uiont64_t nextVal = clusterDirectory[level].size();
+        for (size_t i = 0; i < num_entries; ++i) {
+            VectorID id = 0;
+            id._val = nextVal + i;
+            id._level = level;
+            id._creator_node_id = 0;
+
+            CHECK_NOT_NULLPTR(clusters[i], LOG_TAG_BUFFER);
+            entries[i] = new BufferVertexEntry(clusters[i], id);
             entries[i]->clusterLock.Lock(SX_EXCLUSIVE);
 
             clusterDirectory[level].emplace_back(entries[i]);

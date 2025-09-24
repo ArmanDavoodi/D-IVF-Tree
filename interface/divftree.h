@@ -17,6 +17,8 @@ struct DIVFTreeVertexAttributes {
     uint16_t block_size;
 
     DIVFTreeInterface *index;
+
+    DIVFTreeVertexAttributes() : centroid_id{INVALID_VECTOR_ID}, version{0}, min_size{0}, cap{0}, block_size{0}, index{nullptr}; /* todo: to be remvoed */
 };
 
 struct DIVFTreeAttributes {
@@ -24,6 +26,15 @@ struct DIVFTreeAttributes {
     DistanceType distanceAlg;
     VPairComparator similarityComparator;
     VPairComparator reverseSimilarityComparator;
+
+    uint16_t leaf_min_size;
+    uint16_t leaf_max_size;
+    uint16_t internal_min_size;
+    uint16_t internal_max_size;
+
+    uint16_t split_internal;
+    uint16_t split_leaf;
+
     uint16_t dimension;
 
 
@@ -37,24 +48,25 @@ struct DIVFTreeAttributes {
     }
 };
 
-struct DIVFTreeAttributes {
-    DIVFTreeCoreAttributes core;
-    uint16_t leaf_min_size;
-    uint16_t leaf_max_size;
-    uint16_t internal_min_size;
-    uint16_t internal_max_size;
-    uint16_t split_internal;
-    uint16_t split_leaf;
+// struct DIVFTreeAttributes {
 
-    String ToString() const {
-        return String("{dimension=%hu, clusteringAlg=%s, distanceAlg=%s, "
-                      "leaf_min_size=%hu, leaf_max_size=%hu, "
-                      "internal_min_size=%hu, internal_max_size=%hu, "
-                      "split_internal=%hu, split_leaf=%hu}",
-                      core.dimension, CLUSTERING_TYPE_NAME[core.clusteringAlg], DISTANCE_TYPE_NAME[core.distanceAlg],
-                      leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, split_internal, split_leaf);
-    }
-};
+    // DIVFTreeCoreAttributes core;
+    // uint16_t leaf_min_size;
+    // uint16_t leaf_max_size;
+    // uint16_t internal_min_size;
+    // uint16_t internal_max_size;
+    // uint16_t split_internal;
+    // uint16_t split_leaf;
+
+    // String ToString() const {
+    //     return String("{dimension=%hu, clusteringAlg=%s, distanceAlg=%s, "
+    //                   "leaf_min_size=%hu, leaf_max_size=%hu, "
+    //                   "internal_min_size=%hu, internal_max_size=%hu, "
+    //                   "split_internal=%hu, split_leaf=%hu}",
+    //                   core.dimension, CLUSTERING_TYPE_NAME[core.clusteringAlg], DISTANCE_TYPE_NAME[core.distanceAlg],
+    //                   leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, split_internal, split_leaf);
+    // }
+// };
 
 #define CHECK_CORE_ATTRIBUTES(attr, tag) \
     FatalAssert((attr).core.dimension > 0, (tag), "Dimension must be greater than 0."); \
@@ -85,7 +97,7 @@ public:
     virtual void Unpin() = 0;
     virtual Cluster& GetCluster() = 0;
 
-    virtual const DIVFTreeAttributes& GetAttributes() const = 0;
+    virtual const DIVFTreeVertexAttributes& GetAttributes() const = 0;
 
     // virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
 
@@ -121,7 +133,7 @@ public:
     DIVFTreeInterface() = default;
     virtual ~DIVFTreeInterface() = default;
 
-    virtual const DIVFTreeVertexAttributes& GetAttributes() const = 0;
+    virtual const DIVFTreeAttributes& GetAttributes() const = 0;
 
     // virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) = 0;
     // virtual RetStatus Delete(VectorID vec_id) = 0;

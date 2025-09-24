@@ -155,9 +155,17 @@ class BufferManagerInterface;
 enum ClusteringType : int8_t {
     InvalidC,
     SimpleDivide,
+    PCA1,
+    GradientDescentLinearRegression, // GDLR
+    /* first use a 2-mean(as in k mean) and if it produced higly imbalanced clusters use PCA1 or something becuase it usually means that the cluster */
+    KMeansWithFallBackPCA1,
+    KMeansWithFallBackGDLR,
+    OutLierDetectionThenKMeansWithFallBackPCA1,
+    OutLierDetectionThenKMeansWithFallBackGDLR,
     NumTypesC
 };
-inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypesC + 1] = {"Invalid", "SimpleDivide", "NumTypes"};
+inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypesC + 1] =
+    {"Invalid", "SimpleDivide", "TwoMeansWithFallbackToProjection", "NumTypes"};
 inline constexpr bool IsValid(ClusteringType type) {
     return ((type != ClusteringType::InvalidC) && (type != ClusteringType::NumTypesC));
 }
