@@ -99,6 +99,7 @@ struct BufferVectorEntry {
             return nullptr;
         }
 
+        BufferVertexEntry* parent = nullptr
         while (true) {
             currentLocation = INVALID_VECTOR_LOCATION;
             VectorLocation location = location.Load();
@@ -108,7 +109,7 @@ struct BufferVectorEntry {
                 return nullptr;
             }
 
-            BufferVertexEntry* parent = bufferMgr->ReadBufferEntry(location.containerId, SX_SHARED);
+            parent = bufferMgr->ReadBufferEntry(location.containerId, SX_SHARED);
             currentLocation = location.Load();
             if (currentLocation == INVALID_VECTOR_LOCATION) {
                 /* this means that we should have become the new root! */
@@ -123,8 +124,8 @@ struct BufferVectorEntry {
             if (currentLocation != location) {
                 if ((parent != nullptr) && (currentLocation.containerId == location.containerId) &&
                     (currentLocation.containerVersion == location.containerVersion)) {
-                    /* There was a compaction and we are good to go! */
-                    return parent;
+                    /* This just means that there was a compaction and out offset has changed */
+                    break
                 }
 
                 if (parent != nullptr) {
@@ -134,9 +135,31 @@ struct BufferVectorEntry {
                 continue;
             }
 
-            CHECK_NOT_NULLPTR(parent, LOG_TAG_BUFFER);
-            return parent;
+            break;
         }
+
+        CHECK_NOT_NULLPTR(parent, LOG_TAG_BUFFER);
+        SANITY_CHECK(
+            FatalAssert(parent->centroidMeta.selfId._level = selfId._level + 1, LOG_TAG_BUFFER,
+                        "level mismatch between parent and child!");
+            DIVFTreeVertexInterface* parent_vertex = parent->ReadLatestVersion(false);
+            bool is_leaf = parent->centroidMeta.selfId.IsLeaf();
+            void* meta = parent_vertex->GetCluster().MetaData(currentLocation.entryOffset, false,
+                                                                parent_vertex->GetAttributes().block_size,
+                                                                parent_vertex->GetAttributes().cap,
+                                                                parent_vertex->GetAttributes().index->
+                                                                GetAttributes().dimension);
+            if (is_leaf) {
+                VectorMetaData* vmt = reinterpret_cast<VectorMetaData*>(meta);
+                FatalAssert(meta->id == selfId, LOG_TAG_BUFFER, "Corrupted location data!");
+                FatalAssert(meta->state == VECTOR_STATE_VALID, LOG_TAG_BUFFER, "Corrupted location data!");
+            } else {
+                CentroidMetaData* vmt = reinterpret_cast<CentroidMetaData*>(meta);
+                FatalAssert(meta->id == selfId, LOG_TAG_BUFFER, "Corrupted location data!");
+                FatalAssert(meta->state == VECTOR_STATE_VALID, LOG_TAG_BUFFER, "Corrupted location data!");
+            }
+        )
+        return parent;
     }
 };
 
@@ -271,31 +294,37 @@ struct BufferVertexEntry {
     }
 
     /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
-    Version UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, bool updateVersion = true) {
+    void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster) {
         threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_EXCLUSIVE);
         headerLock.Lock(SX_EXCLUSIVE);
         FatalAssert(liveVersions.find(currentVersion) != liveVersions.end(), LOG_TAG_BUFFER,
                     "new version already exists!");
-        if (updateVersion) {
-            currentVersion++;
-            FatalAssert(liveVersions.find(currentVersion) == liveVersions.end(), LOG_TAG_BUFFER,
-                        "new version already exists!");
-            FatalAssert(newCluster != nullptr, LOG_TAG_BUFFER, "Invalid cluster ptr!");
-            liveVersions.emplace(currentVersion, 1, 0, newCluster);
-            UnpinVersion(currentVersion - 1, true);
-        } else {
-            std::unordered_map<Version, VersionedClusterPtr>::iterator& it = liveVersions.find(currentVersion);
-            uint64_t pinCount = it->second.clusterPtr.pin.load(std::memory_order_relaxed);
-            DIVFTreeVertexInterface* cluster = it->second.clusterPtr.clusterPtr;
-            it->second.clusterPtr.pin.store(0, std::memory_order_relaxed);
-            it->second.clusterPtr.clusterPtr = newCluster;
-            if (newCluster == nullptr) {
-                liveVersions.erase(it);
-            }
-            cluster->MarkForRecycle(pinCount);
+        std::unordered_map<Version, VersionedClusterPtr>::iterator& it = liveVersions.find(currentVersion);
+        uint64_t pinCount = it->second.clusterPtr.pin.load(std::memory_order_relaxed);
+        DIVFTreeVertexInterface* cluster = it->second.clusterPtr.clusterPtr;
+        it->second.clusterPtr.pin.store(0, std::memory_order_relaxed);
+        it->second.clusterPtr.clusterPtr = newCluster;
+        if (newCluster == nullptr) {
+            liveVersions.erase(it);
         }
+        cluster->MarkForRecycle(pinCount);
+    headerLock.Unlock();
+    }
+
+    /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
+    void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion) {
+        threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_EXCLUSIVE);
+        headerLock.Lock(SX_EXCLUSIVE);
+        FatalAssert(liveVersions.find(currentVersion) != liveVersions.end(), LOG_TAG_BUFFER,
+                    "new version already exists!");
+        FatalAssert(newVersion == currentVersion + 1, LOG_TAG_BUFFER, "Version jump detected!");
+        currentVersion++;
+        FatalAssert(liveVersions.find(currentVersion) == liveVersions.end(), LOG_TAG_BUFFER,
+                    "new version already exists!");
+        FatalAssert(newCluster != nullptr, LOG_TAG_BUFFER, "Invalid cluster ptr!");
+        liveVersions.emplace(currentVersion, 1, 0, newCluster);
+        UnpinVersion(currentVersion - 1, true);
         headerLock.Unlock();
-        return currentVersion;
     }
 
     void UnpinVersion(Version version, bool headerLocked=false) {

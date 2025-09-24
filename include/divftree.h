@@ -240,8 +240,16 @@ public:
         }
     }
 
+    Cluster& GetCluster() override {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "not implemented!");
+    }
+
+    const DIVFTreeAttributes& GetAttributes() const override {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "not implemented!");
+    }
+
     /* todo: make sure the vertex is locked in shared/exclusive mode when calling this function! */
-    RetStatus BatchInsert(VectorBatch batch, uint16_t marked_for_update = INVALID_OFFSET) {
+    RetStatus BatchInsert(const VectorBatch& batch, uint16_t marked_for_update = INVALID_OFFSET) {
         // CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
         FatalAssert(batch.size > 0, LOG_TAG_DIVFTREE_VERTEX,
                     "Batch size must be greater than zero.");
@@ -878,18 +886,18 @@ public:
     // }
 
 protected:
-    const DIVFTreeCoreAttributes core_attr;
-    const uint16_t leaf_min_size;
-    const uint16_t leaf_max_size;
-    const uint16_t internal_min_size;
-    const uint16_t internal_max_size;
-    const uint16_t split_internal;
-    const uint16_t split_leaf;
-    const VPairComparator _similarityComparator;
-    const VPairComparator _reverseSimilarityComparator;
-    size_t _size;
-    VectorID _root;
-    uint64_t _levels;
+    // const DIVFTreeCoreAttributes core_attr;
+    // const uint16_t leaf_min_size;
+    // const uint16_t leaf_max_size;
+    // const uint16_t internal_min_size;
+    // const uint16_t internal_max_size;
+    // const uint16_t split_internal;
+    // const uint16_t split_leaf;
+    // const VPairComparator _similarityComparator;
+    // const VPairComparator _reverseSimilarityComparator;
+    // size_t _size;
+    // VectorID _root;
+    // uint64_t _levels;
 
     // inline bool MoreSimilar(const DTYPE& a, const DTYPE& b) const {
     //     switch (core_attr.distanceAlg) {
@@ -902,7 +910,7 @@ protected:
     //     return false; // Return false if the distance type is invalid
     // }
 
-    RetStatus CompactAndInsert(BufferVertexEntry* container_entry, VectorBatch batch,
+    RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const VectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
         FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
@@ -1016,7 +1024,7 @@ protected:
         compacted->_cluster.header.reserved_size.store(new_size, std::memory_order_relaxed);
         compacted->_cluster.header.visible_size.store(new_size, std::memory_order_relaxed);
 
-        (void)container_entry->UpdateClusterPtr(compacted, false);
+        container_entry->UpdateClusterPtr(compacted);
         current = nullptr; // this is to make sure that we no longer access the current!
 
         for (uint16_t i = 0; i < old_reserved; ++i) {
@@ -1048,7 +1056,25 @@ protected:
         return RetStatus::Success();
     }
 
-    RetStatus SplitAndInsert(BufferVertexEntry* container_entry, VectorBatch batch,
+
+    inline uint16_t NumberOfClusters(uint16_t num_vectors) {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "cannot get number of clusters -> not implemented!");
+        return 0;
+    }
+
+    inline void Clustering(uint16_t num_clusters, const DIVFTreeVertex* base,
+                           const VectorBatch& batch, DIVFTreeVertex** target, VectorBatch& centroids,
+                           uint16_t marked_for_update = INVALID_OFFSET) {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "clustering not implemented!");
+    }
+
+    inline BufferVertexEntry* ExpandTree(BufferVertexEntry* current_root, uint16_t num_clusters,
+                                         DIVFTreeVertex* current_root_new_cluster, BufferVertexEntry** sibling_clusters,
+                                         VectorBatch centroids) {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "clustering not implemented!");
+    }
+
+    RetStatus SplitAndInsert(BufferVertexEntry* container_entry, const VectorBatch& batch,
                              uint16_t marked_for_update = INVALID_OFFSET) {
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
         FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
@@ -1056,6 +1082,7 @@ protected:
         FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
         threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
 
+        RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
@@ -1067,29 +1094,94 @@ protected:
         const uint16_t dim = current->_dim;
         const uint16_t cap = current->_cap;
         const uint16_t blckSize = current->_block_size;
+        const uint8_t level = (uint8_t)(container_entry->centroidMeta.selfId._level);
         /* Todo: this will not work if we have more than one block! */
         FatalAssert(current->_cluster.NumBlocks(blckSize, cap) == 1,
                     LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
 
         FatalAssert(!is_leaf || (batch.version != nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
+        uint16_t total_size = current->_cluster.header.reserved_size.load(std::memory_order_relaxed) -
+                              current->_cluster.header.num_deleted.load(std::memory_order_relaxed) +
+                              batch.size;
+        uint16_t num_clusters = NumberOfClusters(total_size);
+        FatalAssert(num_clusters >= 2, LOG_TAG_DIVFTREE, "num_clusters should at least be 2!");
 
-        /*
-         * Todo:
-         * 1) get number of clusters
-         * 2) allocate them and build the in the bufferMgr(they are now all locked in X)
-         * 3) execute clustering algorithm -> pass the marked offset to it
-         * 4) read parent if returned null we are the root so expand
-         * 5) else, call batchInsert into new parent -> if failed unlock parent
-         *    and retry as our vector location might have changed
-         * 6) updateClusterPtr and increment version
-         * 7) unlock parent
-         * 8) for each new cluster generated -> unlock them
-         */
+        BufferVertexEntry** entries = new BufferVertexEntry*[num_clusters - 1];
+        DIVFTreeVertex** clusters = new DIVFTreeVertex*[num_clusters];
+        memset(entries, 0, (num_clusters - 1) * sizeof(BufferVertexEntry*));
 
-        return RetStatus::Success();
+        bufferMgr->BatchCreateBufferEntry(num_clusters - 1, level, entries);
+        clusters[0] = new (bufferMgr->AllocateMemoryForVertex(level)) DIVFTreeVertex();
+        for (uint16_t i = 1; i < num_clusters; ++i) {
+            clusters[i] = static_cast<DIVFTreeVertex*>(entries[i-1]->ReadLatestVersion(false));
+        }
+
+        VectorBatch centroids;
+        /* Clustering should make all vectors valid but should not change their location in buffer */
+        Clustering(num_clusters, current, batch, clusters, centroids, marked_for_update);
+        BufferVertexEntry* parent = nullptr;
+        while (true) {
+            VectorLocation currentLocation = INVALID_VECTOR_LOCATION;
+            parent = container_entry->ReadParent(currentLocation);
+            if (parent == nullptr) {
+                FatalAssert(currentLocation == INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+                            "null parent with valid location!");
+                FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(), LOG_TAG_DIVFTREE,
+                            "null parent but we are not root!");
+                parent = ExpandTree(container_entry, num_clusters, clusters[0], entries, centroids);
+            } else {
+                FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+                            "null parent with valid location!");
+                rs = BatchInsertInto(parent, centroids, false, currentLocation.entryOffset);
+                if (!rs.IsOK()) {
+                    bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                    parent = nullptr;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        threadSelf->SanityCheckLockHeldInModeByMe(&parent->clusterLock, SX_SHARED);
+
+        container_entry->UpdateClusterPtr(clusters[0], centroids.version[0]);
+        bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        parent = nullptr;
+
+        for (uint16_t i = 0; i < num_clusters; ++i) {
+            uint16_t size = clusters[i]->_cluster.header.reserved_size.load(std::memory_order_relaxed);
+            FatalAssert(size == clusters[i]->_cluster.header.visible_size.load(std::memory_order_relaxed),
+                        LOG_TAG_DIVFTREE, "mismatch between sizes when cluster is locked in X mode");
+            FatalAssert(clusters[i]->_cluster.header.num_deleted.load(std::memory_order_relaxed) == 0,
+                        LOG_TAG_DIVFTREE, "num deleted should be 0 at thsi stage!");
+            void* meta = clusters[i]->_cluster.MetaData(0, is_leaf, blckSize, cap, dim);
+            CHECK_NOT_NULLPTR(meta, LOG_TAG_DIVFTREE);
+            for (uint16_t offset = 0; offset < size; ++offset) {
+                if (is_leaf) {
+                    VectorMetaData* vmt = reinterpret_cast<VectorMetaData*>(meta);
+                    bufferMgr->UpdateVectorLocation(vmt[offset].id,
+                                                    VectorLocation{.containerId=centroids.id[i],
+                                                                   .containerVersion=centroids.version[i],
+                                                                   .entryOffset=offset});
+                } else {
+                    CentroidMetaData* vmt = reinterpret_cast<CentroidMetaData*>(meta);
+                    bufferMgr->UpdateVectorLocation(vmt[offset].id,
+                                                    VectorLocation{.containerId=centroids.id[i],
+                                                                   .containerVersion=centroids.version[i],
+                                                                   .entryOffset=offset});
+                }
+            }
+        }
+
+        for (uint16_t i = num_clusters - 1; i != 0; --i) {
+            bufferMgr->ReleaseBufferEntry(entries[i-1], ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+        }
+        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+
+        return rs;
     }
 
-    RetStatus BatchInsertInto(BufferVertexEntry* container_entry, VectorBatch batch, bool releaseEntry,
+    RetStatus BatchInsertInto(BufferVertexEntry* container_entry, const VectorBatch& batch, bool releaseEntry,
                               uint16_t marked_for_update = INVALID_OFFSET) {
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
         FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");

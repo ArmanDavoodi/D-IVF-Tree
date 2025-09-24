@@ -9,24 +9,32 @@
 
 namespace divftree {
 
-struct DIVFTreeCoreAttributes {
-    // DataType vtype;
-    uint16_t dimension;
-    // DataType dtype;
-    ClusteringType clusteringAlg;
-    DistanceType distanceAlg;
+struct DIVFTreeVertexAttributes {
+    VectorID centroid_id;
+    Version version;
+    uint16_t min_size; // todo: do we need this at compute nodes?
+    uint16_t cap; // todo: do we need this at compute nodes?
+    uint16_t block_size;
+
+    DIVFTreeInterface *index;
 };
 
-struct DIVFTreeVertexAttributes {
-    DIVFTreeCoreAttributes core;
+struct DIVFTreeAttributes {
+    ClusteringType clusteringAlg;
+    DistanceType distanceAlg;
     VPairComparator similarityComparator;
     VPairComparator reverseSimilarityComparator;
-    uint64_t version;
-    uint16_t min_size;
-    uint16_t max_size;
-    VectorID centroid_id;
-    Vector centroid_copy;
-    uint8_t cluster_owner;
+    uint16_t dimension;
+
+
+    String ToString() const {
+        return String("{dimension=%hu, clusteringAlg=%s, distanceAlg=%s, "
+                      "leaf_min_size=%hu, leaf_max_size=%hu, "
+                      "internal_min_size=%hu, internal_max_size=%hu, "
+                      "split_internal=%hu, split_leaf=%hu}",
+                      core.dimension, CLUSTERING_TYPE_NAME[core.clusteringAlg], DISTANCE_TYPE_NAME[core.distanceAlg],
+                      leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, split_internal, split_leaf);
+    }
 };
 
 struct DIVFTreeAttributes {
@@ -75,6 +83,9 @@ public:
 
     virtual void MarkForRecycle(uint64_t pinCount) = 0;
     virtual void Unpin() = 0;
+    virtual Cluster& GetCluster() = 0;
+
+    virtual const DIVFTreeAttributes& GetAttributes() const = 0;
 
     // virtual RetStatus BatchUpdate(BatchVertexUpdate& updates) = 0;
 
@@ -110,76 +121,78 @@ public:
     DIVFTreeInterface() = default;
     virtual ~DIVFTreeInterface() = default;
 
-    virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) = 0;
-    virtual RetStatus Delete(VectorID vec_id) = 0;
+    virtual const DIVFTreeVertexAttributes& GetAttributes() const = 0;
 
-    virtual RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
-                                                    uint16_t _internal_k, uint16_t _leaf_k,
-                                                    std::vector<std::pair<VectorID, DTYPE>>& neighbours,
-                                                    bool sort = true, bool sort_from_more_similar_to_less = true) = 0;
+    // virtual RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) = 0;
+    // virtual RetStatus Delete(VectorID vec_id) = 0;
 
-    virtual size_t Size() const = 0;
+    // virtual RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
+    //                                                 uint16_t _internal_k, uint16_t _leaf_k,
+    //                                                 std::vector<std::pair<VectorID, DTYPE>>& neighbours,
+    //                                                 bool sort = true, bool sort_from_more_similar_to_less = true) = 0;
 
-    virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
-    virtual size_t Bytes(bool is_internal_vertex) const = 0;
+    // virtual size_t Size() const = 0;
 
-    virtual String ToString() = 0;
+    // virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
+    // virtual size_t Bytes(bool is_internal_vertex) const = 0;
 
-    inline static RetStatus KNearestNeighbours(const Vector& query, size_t k, uint16_t dim,
-                                               const std::vector<std::pair<VectorID, Vector>>& _data,
-                                               std::vector<std::pair<VectorID, DTYPE>>& neighbours,
-                                               const DistanceType distanceAlg,
-                                               bool sort = true, bool sort_from_more_similar_to_less = true) {
-        FatalAssert(k > 0, LOG_TAG_BASIC, "k should be greater than 0.");
-        FatalAssert(dim > 0, LOG_TAG_BASIC, "Vector dimension should be greater than 0.");
-        FatalAssert(_data.size() > 0, LOG_TAG_BASIC, "Data should contain at least one vector.");
-        FatalAssert(query.IsValid(), LOG_TAG_BASIC, "Query vector is invalid.");
-        FatalAssert(neighbours.empty(), LOG_TAG_BASIC, "Neighbours vector should be empty.");
-        CLOG_IF_TRUE(_data.size() <= k, LOG_LEVEL_WARNING, LOG_TAG_BASIC,
-                     "Data size (%lu) is less than or equal to k (%lu).", _data.size(), k);
+    // virtual String ToString() = 0;
 
-        for (const auto& pair : _data) {
-            DTYPE distance = divftree::Distance(query, pair.second, dim, distanceAlg);
-            neighbours.emplace_back(pair.first, distance);
-            std::push_heap(neighbours.begin(), neighbours.end(),
-                          GetDistancePairSimilarityComparator(distanceAlg, true));
-            if (neighbours.size() > k) {
-                std::pop_heap(neighbours.begin(), neighbours.end(),
-                              GetDistancePairSimilarityComparator(distanceAlg, true));
-                neighbours.pop_back();
-            }
-        }
-        if (sort) {
-            std::sort_heap(neighbours.begin(), neighbours.end(),
-                           GetDistancePairSimilarityComparator(distanceAlg, true));
-            if (!sort_from_more_similar_to_less) {
-                std::reverse(neighbours.begin(), neighbours.end());
-            }
-        }
+    // inline static RetStatus KNearestNeighbours(const Vector& query, size_t k, uint16_t dim,
+    //                                            const std::vector<std::pair<VectorID, Vector>>& _data,
+    //                                            std::vector<std::pair<VectorID, DTYPE>>& neighbours,
+    //                                            const DistanceType distanceAlg,
+    //                                            bool sort = true, bool sort_from_more_similar_to_less = true) {
+    //     FatalAssert(k > 0, LOG_TAG_BASIC, "k should be greater than 0.");
+    //     FatalAssert(dim > 0, LOG_TAG_BASIC, "Vector dimension should be greater than 0.");
+    //     FatalAssert(_data.size() > 0, LOG_TAG_BASIC, "Data should contain at least one vector.");
+    //     FatalAssert(query.IsValid(), LOG_TAG_BASIC, "Query vector is invalid.");
+    //     FatalAssert(neighbours.empty(), LOG_TAG_BASIC, "Neighbours vector should be empty.");
+    //     CLOG_IF_TRUE(_data.size() <= k, LOG_LEVEL_WARNING, LOG_TAG_BASIC,
+    //                  "Data size (%lu) is less than or equal to k (%lu).", _data.size(), k);
 
-        return RetStatus::Success();
-    }
+    //     for (const auto& pair : _data) {
+    //         DTYPE distance = divftree::Distance(query, pair.second, dim, distanceAlg);
+    //         neighbours.emplace_back(pair.first, distance);
+    //         std::push_heap(neighbours.begin(), neighbours.end(),
+    //                       GetDistancePairSimilarityComparator(distanceAlg, true));
+    //         if (neighbours.size() > k) {
+    //             std::pop_heap(neighbours.begin(), neighbours.end(),
+    //                           GetDistancePairSimilarityComparator(distanceAlg, true));
+    //             neighbours.pop_back();
+    //         }
+    //     }
+    //     if (sort) {
+    //         std::sort_heap(neighbours.begin(), neighbours.end(),
+    //                        GetDistancePairSimilarityComparator(distanceAlg, true));
+    //         if (!sort_from_more_similar_to_less) {
+    //             std::reverse(neighbours.begin(), neighbours.end());
+    //         }
+    //     }
+
+    //     return RetStatus::Success();
+    // }
 
 protected:
-    virtual RetStatus SearchVertexs(const Vector& query,
-                                  const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
-                                  std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) = 0;
+    // virtual RetStatus SearchVertexs(const Vector& query,
+    //                               const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
+    //                               std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) = 0;
 
-    virtual VectorID RecordInto(const Vector& vec, DIVFTreeVertexInterface* container_vertex,
-                                DIVFTreeVertexInterface* vertex = nullptr) = 0;
+    // virtual VectorID RecordInto(const Vector& vec, DIVFTreeVertexInterface* container_vertex,
+    //                             DIVFTreeVertexInterface* vertex = nullptr) = 0;
 
-    virtual RetStatus ExpandTree(DIVFTreeVertexInterface* root, const Vector& centroid) = 0;
+    // virtual RetStatus ExpandTree(DIVFTreeVertexInterface* root, const Vector& centroid) = 0;
 
-    virtual size_t FindClosestCluster(const std::vector<DIVFTreeVertexInterface*>& candidates,
-                                       const Vector& vec) = 0;
+    // virtual size_t FindClosestCluster(const std::vector<DIVFTreeVertexInterface*>& candidates,
+    //                                    const Vector& vec) = 0;
 
-    virtual RetStatus Split(std::vector<DIVFTreeVertexInterface*>& candidates, size_t vertex_idx) = 0;
-    virtual RetStatus Split(DIVFTreeVertexInterface* leaf) = 0;
+    // virtual RetStatus Split(std::vector<DIVFTreeVertexInterface*>& candidates, size_t vertex_idx) = 0;
+    // virtual RetStatus Split(DIVFTreeVertexInterface* leaf) = 0;
 
-    virtual DIVFTreeVertexInterface* CreateNewVertex(VectorID id) = 0;
+    // virtual DIVFTreeVertexInterface* CreateNewVertex(VectorID id) = 0;
 
-    virtual RetStatus Cluster(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
-                              std::vector<Vector>& centroids, uint16_t split_into) = 0;
+    // virtual RetStatus Cluster(std::vector<DIVFTreeVertexInterface*>& vertices, size_t target_vertex_index,
+    //                           std::vector<Vector>& centroids, uint16_t split_into) = 0;
 };
 
 };
