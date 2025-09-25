@@ -193,9 +193,7 @@ public:
 
         for (uint16_t i = 0; i < batch.size; ++i) {
             bufferMgr->
-                UpdateVectorLocation(batch.id[i], VectorLocation{.containerId = attr.centroid_id,
-                                                                 .containerVersion = attr.version,
-                                                                 .entryOffset = offset + i});
+                UpdateVectorLocation(batch.id[i], VectorLocation(attr.centroid_id, attr.version, offset + i));
         }
 
         if (marked_for_update != INVALID_OFFSET) {
@@ -1120,8 +1118,94 @@ protected:
         return rs;
     }
 
+    inline void PruneAtRootAndRelease(BufferVertexEntry* container_entry) {
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented!");
+    }
+
+    inline void PruneEmptyVertexAndRelease(BufferVertexEntry* container_entry) {
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented!");
+    }
+
     inline void PruneIfNeededAndRelease(BufferVertexEntry* container_entry) {
-        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "not implemeted");
+        while (true) {
+            threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
+            CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+
+            BufferManager* bufferMgr = BufferManager::GetInstance();
+            CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+            VectorID rootId = bufferMgr->GetCurrentRootId();
+            CHECK_VECTORID_IS_VALID(rootId, LOG_TAG_DIVFTREE);
+            CHECK_VECTORID_IS_CENTROID(rootId, LOG_TAG_DIVFTREE);
+            if (rootId.IsLeaf()) {
+                FatalAssert(container_entry->centroidMeta.selfId == rootId, LOG_TAG_DIVFTREE, "we should be the root!");
+                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                return;
+            }
+
+            DIVFTreeVertex* container = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+            CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
+            if (container_entry->centroidMeta.selfId == rootId) {
+                /* we can be sure that we remain root as changing the current root requires exclusive lock on it */
+                if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
+                    container->cluster.header.num_deleted.load(std::memory_order_acquire)) > 1) {
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                    return;
+                }
+                BufferVertexEntryState state = BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS;
+                if (container_entry->UpgradeAccessToExclusive(state).IsOK()) {
+                    PruneAtRootAndRelease(container_entry);
+                    return;
+                } else if (state == BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS ||
+                           state == BufferVertexEntryState::CLUSTER_DELETED) {
+                    /* someone else has handled it */
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                    return;
+                } else if (state == BufferVertexEntryState::CLUSTER_FULL) {
+                    /* recheck if pruning is needed */
+                    continue;
+                } else {
+                    CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here! Invalid state");
+                }
+            }
+
+            if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
+                container->cluster.header.num_deleted.load(std::memory_order_acquire)) >= 1) {
+                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                return;
+            }
+            BufferVertexEntryState state = BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS;
+            if (container_entry->UpgradeAccessToExclusive(state).IsOK()) {
+                if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
+                    container->cluster.header.num_deleted.load(std::memory_order_acquire)) >= 1) {
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+                    return;
+                }
+
+                rootId = bufferMgr->GetCurrentRootId();
+                if (rootId.IsLeaf()) {
+                    FatalAssert(container_entry->centroidMeta.selfId == rootId, LOG_TAG_DIVFTREE,
+                                "we should be the root!");
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+                    return;
+                }
+                if (container_entry->centroidMeta.selfId == rootId) {
+                    PruneAtRootAndRelease(container_entry);
+                } else {
+                    PruneEmptyVertexAndRelease(container_entry);
+                }
+                return;
+            } else if (state == BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS ||
+                       state == BufferVertexEntryState::CLUSTER_DELETED) {
+                /* someone else has handled it */
+                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            } else if (state == BufferVertexEntryState::CLUSTER_FULL) {
+                /* recheck if pruning is needed */
+                continue;
+            } else {
+                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here! Invalid state");
+            }
+        }
     }
 
     RetStatus DeleteVectorAndReleaseContainer(VectorID target, BufferVertexEntry* container_entry, VectorLocation loc) {

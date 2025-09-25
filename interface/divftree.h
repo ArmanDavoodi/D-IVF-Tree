@@ -97,7 +97,7 @@ struct DIVFTreeAttributes {
 
 class DIVFTreeVertexInterface {
 public:
-    // virtual ~DIVFTreeVertexInterface() = default;
+    virtual ~DIVFTreeVertexInterface() = default;
     // virtual RetStatus AssignParent(VectorID parent_id) = 0;
 
     virtual void MarkForRecycle(uint64_t pinCount) = 0;
