@@ -165,10 +165,11 @@ struct BufferVectorEntry {
 
 enum BufferVertexEntryState : uint8_t {
     CLUSTER_INVALID = 0,
-    CLUSTER_STABLE = 1,
-    CLUSTER_FULL = 2,
-    CLUSTER_DELETE_IN_PROGRESS = 3,
-    CLUSTER_DELETED = 4
+    CLUSTER_CREATED = 1,
+    CLUSTER_STABLE = 2,
+    CLUSTER_FULL = 3,
+    CLUSTER_DELETE_IN_PROGRESS = 4,
+    CLUSTER_DELETED = 5
 };
 
 /*
@@ -199,8 +200,9 @@ struct BufferVertexEntry {
      */
     std::unordered_map<Version, VersionedClusterPtr> liveVersions;
 
-    BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id) : centroidMeta(id), state(CLUSTER_INVALID),
-                                                                       currentVersion(0) {
+    BufferVertexEntry(DIVFTreeVertexInterface* cluster,
+                      VectorID id, bool valid) : centroidMeta(id), state(valid ? CLUSTER_STABLE : CLUSTER_INVALID),
+                                                 currentVersion(0) {
         oldVersions[0] = VersionedClusterPtr{1, ClusterPtr{0, cluster}};
         /*
          * set version pin to 1 as BufferVertexEntry is referencing it with currentVersion and
@@ -479,7 +481,7 @@ public:
      *
      * will return the rootEntry in the INVALID state and locked in exclusive mode!
      */
-    inline static RetStatus Init(uint64_t vertexMetaDataSize, uint16_t cap, uint16_t dim, BufferVertexEntry*& rootEntry) {
+    inline static BufferVertexEntry* Init(uint64_t vertexMetaDataSize, uint16_t cap, uint16_t dim) {
         FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
         uint64_t internalVertexSize = ALLIGNED_SIZE(ALLIGNED_SIZE(vertexMetaDataSize) +
                                       ALLIGNED_SIZE(sizeof(ClusterHeader) + Cluster::DataBytes(false, cap, dim)));
@@ -487,9 +489,8 @@ public:
                                                 ALLIGNED_SIZE(sizeof(ClusterHeader) +
                                                               Cluster::DataBytes(true, cap, dim)));
         bufferMgrInstance = new BufferManager(internalVertexSize, leafVertexSize);
-        rootEntry = nullptr;
-        bufferMgrInstance->BatchCreateBufferEntry(1, VectorID::LEAF_LEVEL, &rootEntry);
-        return RetStatus::Success();
+        BufferVertexEntry* root = bufferMgrInstance->CreateNewRootEntry();
+        return root;
     }
 
     /*
@@ -509,45 +510,54 @@ public:
 
     DIVFTreeVertexInterface* AllocateMemoryForVertex(uint8_t level) {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
-        FatalAssert(MAX_TREE_HIGHT > VectorID::VECTOR_LEVEL && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+        FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                     "Level is out of bounds.");
         return aligned_alloc(CACHE_LINE_SIZE,
                              ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
     }
 
-    void BatchCreateBufferEntry(size_t num_entries, uint8_t level, BufferVertexEntry** entries) {
+    BufferVertexEntry* CreateNewRootEntry() {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
-        CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
-        FatalAssert(num_entries > 0, LOG_TAG_BUFFER, "number of entries cannot be 0!");
-        FatalAssert(MAX_TREE_HIGHT > VectorID::VECTOR_LEVEL && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
-                    "Level is out of bounds.");
-
         bufferMgrLock.Lock(SX_EXCLUSIVE);
-        const uiont64_t nextVal = clusterDirectory[level].size();
-        for (size_t i = 0; i < num_entries; ++i) {
-            VectorID id = 0;
-            id._val = nextVal + i;
-            id._level = level;
-            id._creator_node_id = 0;
-
-            DIVFTreeVertexInterface* memLoc = AllocateMemoryForVertex(level)
-            CHECK_NOT_NULLPTR(memLoc, LOG_TAG_BUFFER);
-            entries[i] = new BufferVertexEntry(memLoc, id);
-            entries[i]->clusterLock.Lock(SX_EXCLUSIVE);
-
-            clusterDirectory[level].emplace_back(entries[i]);
+        VectorID currentId = currentRootId.load(std::memory_order_relaxed);
+        VectorID newId = INVALID_VECTOR_ID;
+        newId._creator_node_id = 0;
+        if (currentId == INVALID_VECTOR_ID) {
+            /* this is called during init */
+            newId._level = VectorID::LEAF_LEVEL;
+        } else {
+            SANITY_CHECK(
+                BufferVertexEntry* oldRootEntry = GetVertexEntry(currentId, false);
+                CHECK_NOT_NULLPTR(oldRootEntry, LOG_TAG_BUFFER);
+                threadSelf->SanityCheckLockHeldInModeByMe(&oldRootEntry->clusterLock, SX_EXCLUSIVE);
+                FatalAssert(oldRootEntry->centroidMeta.selfId == currentId);
+            )
+            newId._level = currentId._level + 1;
         }
+        FatalAssert(MAX_TREE_HIGHT > newId._level && newId._level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+        newId._val = clusterDirectory[newId._level].size();
+        DIVFTreeVertexInterface* memLoc = AllocateMemoryForVertex(newId._level);
+        CHECK_NOT_NULLPTR(memLoc, LOG_TAG_BUFFER);
+        BufferVertexEntry* newRoot = new BufferVertexEntry(memLoc, id, false);
+        newRoot->clusterLock.Lock(SX_EXCLUSIVE);
+        clusterDirectory[newId._level].emplace_back(newRoot);
+        currentRootId.store(newId, std::memory_order_release);
         bufferMgrLock.Unlock();
     }
 
-    void BatchCreateBufferEntry(size_t num_entries, uint8_t level, DIVFTreeVertexInterface** clusters,
-                                BufferVertexEntry** entries) {
+    /* centroidsData.size is the total number of entries and we should fill in id and version for new entries. the first centroid should already exist in the buffer. */
+    void BatchCreateBufferEntryAfterClustering(VectorBatch& centroidsData, uint8_t level, DIVFTreeVertexInterface** clusters,
+                                               BufferVertexEntry** entries) {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
         CHECK_NOT_NULLPTR(clusters, LOG_TAG_BUFFER);
-        FatalAssert(num_entries > 0, LOG_TAG_BUFFER, "number of entries cannot be 0!");
-        FatalAssert(MAX_TREE_HIGHT > VectorID::VECTOR_LEVEL && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+        CHECK_NOT_NULLPTR(centroidsData.id, LOG_TAG_BUFFER);
+        CHECK_NOT_NULLPTR(centroidsData.version, LOG_TAG_BUFFER);
+        FatalAssert(centroidsData.size > 1, LOG_TAG_BUFFER, "number of entries cannot be 0!");
+        FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                     "Level is out of bounds.");
+        uint16_t num_entries = centroidsData.size - 1;
 
         bufferMgrLock.Lock(SX_EXCLUSIVE);
         const uiont64_t nextVal = clusterDirectory[level].size();
@@ -558,8 +568,10 @@ public:
             id._creator_node_id = 0;
 
             CHECK_NOT_NULLPTR(clusters[i], LOG_TAG_BUFFER);
-            entries[i] = new BufferVertexEntry(clusters[i], id);
+            entries[i] = new BufferVertexEntry(clusters[i], id, true);
             entries[i]->clusterLock.Lock(SX_EXCLUSIVE);
+            centroidsData.id[i+1] = id;
+            centroidsData.version[i+1] = entries[i]->currentVersion;
 
             clusterDirectory[level].emplace_back(entries[i]);
         }

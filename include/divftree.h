@@ -195,13 +195,6 @@
 
 namespace divftree {
 
-struct VectorBatch {
-    VTYPE* data;
-    VectorID* id;
-    Version* version;
-    uint16_t size;
-};
-
 class DIVFTreeVertex : public DIVFTreeVertexInterface {
 public:
     DIVFTreeVertex() : unpinCount{0}, cluster(false, 0, 0, 0) {
@@ -1158,6 +1151,10 @@ protected:
 
     }
 
+    /*
+     * will only fill in the raw centroid vectors to
+     * the centroids batch and allocates memory for version and ids but does not fill them
+     */
     inline void Clustering(const DIVFTreeVertex* base, const VectorBatch& batch, DIVFTreeVertex** target,
                                VectorBatch& centroids, uint16_t marked_for_update = INVALID_OFFSET) {
         switch (attr.clusteringAlg)
@@ -1170,10 +1167,16 @@ protected:
         }
     }
 
-    inline BufferVertexEntry* ExpandTree(BufferVertexEntry* current_root, uint16_t numclusters,
-                                         DIVFTreeVertex* current_root_newcluster, BufferVertexEntry** siblingclusters,
-                                         VectorBatch centroids) {
-        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "clustering not implemented!");
+    inline BufferVertexEntry* ExpandTree() {
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        BufferVertexEntry* new_root = bufferMgr->CreateNewRootEntry();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+        (void)(new (new_root->ReadLatestVersion(false)) DIVFTreeVertex());
+        new_root->state.store(BufferVertexEntryState::CLUSTER_CREATED, std::memory_order_relaxed);
+        new_root->DowngradeAccessToShared();
+        return new_root;
     }
 
     RetStatus SplitAndInsert(BufferVertexEntry* container_entry, const VectorBatch& batch,
@@ -1224,17 +1227,19 @@ protected:
                             "null parent with valid location!");
                 FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(), LOG_TAG_DIVFTREE,
                             "null parent but we are not root!");
-                parent = ExpandTree(container_entry, centroids.size, clusters[0], entries, centroids);
-            } else {
-                FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
-                            "null parent with valid location!");
-                rs = BatchInsertInto(parent, centroids, false, currentLocation.entryOffset);
-                if (!rs.IsOK()) {
-                    bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                    parent = nullptr;
-                    continue;
-                }
+                parent = ExpandTree();
             }
+
+            CHECK_NOT_NULLPTR(parent, LOG_TAG_DIVFTREE);
+            FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+                        "null parent with valid location!");
+            rs = BatchInsertInto(parent, centroids, false, currentLocation.entryOffset);
+            if (!rs.IsOK()) {
+                bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                parent = nullptr;
+                continue;
+            }
+
             break;
         }
 

@@ -301,6 +301,12 @@ inline String VectorStateToString(VectorState state) {
     }
 }
 
+struct VectorBatch {
+    VTYPE* data;
+    VectorID* id;
+    Version* version;
+    uint16_t size;
+};
 
 /* todo: we may need to use packed attrbite for these in the multi node setup to save network bandwidth */
 struct VectorMetaData {
