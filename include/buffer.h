@@ -506,8 +506,16 @@ public:
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                     "Level is out of bounds.");
-        return aligned_alloc(CACHE_LINE_SIZE,
-                             ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
+        return std::aligned_alloc(CACHE_LINE_SIZE,
+                                  ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
+    }
+
+    void Recycle(DIVFTreeVertexInterface* memory) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        if (memory == nullptr) {
+            return;
+        }
+        std::free(memory);
     }
 
     BufferVertexEntry* CreateNewRootEntry() {

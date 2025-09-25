@@ -202,18 +202,18 @@ public:
     DIVFTreeVertex(const DIVFTreeVertex&) = delete;
     DIVFTreeVertex(DIVFTreeVertex&&) = delete;
 
-    DIVFTreeVertex(const DIVFTreeVertexAttributes& attributes) : attr(attributes, 0), unpinCount{0},
+    DIVFTreeVertex(const DIVFTreeVertexAttributes& attributes) : attr(attributes), unpinCount{0},
                                                                  cluster(attributes.centroid_id.IsLeaf(),
                                                                          attributes.block_size,
                                                                          attributes.cap,
                                                                          attributes.index->GetAttributes().dimension,
                                                                          true) {
         CHECK_MIN_MAX_SIZE(attr.min_size, attr.cap, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_VECTORID_IS_VALID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_VECTORID_IS_CENTROID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_NOT_NULLPTR(attributes.index, LOG_TAG_DIVFTREE_VERTEX);
-        FatalAssert(attributes.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
-        FatalAssert(attributes.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
+        CHECK_VECTORID_IS_VALID(attr.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_VECTORID_IS_CENTROID(attr.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_NOT_NULLPTR(attr.index, LOG_TAG_DIVFTREE_VERTEX);
+        FatalAssert(attr.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
+        FatalAssert(attr.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
     }
 
     DIVFTreeVertex(const DIVFTreeAttributes& attributes, VectorID id, DIVFTreeInterface* index) :
@@ -226,11 +226,36 @@ public:
                                     id.IsLeaf() ? attributes.leaf_max_size: attributes.internal_max_size,
                                     attributes.dimension, true) {
         CHECK_MIN_MAX_SIZE(attr.min_size, attr.cap, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_VECTORID_IS_VALID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_VECTORID_IS_CENTROID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
-        CHECK_NOT_NULLPTR(attributes.index, LOG_TAG_DIVFTREE_VERTEX);
-        FatalAssert(attributes.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
-        FatalAssert(attributes.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
+        CHECK_VECTORID_IS_VALID(attr.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_VECTORID_IS_CENTROID(attr.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_NOT_NULLPTR(attr.index, LOG_TAG_DIVFTREE_VERTEX);
+        FatalAssert(attr.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
+        FatalAssert(attr.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
+    }
+
+    ~DIVFTreeVertex() {
+        FatalAssert(unpinCount.load(std::memory_order_relaxed) == 0, LOG_TAG_DIVFTREE_VERTEX,
+                    "the vertex is still pinned!");
+        if (attr.centroid_id.IsLeaf()) {
+            return;
+        }
+
+        uint16_t size = cluster.header.reserved_size.load(std::memory_order_relaxed);
+        FatalAssert(size == cluster.header.visible_size.load(std::memory_order_relaxed), LOG_TAG_DIVFTREE_VERTEX,
+                    "mismatch between visited and reserved!");
+        const uint16_t dim = attr.index->GetAttributes().dimension;
+        CentroidMetaData* vmd =
+            reinterpret_cast<CentroidMetaData*>(cluster.MetaData(0, attr.centroid_id.IsLeaf(),
+                                                                 attr.block_size, attr.cap, dim));
+        FatalAssert(cluster.NumBlocks(attr.block_size, attr.cap) == 1, LOG_TAG_NOT_IMPLEMENTED,
+                    "cannot support more than one block!");
+        for (uint16_t i = 0; i < size; ++i) {
+            VectorState state = vmd[i].state.load(std::memory_order_relaxed);
+            if (state == VECTOR_STATE_VALID || state == VECTOR_STATE_MIGRATED) {
+                FatalAssert(vmd[i].id != INVALID_VECTOR_ID, LOG_TAG_DIVFTREE_VERTEX, "cannot unpin invalid vector");
+                BufferManager::GetInstance()->UnpinVertexVersion(vmd[i].id, vmd[i].version);
+            }
+        }
     }
 
     inline void Unpin() override {
@@ -238,7 +263,9 @@ public:
             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT,
                  VECTORID_LOG(attr.centroid_id));
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
-            delete this;
+            this->~DIVFTreeVertex();
+            BufferManager::GetInstance()->Recycle(this);
+            return;
         }
         else {
             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin vertex " VECTORID_LOG_FMT,
@@ -257,7 +284,8 @@ public:
             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT,
                  VECTORID_LOG(attr.centroid_id));
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
-            delete this;
+            this->~DIVFTreeVertex();
+            BufferManager::GetInstance()->Recycle(this);
             return;
         }
     }
@@ -333,7 +361,7 @@ public:
                 cluster.MetaData(marked_for_update, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim));
             markedMeta->state.store(VECTOR_STATE_OUTDATED);
             cluster.header.num_deleted.fetch_add(1);
-            /* todo: can we unpin version here??? or should we do it in the destructor? */
+            /* todo: can we unpin version here??? or should we do it in the destructor? yes because if we see that this is outdated we will reread cluster with the new size*/
             bufferMgr->UnpinVertexVersion(markedMeta->id, markedMeta->version);
         }
 
