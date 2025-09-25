@@ -519,10 +519,10 @@ typedef DISTANCE_TYPE DTYPE;
 #define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
 
 #define CHECK_MIN_MAX_SIZE(min_size, max_size, tag) \
-    do {
+    do { \
         FatalAssert((min_size) > 0, (tag), "Min size must be greater than 0."); \
-        FatalAssert(((max_size) / 2) >= (min_size), (tag), \
-                    "Max size must be at least twice the min size. Min size: %hu, Max size: %hu", \
+        FatalAssert(((max_size) / 2) > (min_size), (tag), \
+                    "Max size must be more than twice the min size. Min size: %hu, Max size: %hu", \
                     (min_size), (max_size)); \
     } while(0)
 

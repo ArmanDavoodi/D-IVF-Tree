@@ -197,8 +197,40 @@ namespace divftree {
 
 class DIVFTreeVertex : public DIVFTreeVertexInterface {
 public:
-    DIVFTreeVertex() : unpinCount{0}, cluster(false, 0, 0, 0) {
-        FatalAssert(false, LOG_TAG_DIVFTREE_VERTEX, "not implemented");
+    DIVFTreeVertex() = delete;
+    DIVFTreeVertex(DIVFTreeVertex&) = delete;
+    DIVFTreeVertex(const DIVFTreeVertex&) = delete;
+    DIVFTreeVertex(DIVFTreeVertex&&) = delete;
+
+    DIVFTreeVertex(const DIVFTreeVertexAttributes& attributes) : attr(attributes, 0), unpinCount{0},
+                                                                 cluster(attributes.centroid_id.IsLeaf(),
+                                                                         attributes.block_size,
+                                                                         attributes.cap,
+                                                                         attributes.index->GetAttributes().dimension,
+                                                                         true) {
+        CHECK_MIN_MAX_SIZE(attr.min_size, attr.cap, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_VECTORID_IS_VALID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_VECTORID_IS_CENTROID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_NOT_NULLPTR(attributes.index, LOG_TAG_DIVFTREE_VERTEX);
+        FatalAssert(attributes.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
+        FatalAssert(attributes.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
+    }
+
+    DIVFTreeVertex(const DIVFTreeAttributes& attributes, VectorID id, DIVFTreeInterface* index) :
+        attr(id, 0,
+             id.IsLeaf() ? attributes.leaf_min_size : attributes.internal_min_size,
+             id.IsLeaf() ? attributes.leaf_max_size: attributes.internal_max_size,
+             id.IsLeaf() ? attributes.leaf_blck_size: attributes.internal_blck_size, index),
+             unpinCount{0}, cluster(id.IsLeaf(),
+                                    id.IsLeaf() ? attributes.leaf_blck_size: attributes.internal_blck_size,
+                                    id.IsLeaf() ? attributes.leaf_max_size: attributes.internal_max_size,
+                                    attributes.dimension, true) {
+        CHECK_MIN_MAX_SIZE(attr.min_size, attr.cap, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_VECTORID_IS_VALID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_VECTORID_IS_CENTROID(attributes.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_NOT_NULLPTR(attributes.index, LOG_TAG_DIVFTREE_VERTEX);
+        FatalAssert(attributes.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
+        FatalAssert(attributes.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
     }
 
     inline void Unpin() override {
@@ -905,15 +937,17 @@ protected:
         FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
         threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
 
+        DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
+        FatalAssert(current->GetAttributes().index == this, LOG_TAG_DIVFTREE,
+                    "input entry does not belong to this index!");
+
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
         DIVFTreeVertex* compacted =
             new(bufferMgr->AllocateMemoryForVertex(container_entry->centroidMeta.selfId._level))
-            DIVFTreeVertex();
-
-        DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
-        CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
+            DIVFTreeVertex(current->GetAttributes());
 
         uint16_t size = current->cluster.header.reserved_size.load(std::memory_order_relaxed);
         const bool is_leaf = container_entry->centroidMeta.selfId.IsLeaf();
@@ -1043,8 +1077,10 @@ protected:
         return RetStatus::Success();
     }
 
-    inline void SimpleDivideClustering(const DIVFTreeVertex* base, const VectorBatch& batch, DIVFTreeVertex** target,
-                                       VectorBatch& centroids, uint16_t marked_for_update = INVALID_OFFSET) {
+    inline void SimpleDivideClustering(const DIVFTreeVertex* base, const VectorBatch& batch,
+                                       BufferVertexEntry**& entries, DIVFTreeVertex**& clusters, VectorBatch& centroids,
+                                       uint16_t marked_for_update = INVALID_OFFSET) {
+        FatalAssert(base->attr.index == this, LOG_TAG_DIVFTREE, "index mismatch!");
         uint16_t num_vectors = base->cluster.header.reserved_size.load(std::memory_order_relaxed) -
                                base->cluster.header.num_deleted.load(std::memory_order_relaxed) + batch.size -
                                (marked_for_update != INVALID_OFFSET ? 1 : 0);
@@ -1061,11 +1097,28 @@ protected:
         centroids.data = new VTYPE[attr.dimension * centroids.size];
         centroids.version = new Version[centroids.size];
         centroids.id = new VectorID[centroids.size];
-        target = new DIVFTreeVertex*[centroids.size];
+        entries = new BufferVertexEntry*[centroids.size];
+        clusters = new DIVFTreeVertex*[centroids.size];
+
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_CLUSTERING);
-        for (uint16_t i = 0; i < centroids.size; ++i) {
-            target[i] = new (bufferMgr->AllocateMemoryForVertex(base->attr.centroid_id._level)) DIVFTreeVertex();
+        centroids.id[0] = base->attr.centroid_id;
+        centroids.version[0] = base->attr.version + 1;
+        clusters[0] = new (bufferMgr->AllocateMemoryForVertex(centroids.id[0]._level))
+            DIVFTreeVertex(DIVFTreeVertexAttributes(centroids.id[0], centroids.version[0], base->attr.min_size,
+                                                    base->attr.cap, base->attr.block_size, base->attr.index));
+        CHECK_NOT_NULLPTR(clusters[0], LOG_TAG_CLUSTERING);
+        entries[0] = nullptr;
+        DIVFTreeVertexInterface** clusterMemories = reinterpret_cast<DIVFTreeVertexInterface**>(&clusters[1]);
+        bufferMgr->BatchCreateBufferEntry(centroids.size - 1, base->attr.centroid_id._level, &entries[1],
+                                          clusterMemories, &centroids.id[1], &centroids.version[1]);
+
+        for (uint16_t i = 1; i < centroids.size; ++i) {
+            CHECK_NOT_NULLPTR(clusters[i], LOG_TAG_CLUSTERING);
+            CHECK_NOT_NULLPTR(entries[i], LOG_TAG_CLUSTERING);
+            new (clusters[i]) DIVFTreeVertex(
+                DIVFTreeVertexAttributes(centroids.id[i], centroids.version[i], base->attr.min_size,
+                                         base->attr.cap, base->attr.block_size, base->attr.index));
         }
 
         FatalAssert(base->cluster.NumBlocks(base->attr.block_size, base->attr.cap) == 1,
@@ -1079,12 +1132,12 @@ protected:
             }
 
             const uint16_t destSize =
-                target[num_seen % centroids.size]->cluster.header.reserved_size.load(std::memory_order_relaxed);
+                clusters[num_seen % centroids.size]->cluster.header.reserved_size.load(std::memory_order_relaxed);
             void* destMeta =
-                target[num_seen % centroids.size]->cluster.MetaData(destSize, is_leaf, base->attr.block_size,
+                clusters[num_seen % centroids.size]->cluster.MetaData(destSize, is_leaf, base->attr.block_size,
                                                                     base->attr.cap, attr.dimension);
             VTYPE* destData =
-                target[num_seen % centroids.size]->cluster.Data(destSize, is_leaf, base->attr.block_size,
+                clusters[num_seen % centroids.size]->cluster.Data(destSize, is_leaf, base->attr.block_size,
                                                                 base->attr.cap, attr.dimension);
             if (is_leaf) {
                 const VectorMetaData* vmt = reinterpret_cast<const VectorMetaData*>(meta);
@@ -1106,19 +1159,19 @@ protected:
                 destVmt->version = vmt[i].version;
                 destVmt->state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
             }
-            target[num_seen % centroids.size]->cluster.header.reserved_size.store(destSize + 1,
-                                                                                  std::memory_order_relaxed);
+            clusters[num_seen % centroids.size]->cluster.header.reserved_size.store(destSize + 1,
+                                                                                    std::memory_order_relaxed);
             ++num_seen;
         }
 
         for (uint16_t i = 0; i < batch.size; ++i) {
             const uint16_t destSize =
-                target[num_seen % centroids.size]->cluster.header.reserved_size.load(std::memory_order_relaxed);
+                clusters[num_seen % centroids.size]->cluster.header.reserved_size.load(std::memory_order_relaxed);
             void* destMeta =
-                target[num_seen % centroids.size]->cluster.MetaData(destSize, is_leaf, base->attr.block_size,
+                clusters[num_seen % centroids.size]->cluster.MetaData(destSize, is_leaf, base->attr.block_size,
                                                                     base->attr.cap, attr.dimension);
             VTYPE* destData =
-                target[num_seen % centroids.size]->cluster.Data(destSize, is_leaf, base->attr.block_size,
+                clusters[num_seen % centroids.size]->cluster.Data(destSize, is_leaf, base->attr.block_size,
                                                                 base->attr.cap, attr.dimension);
             if (is_leaf) {
                 VectorMetaData* destVmt = reinterpret_cast<VectorMetaData*>(destMeta);
@@ -1133,19 +1186,19 @@ protected:
                 destVmt->state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
                 bufferMgr->PinVertexVersion(batch.id[i], batch.version[i]);
             }
-            target[num_seen % centroids.size]->cluster.header.reserved_size.store(destSize + 1,
+            clusters[num_seen % centroids.size]->cluster.header.reserved_size.store(destSize + 1,
                                                                                   std::memory_order_relaxed);
             ++num_seen;
         }
 
         /* Now we have to compute centroids and update num visible for each cluster and do a sanityt check for their size */
         for (uint16_t i = 0; i < centroids.size; ++i) {
-            uint16_t size = target[i]->cluster.header.reserved_size.load(std::memory_order_relaxed);
+            uint16_t size = clusters[i]->cluster.header.reserved_size.load(std::memory_order_relaxed);
             FatalAssert((base->attr.min_size <= size) && (size <= base->attr.cap), LOG_TAG_CLUSTERING, "invalid size!");
-            target[i]->cluster.header.num_deleted.store(0, std::memory_order_relaxed);
-            target[i]->cluster.header.visible_size.store(size, std::memory_order_relaxed);
+            clusters[i]->cluster.header.num_deleted.store(0, std::memory_order_relaxed);
+            clusters[i]->cluster.header.visible_size.store(size, std::memory_order_relaxed);
 
-            ComputeCentroid(target[i]->cluster.Data(0, is_leaf, base->attr.block_size, base->attr.cap, attr.dimension),
+            ComputeCentroid(clusters[i]->cluster.Data(0, is_leaf, base->attr.block_size, base->attr.cap, attr.dimension),
                             size, nullptr, 0, attr.dimension, attr.distanceAlg, &centroids.data[i * attr.dimension]);
         }
 
@@ -1155,12 +1208,13 @@ protected:
      * will only fill in the raw centroid vectors to
      * the centroids batch and allocates memory for version and ids but does not fill them
      */
-    inline void Clustering(const DIVFTreeVertex* base, const VectorBatch& batch, DIVFTreeVertex** target,
-                               VectorBatch& centroids, uint16_t marked_for_update = INVALID_OFFSET) {
+    inline void Clustering(const DIVFTreeVertex* base, const VectorBatch& batch,
+                           BufferVertexEntry**& entries, DIVFTreeVertex**& clusters, VectorBatch& centroids,
+                           uint16_t marked_for_update = INVALID_OFFSET) {
         switch (attr.clusteringAlg)
         {
         case ClusteringType::SimpleDivide:
-            SimpleDivideClustering(base, batch, target, centroids, marked_for_update);
+            SimpleDivideClustering(base, batch, entries, clusters, centroids, marked_for_update);
         default:
             CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
                  "Cluster: Invalid clustering type: %hhu", (uint8_t)(attr.clusteringAlg));
@@ -1173,8 +1227,7 @@ protected:
 
         BufferVertexEntry* new_root = bufferMgr->CreateNewRootEntry();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
-        (void)(new (new_root->ReadLatestVersion(false)) DIVFTreeVertex());
-        new_root->state.store(BufferVertexEntryState::CLUSTER_CREATED, std::memory_order_relaxed);
+        (void)(new (new_root->ReadLatestVersion(false)) DIVFTreeVertex(attr, new_root->centroidMeta.selfId, this));
         new_root->DowngradeAccessToShared();
         return new_root;
     }
@@ -1211,13 +1264,16 @@ protected:
 
         VectorBatch centroids;
         DIVFTreeVertex** clusters = nullptr;
-        /* Clustering should make all vectors valid but should not change their location in buffer */
-        Clustering(current, batch, clusters, centroids, marked_for_update);
+        BufferVertexEntry** entries = nullptr;
+        Clustering(current, batch, entries, clusters, centroids, marked_for_update);
+        CHECK_NOT_NULLPTR(entries, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(clusters, LOG_TAG_DIVFTREE);
         FatalAssert(centroids.size >= 2, LOG_TAG_DIVFTREE, "numclusters should at least be 2!");
-        centroids.id[0] = container_entry->centroidMeta.selfId;
-        centroids.version[0] = container_entry->currentVersion + 1; /* increment the version! */
-        BufferVertexEntry** entries = new BufferVertexEntry*[centroids.size - 1];
-        bufferMgr->BatchCreateBufferEntryAfterClustering(centroids, level, &clusters[1], entries); /*  todo: update centroid ids and versions -> we can just pass centroids instead*/
+        CHECK_NOT_NULLPTR(centroids.data, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(centroids.id, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(centroids.version, LOG_TAG_DIVFTREE);
+        entries[0] = container_entry;
+
         BufferVertexEntry* parent = nullptr;
         while (true) {
             VectorLocation currentLocation = INVALID_VECTOR_LOCATION;
@@ -1297,7 +1353,6 @@ protected:
         RetStatus rs = RetStatus::Success();
 
         threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
-        FatalAssert(container_entry->state.load() != CLUSTER_INVALID, LOG_TAG_DIVFTREE, "Container vertex is invalid.");
         FatalAssert(container_entry->state.load() != CLUSTER_DELETED, LOG_TAG_DIVFTREE, "Container vertex is deleted.");
         while (true) {
             /*

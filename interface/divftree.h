@@ -19,6 +19,10 @@ struct DIVFTreeVertexAttributes {
     DIVFTreeInterface *index;
 
     DIVFTreeVertexAttributes() : centroid_id{INVALID_VECTOR_ID}, version{0}, min_size{0}, cap{0}, block_size{0}, index{nullptr}; /* todo: to be remvoed */
+    DIVFTreeVertexAttributes(VectorID id, Version ver, uint16_t min,
+                             uint16_t max, uint16_t blck_size, DIVFTreeInterface* idx) :
+                                centroid_id{id}, version{ver}, min_size{min}, cap{max}, block_size{blck_size},\
+                                index{idx};
 };
 
 struct DIVFTreeAttributes {
@@ -31,6 +35,9 @@ struct DIVFTreeAttributes {
     uint16_t leaf_max_size;
     uint16_t internal_min_size;
     uint16_t internal_max_size;
+
+    uint16_t leaf_blck_size;
+    uint16_t internal_blck_size;
 
     uint16_t split_internal;
     uint16_t split_leaf;
