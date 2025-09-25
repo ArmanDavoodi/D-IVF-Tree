@@ -30,6 +30,12 @@ union alignas(16) VectorLocation {
     inline bool operator!=(const VectorLocation& other) {
         return raw != other.raw;
     }
+
+    VectorLocation() : raw(0) {}
+    VectorLocation(const VectorLocation& other) : raw(other.raw) {}
+    VectorLocation(VectorLocation&& other) : raw(other.raw) {}
+
+    VectorLocation(VectorID cid, Version cv, uint16_t eo) : containerId(cid), containerVersion(cv), entryOffset(eo) {}
 };
 
 constexpr VectorLocation INVALID_VECTOR_LOCATION{.containerId = INVALID_VECTOR_ID,

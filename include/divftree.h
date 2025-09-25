@@ -215,6 +215,71 @@ public:
         return RetStatus::Success();
     }
 
+    /*
+     * if id.level is vertex/cluster and targetState is Invalid then the cluster should be locked in exclusive mode
+     * otherwise if id.level is vertex/cluster then target should be locked in shared mode
+     */
+    inline RetStatus ChangeVectorState(VectorID target, uint16_t targetOffset,
+                                       VectorState excpectedState, VectorState finalState, Version* version = nullptr) {
+        CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE_VERTEX);
+        FatalAssert(target._level + 1 == attr.centroid_id._level, LOG_TAG_DIVFTREE_VERTEX, "level mismatch");
+        FatalAssert(excpectedState == VECTOR_STATE_VALID || excpectedState == VECTOR_STATE_MIGRATED,
+                    LOG_TAG_DIVFTREE_VERTEX, "expected state can be either VALID or MIGRATED");
+        FatalAssert(finalState == VECTOR_STATE_VALID || finalState == VECTOR_STATE_MIGRATED ||
+                    finalState == VECTOR_STATE_INVALID, LOG_TAG_DIVFTREE_VERTEX,
+                    "final state can only be valid, invalid or migrated!");
+        FatalAssert((excpectedState == VECTOR_STATE_MIGRATED) == (finalState == VECTOR_STATE_VALID),
+                    LOG_TAG_DIVFTREE_VERTEX, "excpected state is migrated is migrated if and only "
+                    "if final state is valid. this can only happen when a migration fails and "
+                    "we want to revert our state back to valid");
+        uint16_t size = cluster.header.visible_size.load(std::memory_order_acquire);
+        FatalAssert(targetOffset < size, LOG_TAG_DIVFTREE_VERTEX, "offset out of range!");
+
+        Address meta = cluster.MetaData(targetOffset, attr.centroid_id.IsLeaf(),
+                                        attr.block_size, attr.cap, attr.index->GetAttributes().dimension);
+        VectorID* id = nullptr;
+        std::atomic<VectorState>* state = nullptr;
+        if (attr.centroid_id.IsLeaf()) {
+            VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
+            id = &(vmd->id);
+            state = &(vmd->state);
+        } else {
+            CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
+            id = &(vmd->id);
+            if (version != nullptr) {
+                *version = vmd->version;
+            }
+            state = &(vmd->state);
+        }
+
+        FatalAssert(*id == target, LOG_TAG_DIVFTREE_VERTEX, "id mismatch!");
+        if (excpectedState == VECTOR_STATE_MIGRATED) {
+            FatalAssert((*state).load(std::memory_order_acquire) == VECTOR_STATE_MIGRATED, LOG_TAG_DIVFTREE_VERTEX,
+                        "mismatch state!");
+            state->store(finalState, std::memory_order_release);
+            return RetStatus::Success();
+        }
+
+        if (target.IsCentroid()) {
+            if (finalState == VECTOR_STATE_INVALID) {
+                /* deletion */
+                /* todo: check target should be locked in exclusive mode! */
+                FatalAssert((*state).load(std::memory_order_acquire) == VECTOR_STATE_VALID, LOG_TAG_DIVFTREE_VERTEX,
+                            "mismatch state!");
+                state->store(finalState, std::memory_order_release);
+                return RetStatus::Success();
+            } else {
+                /* todo: check target should be locked in shared mode! */
+                FatalAssert((*state).load(std::memory_order_acquire) != VECTOR_STATE_INVALID, LOG_TAG_DIVFTREE_VERTEX,
+                            "mismatch state!");
+            }
+        }
+
+        return (state->compare_exchange_strong(excpectedState, finalState) ?
+                RetStatus::Success() :
+                RetStatus{.stat=RetStatus::FAILED_TO_CAS_VECTOR_STATE, .message=nullptr});
+    }
+
     // RetStatus Search(const Vector& query, size_t k,
     //                  std::vector<std::pair<VectorID, DTYPE>>& neighbours) override {
     //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
@@ -623,9 +688,8 @@ protected:
                     dest_vmd[new_size].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
                     ++new_size;
                 } SANITY_CHECK( else if (vstate == VECTOR_STATE_MIGRATED) {
-                    VectorLocation outdatedLoc{.containerId = container_entry->centroidMeta.selfId,
-                                               .containerVersion = container_entry->currentVersion,
-                                               .entryOffset = i};
+                    VectorLocation outdatedLoc(container_entry->centroidMeta.selfId,
+                                               container_entry->currentVersion, i);
                     FatalAssert(outdatedLoc != bufferMgr->LoadCurrentVectorLocation(src_vmd[i].id), LOG_TAG_DIVFTREE,
                                 "current location is migrated!");
                 })
@@ -640,9 +704,8 @@ protected:
                     dest_vmd[new_size].state.store(VECTOR_STATE_VALID, std::memory_order_relaxed);
                     ++new_size;
                 } SANITY_CHECK( else if (vstate == VECTOR_STATE_MIGRATED) {
-                    VectorLocation outdatedLoc{.containerId = container_entry->centroidMeta.selfId,
-                                                .containerVersion = container_entry->currentVersion,
-                                                .entryOffset = i};
+                    VectorLocation outdatedLoc(container_entry->centroidMeta.selfId,
+                                               container_entry->currentVersion, i);
                     FatalAssert(outdatedLoc != bufferMgr->LoadCurrentVectorLocation(src_vmd[i].id), LOG_TAG_DIVFTREE,
                                 "current location is migrated!");
                 })
@@ -697,15 +760,11 @@ protected:
             if (is_leaf) {
                 VectorMetaData* vmd = reinterpret_cast<VectorMetaData*>(destMetaData);
                 bufferMgr->UpdateVectorLocation(vmd[i].id,
-                    VectorLocation{.containerId=container_entry->centroidMeta.selfId,
-                                   .containerVersion = container_entry->currentVersion,
-                                   .entryOffset=new_size});
+                    VectorLocation(container_entry->centroidMeta.selfId, container_entry->currentVersion, new_size));
             } else {
                 CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(destMetaData);
                 bufferMgr->UpdateVectorLocation(vmd[i].id,
-                    VectorLocation{.containerId=container_entry->centroidMeta.selfId,
-                                   .containerVersion = container_entry->currentVersion,
-                                   .entryOffset=new_size});
+                    VectorLocation(container_entry->centroidMeta.selfId, container_entry->currentVersion, new_size));
             }
         }
 
@@ -952,15 +1011,11 @@ protected:
                 if (is_leaf) {
                     VectorMetaData* vmt = reinterpret_cast<VectorMetaData*>(meta);
                     bufferMgr->UpdateVectorLocation(vmt[offset].id,
-                                                    VectorLocation{.containerId=centroids.id[i],
-                                                                   .containerVersion=centroids.version[i],
-                                                                   .entryOffset=offset});
+                                                    VectorLocation(centroids.id[i], centroids.version[i], offset));
                 } else {
                     CentroidMetaData* vmt = reinterpret_cast<CentroidMetaData*>(meta);
                     bufferMgr->UpdateVectorLocation(vmt[offset].id,
-                                                    VectorLocation{.containerId=centroids.id[i],
-                                                                   .containerVersion=centroids.version[i],
-                                                                   .entryOffset=offset});
+                                                    VectorLocation(centroids.id[i], centroids.version[i], offset));
                 }
             }
         }
@@ -1038,9 +1093,9 @@ protected:
                 container_vertex->cluster.header.reserved_size.load(std::memory_order_relaxed) + batch.size;
             uint16_t real_size =
                 reserved_size - container_vertex->cluster.header.num_deleted.load(std::memory_order_relaxed);
-            if ((float)real_size * COMPACTION_FACTOR <= (float)container_vertex->_cap) {
+            if ((float)real_size * COMPACTION_FACTOR <= (float)container_vertex->attr.cap) {
                 rs = CompactAndInsert(container_entry, batch);
-            } else if (reserved_size < container_vertex->_cap) {
+            } else if (reserved_size < container_vertex->attr.cap) {
                 container_entry->DowngradeAccessToShared();
                 continue;
             } else {
@@ -1064,6 +1119,43 @@ protected:
         }
         return rs;
     }
+
+    inline void PruneIfNeededAndRelease(BufferVertexEntry* container_entry) {
+        FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "not implemeted");
+    }
+
+    RetStatus DeleteVectorAndReleaseContainer(VectorID target, BufferVertexEntry* container_entry, VectorLocation loc) {
+        CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
+        FatalAssert(target._level + 1 == container_entry->centroidMeta.selfId._level, LOG_TAG_DIVFTREE,
+                    "target cannot be child of container");
+        FatalAssert(loc.containerId == container_entry->centroidMeta.selfId, LOG_TAG_DIVFTREE, "Location Id mismatch");
+        FatalAssert(container_entry->currentVersion == loc.containerVersion, LOG_TAG_DIVFTREE,
+                    "Location version mismatch");
+        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
+        DIVFTreeVertex* container = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
+        Version version = 0;
+        RetStatus rs = container->ChangeVectorState(target, loc.entryOffset, VECTOR_STATE_VALID, VECTOR_STATE_INVALID,
+                                                    &version);
+        FatalAssert(target.IsVector() || rs.IsOK(), LOG_TAG_DIVFTREE,
+                    "state change will never fail if target is a vertex as it should be locked in X mode.");
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+        if (rs.IsOK()) {
+            bufferMgr->UpdateVectorLocation(target, INVALID_VECTOR_LOCATION);
+            if (target.IsCentroid()) {
+                bufferMgr->UnpinVertexVersion(target, version);
+            }
+            container->cluster.header.num_deleted.fetch_add(1);
+            PruneIfNeededAndRelease(container_entry);
+        } else {
+            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        }
+
+        return rs;
+    }
+
 
     // RetStatus SearchVertexs(const Vector& query,
     //                       const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,

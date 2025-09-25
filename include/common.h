@@ -34,6 +34,7 @@ struct RetStatus {
         VERTEX_NOT_ENOUGH_SPACE, /* returned when there is not enough space but someone else is splitting */
 
         FAILED_TO_CAS_ENTRY_STATE,
+        FAILED_TO_CAS_VECTOR_STATE,
 
         FAIL
     } stat;
