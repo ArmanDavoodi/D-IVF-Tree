@@ -1146,6 +1146,16 @@ protected:
         }
 
         /* Now we have to compute centroids and update num visible for each cluster and do a sanityt check for their size */
+        for (uint16_t i = 0; i < centroids.size; ++i) {
+            uint16_t size = target[i]->cluster.header.reserved_size.load(std::memory_order_relaxed);
+            FatalAssert((base->attr.min_size <= size) && (size <= base->attr.cap), LOG_TAG_CLUSTERING, "invalid size!");
+            target[i]->cluster.header.num_deleted.store(0, std::memory_order_relaxed);
+            target[i]->cluster.header.visible_size.store(size, std::memory_order_relaxed);
+
+            ComputeCentroid(target[i]->cluster.Data(0, is_leaf, base->attr.block_size, base->attr.cap, attr.dimension),
+                            size, nullptr, 0, attr.dimension, attr.distanceAlg, &centroids.data[i * attr.dimension]);
+        }
+
     }
 
     inline void Clustering(const DIVFTreeVertex* base, const VectorBatch& batch, DIVFTreeVertex** target,
@@ -1201,8 +1211,10 @@ protected:
         /* Clustering should make all vectors valid but should not change their location in buffer */
         Clustering(current, batch, clusters, centroids, marked_for_update);
         FatalAssert(centroids.size >= 2, LOG_TAG_DIVFTREE, "numclusters should at least be 2!");
+        centroids.id[0] = container_entry->centroidMeta.selfId;
+        centroids.version[0] = container_entry->currentVersion + 1; /* increment the version! */
         BufferVertexEntry** entries = new BufferVertexEntry*[centroids.size - 1];
-        bufferMgr->BatchCreateBufferEntry(centroids.size - 1, level, &clusters[1], entries);
+        bufferMgr->BatchCreateBufferEntryAfterClustering(centroids, level, &clusters[1], entries); /*  todo: update centroid ids and versions -> we can just pass centroids instead*/
         BufferVertexEntry* parent = nullptr;
         while (true) {
             VectorLocation currentLocation = INVALID_VECTOR_LOCATION;
