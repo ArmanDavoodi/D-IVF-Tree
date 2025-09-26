@@ -1530,10 +1530,13 @@ protected:
                                                  expState, VECTOR_STATE_VALID);
             FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "this should not fail!");
             rs = RetStatus{.stat=RetStatus::NEW_CONTAINER_UPDATED, .message=nullptr};
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+                                           ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        } else {
+            oldContainer->cluster.header.num_deleted.fetch_add(1);
+            PruneIfNeededAndRelease(*oldContainerEntry);
         }
 
-        bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                           ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
         return rs;
     }
 
