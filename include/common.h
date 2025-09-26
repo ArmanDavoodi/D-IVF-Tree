@@ -44,6 +44,11 @@ struct RetStatus {
         OLD_CONTAINER_UPDATED,
         NEW_CONTAINER_UPDATED,
 
+        DEST_DELETED,
+        DEST_UPDATED,
+        SRC_DELETED,
+        SRC_HAS_TOO_MANY_VECTORS,
+
         FAIL
     } stat;
 
@@ -143,6 +148,22 @@ union VectorID {
 
     inline bool operator!=(const uint64_t& ID) const {
         return _id != ID;
+    }
+
+    inline bool operator<(const VectorID& ID) const {
+        return _id < ID._id;
+    }
+
+    inline bool operator<=(const VectorID& ID) const {
+        return _id < ID._id;
+    }
+
+    inline bool operator>(const VectorID& ID) const {
+        return _id > ID._id;
+    }
+
+    inline bool operator>=(const VectorID& ID) const {
+        return _id > ID._id;
     }
 };
 
