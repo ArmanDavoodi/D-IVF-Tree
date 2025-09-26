@@ -36,6 +36,14 @@ struct RetStatus {
         FAILED_TO_CAS_ENTRY_STATE,
         FAILED_TO_CAS_VECTOR_STATE,
 
+        TARGET_DELETED,
+        TARGET_MIGRATED,
+        TARGET_IS_ROOT,
+        NEW_CONTAINER_DELETED,
+        TARGET_VERTEX_UPDATED,
+        OLD_CONTAINER_UPDATED,
+        NEW_CONTAINER_UPDATED,
+
         FAIL
     } stat;
 

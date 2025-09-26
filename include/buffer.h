@@ -111,7 +111,8 @@ struct BufferVectorEntry {
             VectorLocation location = location.Load();
             if (location == INVALID_VECTOR_LOCATION) {
                 /* this means that we should have become the new root! */
-                FatalAssert(selfId == bufferMgr->GetCurrentRootId());
+                FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
+                            "if location is invalid and we are a centroid we have to be the root!");
                 return nullptr;
             }
 
@@ -123,7 +124,8 @@ struct BufferVectorEntry {
                     bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                     parent = nullptr;
                 }
-                FatalAssert(selfId == bufferMgr->GetCurrentRootId());
+                FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
+                            "if location is invalid and we are a centroid we have to be the root!");
                 return nullptr;
             }
 
@@ -905,6 +907,22 @@ public:
         FatalAssert(entry->state.load() == CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is not stable! VertexID="
                     VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
         return &entry;
+    }
+
+    inline void ReleaseEntriesIfNotNull(BufferVertexEntry** entries, uint8_t num_entries,
+                                        ReleaseBufferEntryFlags flags) override {
+        CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
+        for (uint8_t i = 0; i < num_entries; ++i) {
+            if (entries[i] != nullptr) {
+                ReleaseBufferEntry(entries[i], flags);
+            }
+        }
+    }
+
+    inline void ReleaseBufferEntryIfNotNull(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags) override {
+        if (entry != nullptr) {
+            ReleaseBufferEntry(entry, flags);
+        }
     }
 
     void ReleaseBufferEntry(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags) override {
