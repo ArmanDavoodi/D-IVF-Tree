@@ -1051,7 +1051,7 @@ protected:
                 static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
             CHECK_NOT_NULLPTR(container_vertex, LOG_TAG_DIVFTREE);
             // CHECK_VERTEX_IS_VALID(container_vertex, LOG_TAG_DIVFTREE, RetStatus::FAIL);
-            rs = container_vertex->BatchInsert(batch);
+            rs = container_vertex->BatchInsert(batch, marked_for_update);
             if (rs.IsOK()) {
                 break;
             }
@@ -1092,12 +1092,12 @@ protected:
             uint16_t real_size =
                 reserved_size - container_vertex->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if ((float)real_size * COMPACTION_FACTOR <= (float)container_vertex->attr.cap) {
-                rs = CompactAndInsert(container_entry, batch);
+                rs = CompactAndInsert(container_entry, batch, marked_for_update);
             } else if (reserved_size < container_vertex->attr.cap) {
                 container_entry->DowngradeAccessToShared();
                 continue;
             } else {
-                rs = SplitAndInsert(container_entry, batch);
+                rs = SplitAndInsert(container_entry, batch, marked_for_update);
             }
 
             FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Major update failed!");
@@ -1119,11 +1119,101 @@ protected:
     }
 
     inline void PruneAtRootAndRelease(BufferVertexEntry* container_entry) {
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented!");
+        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+        CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(),
+                    LOG_TAG_DIVFTREE, "we should be the root!");
+
+        VectorID rootId = bufferMgr->GetCurrentRootId();
+        CHECK_VECTORID_IS_VALID(container_entry->centroidMeta.selfId , LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_INTERNAL(container_entry->centroidMeta.selfId , LOG_TAG_DIVFTREE);
+
+        DIVFTreeVertex* container = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
+        uint16_t size = container->cluster.header.reserved_size.load(std::memory_order_relaxed);
+        uint16_t num_deleted = container->cluster.header.num_deleted.load(std::memory_order_relaxed);
+
+        FatalAssert(size == container->cluster.header.visible_size.load(std::memory_order_relaxed), LOG_TAG_DIVFTREE,
+                    "size should be stable!");
+        FatalAssert(size >= num_deleted, LOG_TAG_DIVFTREE,
+                    "we cannot delete more vectors than there are in the cluster!");
+        if (size - num_deleted == 0) {
+            /* all vectors in the index are deleted */
+            /* todo: delete this node and then create a new root? what if an insertion comes in at this point? */
+            CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "we do not handle this case for now");
+        }
+
+        if (((size - num_deleted) > 1)) {
+            /* no need to prune */
+            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            return;
+        }
+
+        /* we should see exactly one child in this cluster and that child will become the new root */
+        FatalAssert(container->cluster.NumBlocks(container->attr.block_size, container->attr.cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "cannot handle multiple blocks");
+        CentroidMetaData* vmd =
+            static_cast<CentroidMetaData*>(container->
+                cluster.MetaData(0, false, container->attr.block_size, container->attr.cap,
+                                 container->attr.index->GetAttributes().dimension));
+        VectorID newRootId = INVALID_VECTOR_ID;
+        Version newRootVersion = 0;
+        for (uint16_t i = 0; i < size; ++i) {
+            if (vmd[i].state.load(std::memory_order_relaxed) == VECTOR_STATE_VALID) {
+                newRootId = vmd[i].id;
+                break;
+            }
+        }
+        CHECK_VECTORID_IS_VALID(newRootId, LOG_TAG_DIVFTREE);
+        bufferMgr->UpdateVectorLocation(newRootId, INVALID_VECTOR_LOCATION);
+        bufferMgr->UpdateRoot(newRootId, newRootVersion, container_entry);
+        container_entry->UnpinVersion(container_entry->currentVersion);
+        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=0});
     }
 
     inline void PruneEmptyVertexAndRelease(BufferVertexEntry* container_entry) {
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented!");
+        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+        CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        DIVFTreeVertex* container = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
+        uint16_t size = container->cluster.header.reserved_size.load(std::memory_order_relaxed);
+        uint16_t num_deleted = container->cluster.header.num_deleted.load(std::memory_order_relaxed);
+
+        FatalAssert(size == container->cluster.header.visible_size.load(std::memory_order_relaxed), LOG_TAG_DIVFTREE,
+                    "size should be stable!");
+        FatalAssert(size >= num_deleted, LOG_TAG_DIVFTREE,
+                    "we cannot delete more vectors than there are in the cluster!");
+        if (((size - num_deleted) >= 1)) {
+            /* no need to prune */
+            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            return;
+        }
+
+        VectorLocation loc = bufferMgr->LoadCurrentVectorLocation(container_entry->centroidMeta.selfId);
+        BufferVertexEntry* parent = nullptr;
+        if ((loc == INVALID_VECTOR_LOCATION) || ((parent = container_entry->ReadParent(loc)) == nullptr)) {
+            FatalAssert((parent == nullptr) && (loc == INVALID_VECTOR_LOCATION), LOG_TAG_DIVFTREE,
+                        "mismatch between parent ptr and location");
+            PruneAtRootAndRelease(container_entry);
+            return;
+        }
+        FatalAssert((parent != nullptr) && (loc != INVALID_VECTOR_LOCATION), LOG_TAG_DIVFTREE,
+                    "mismatch between parent ptr and location");
+        FatalAssert(container_entry->centroidMeta.selfId != bufferMgr->GetCurrentRootId(),
+                    LOG_TAG_DIVFTREE, "we should not be the root!");
+        RetStatus rs = DeleteVectorAndReleaseContainer(container_entry->centroidMeta.selfId, parent, loc);
+        UNUSED_VARIABLE(rs);
+        FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "this deletion should not fail!");
+        container_entry->UnpinVersion(container_entry->currentVersion);
+        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=0});
     }
 
     inline void PruneIfNeededAndRelease(BufferVertexEntry* container_entry) {

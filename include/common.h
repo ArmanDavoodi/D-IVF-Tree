@@ -535,6 +535,9 @@ typedef DISTANCE_TYPE DTYPE;
     FatalAssert((vid).IsVector(), (tag), "VectorID " VECTORID_LOG_FMT " is not a vector", VECTORID_LOG((vid)))
 #define CHECK_VECTORID_IS_LEAF(vid, tag) \
     FatalAssert((vid).IsLeaf(), (tag), "VectorID " VECTORID_LOG_FMT " is not a leaf", VECTORID_LOG((vid)))
+#define CHECK_VECTORID_IS_INTERNAL(vid, tag) \
+    FatalAssert((!((vid).IsLeaf()) && ((vid).IsCentroid())), (tag), \
+                "VectorID " VECTORID_LOG_FMT " is not a leaf", VECTORID_LOG((vid)))
 
 #define CHECK_VERTEX_IS_LEAF(vertex, tag) \
     FatalAssert(((vertex) != nullptr) && (vertex)->IsLeaf(), (tag), \
