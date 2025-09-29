@@ -632,12 +632,12 @@ public:
     //     }
 
     //     neighbours.swap(upper_layer);
-    //     if (sort) {
-    //         std::sort_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
-    //         if (!sort_from_more_similar_to_less) {
-    //             std::reverse(neighbours.begin(), neighbours.end());
-    //         }
-    //     }
+        // if (sort) {
+        //     std::sort_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
+        //     if (!sort_from_more_similar_to_less) {
+        //         std::reverse(neighbours.begin(), neighbours.end());
+        //     }
+        // }
 
     //     PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE, "ApproximateKNearestNeighbours End: neighbours=");
 
@@ -1915,62 +1915,14 @@ protected:
             --current_level;
         }
 
-        /* todo: sort the last layer based on sort type */
+        if (sort_type != SortType::Unsorted) {
+            std::sort_heap(layers[end_level].begin(), layers[end_level].end(), attr.reverseSimilarityComparator);
+            if (sort_type == SortType::DecreasingSimilarity) {
+                std::reverse(layers[end_level].begin(), layers[end_level].end());
+            }
+        }
         return RetStatus::Success();
     }
-
-    // RetStatus SearchVertexs(const Vector& query,
-    //                       const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
-    //                       std::vector<std::pair<VectorID, DTYPE>>& lower_layer, size_t n) override {
-    //     FatalAssert(n > 0, LOG_TAG_DIVFTREE, "Number of vertices to search for should be greater than 0.");
-    //     FatalAssert(!upper_layer.empty(), LOG_TAG_DIVFTREE, "Upper layer should not be empty.");
-    //     FatalAssert(query.IsValid(), LOG_TAG_DIVFTREE, "Query vector is invalid.");
-
-    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-    //          "Search_Vertexs BEGIN: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu",
-    //          query.ToString(core_attr.dimension).ToCStr(), n, upper_layer.size(), upper_layer.front().first._level);
-
-    //     RetStatus rs = RetStatus::Success();
-    //     lower_layer.clear();
-    //     lower_layer.reserve(n);
-    //     uint16_t level = upper_layer.front().first._level;
-    //     for (const std::pair<VectorID, DTYPE>& vertex_data : upper_layer) {
-    //         VectorID vertex_id = vertex_data.first;
-
-    //         CHECK_VECTORID_IS_VALID(vertex_id, LOG_TAG_DIVFTREE);
-    //         CHECK_VECTORID_IS_CENTROID(vertex_id, LOG_TAG_DIVFTREE);
-    //         FatalAssert(vertex_id._level == level, LOG_TAG_DIVFTREE, "Vertex level mismatch: expected %hhu, got %hhu.",
-    //                     level, vertex_id._level);
-
-    //         DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(_bufmgr.GetVertex(vertex_id));
-    //         CHECK_VERTEX_IS_VALID(vertex, LOG_TAG_DIVFTREE, false);
-
-    //         if (vertex_id != _root) {
-    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-    //                 "Search_Vertexs: vertex_id=" VECTORID_LOG_FMT ", vertex_centroid=%s, vertex_type=%s",
-    //                 VECTORID_LOG(vertex_id), _bufmgr.GetVector(vertex_id).ToString(core_attr.dimension).ToCStr(),
-    //                 ((vertex->IsLeaf()) ? "Leaf" : "Internal"));
-    //         }
-    //         else {
-    //             CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-    //                 "Search_Vertexs(root): vertex_id=" VECTORID_LOG_FMT ", vertex_type=%s",
-    //                 VECTORID_LOG(vertex_id), ((vertex->IsLeaf()) ? "Leaf" : "Internal"));
-    //         }
-
-    //         rs = vertex->Search(query, n, lower_layer);
-    //         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search failed at vertex " VECTORID_LOG_FMT " with err(%s).",
-    //                     VECTORID_LOG(vertex_id), rs.Msg());
-    //     }
-
-    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-    //          "Search_Vertexs END: query=%s, n=%lu, upper_layer_size=%lu, searching_level=%hhu, "
-    //          "lower_layer_size=%lu, lower_level=%hhu",
-    //          query.ToString(core_attr.dimension).ToCStr(), n, upper_layer.size(),
-    //          upper_layer.front().first._level, lower_layer.size(),
-    //          lower_layer.front().first._level);
-
-    //     return rs;
-    // }
 
 TESTABLE;
 };
