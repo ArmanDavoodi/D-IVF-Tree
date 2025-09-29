@@ -98,7 +98,7 @@ public:
                     "cannot support more than one block!");
         for (uint16_t i = 0; i < size; ++i) {
             VectorState state = vmd[i].state.load(std::memory_order_relaxed);
-            if (state == VECTOR_STATE_VALID || state == VECTOR_STATE_MIGRATED) {
+            if (state == VECTOR_STATE_VALID || state == VECTOR_STATE_MIGRATED || state == VECTOR_STATE_OUTDATED) {
                 FatalAssert(vmd[i].id != INVALID_VECTOR_ID, LOG_TAG_DIVFTREE_VERTEX, "cannot unpin invalid vector");
                 BufferManager::GetInstance()->UnpinVertexVersion(vmd[i].id, vmd[i].version);
             }
@@ -206,8 +206,12 @@ public:
                 cluster.MetaData(marked_for_update, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim));
             markedMeta->state.store(VECTOR_STATE_OUTDATED);
             cluster.header.num_deleted.fetch_add(1);
-            /* todo: can we unpin version here??? or should we do it in the destructor? yes because if we see that this is outdated we will reread cluster with the new size*/
-            bufferMgr->UnpinVertexVersion(markedMeta->id, markedMeta->version);
+            /*
+             * we cannot unpin the outdated version here because if an ANN search has read this version but
+             * has not pinned it, and the time it was not outdated,
+             * the version will be lost.
+             */
+            // bufferMgr->UnpinVertexVersion(markedMeta->id, markedMeta->version);
         }
 
         return RetStatus::Success();
@@ -279,6 +283,120 @@ public:
                 RetStatus{.stat=RetStatus::FAILED_TO_CAS_VECTOR_STATE, .message=nullptr});
     }
 
+    void Search(const VTYPE* query, size_t k, std::vector<ANNVectorInfo>& neighbours,
+                     std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) {
+        /* todo: should I also ignore same vectors with different versions? e.g. if it is newer replace o.w ignore */
+        const uint16_t dim = attr.index->GetAttributes().dimension;
+        const DistanceType dtype = attr.index->GetAttributes().distanceAlg;
+        const SimilarityComparator cmp = attr.index->GetAttributes().reverseSimilarityComparator;
+        VTYPE* data = cluster.Data(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
+        Address meta = cluster.MetaData(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
+        uint16_t old_size = 0;
+        uint16_t curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
+        std::unordered_map<VectorID, uint16_t, VectorIDHash> in_list;
+        std::unordered_set<VectorID, VectorIDHash> in_cluster;
+        while(curr_size != old_size) {
+            /* this will overflow and i will get greater than size when it gets to 0 */
+            uint16_t last_seen = old_size - 1;
+            for (uint16_t i = curr_size - 1; i != last_seen; --i) {
+                ANNVectorInfo new_vector;
+                if (attr.centroid_id.IsLeaf()) {
+                    VectorMetaData* vmd = reinterpret_cast<VectorMetaData*>(meta);
+                    if (seen.find(std::make_pair(vmd[i].id, 0)) != seen.end()) {
+                        continue;
+                    }
+
+                    switch (vmd[i].state.load(std::memory_order_acquire)) {
+                    case VECTOR_STATE_VALID:
+                    case VECTOR_STATE_MIGRATED:
+                        new_vector = ANNVectorInfo(Distance(query, &data[i * dim], dim, dtype), vmd[i].id);
+                        neighbours.emplace_back(new_vector);
+                        seen.emplace(new_vector.id, new_vector.version);
+                        std::push_heap(neighbours.begin(), neighbours.end(), cmp);
+                        while (neighbours.size() > k) {
+                            std::pop_heap(neighbours.begin(), neighbours.end(), cmp);
+                            neighbours.pop_back();
+                        }
+                        break;
+                    case VECTOR_STATE_OUTDATED:
+                        FatalAssert(false, LOG_TAG_DIVFTREE_VERTEX, "a pure vector cannot become outdated!");
+                    default:
+                        continue;
+                    }
+                } else {
+                    CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(meta);
+                    if (seen.find(std::make_pair(vmd[i].id, vmd[i].version)) != seen.end()) {
+                        continue;
+                    }
+
+                    std::unordered_map<divftree::VectorID, uint16_t, divftree::VectorIDHash>::iterator emplace_res;
+                    switch (vmd[i].state.load(std::memory_order_acquire)) {
+                    case VECTOR_STATE_VALID:
+                    case VECTOR_STATE_MIGRATED:
+                        auto check = in_list.find(vmd[i].id);
+                        if (check != in_list.end()) { /* todo: we can handle this case much more efficiently! */
+                            /* a vector was outdated in a previous pass */
+                            FatalAssert((vmd[check->second].id == vmd[i].id) &&
+                                        (vmd[check->second].state.load(std::memory_order_acquire) ==
+                                        VECTOR_STATE_OUTDATED) && (vmd[check->second].version < vmd[i].version),
+                                        LOG_TAG_DIVFTREE_VERTEX,
+                                        "the one that we have seen before should be outdated!");
+                            size_t j = 0;
+                            for (; j < neighbours.size(); ++j) {
+                                if (neighbours[j].id == vmd[i].id) {
+                                    break;
+                                }
+                            }
+                            FatalAssert((j < neighbours.size()) &&
+                                        neighbours[j].version ==
+                                        vmd[check->second].state.load(std::memory_order_acquire),
+                                        LOG_TAG_DIVFTREE_VERTEX, "Could not find the outdated version!");
+                            neighbours[j] = neighbours.back();
+                            neighbours.pop_back();
+                            std::make_heap(neighbours.begin(), neighbours.end());
+                            check->second = i;
+                            emplace_res = check;
+                        } else {
+                            emplace_res = in_list.emplace(new_vector.id, i).first;
+                        }
+                        new_vector = ANNVectorInfo(Distance(query, &data[i * dim], dim, dtype), vmd[i].id);
+                        neighbours.emplace_back(new_vector);
+                        in_cluster.emplace(new_vector.id);
+                        seen.emplace(new_vector.id, new_vector.version);
+                        std::push_heap(neighbours.begin(), neighbours.end(), cmp);
+                        while (neighbours.size() > k) {
+                            std::pop_heap(neighbours.begin(), neighbours.end(), cmp);
+                            if (new_vector == neighbours.back()) {
+                                in_list.erase(emplace_res);
+                            } else {
+                                auto it = in_list.find(new_vector.id);
+                                if (it != in_list.end()) {
+                                    in_list.erase(it);
+                                }
+                            }
+                            neighbours.pop_back();
+                        }
+                        break;
+                    case VECTOR_STATE_OUTDATED:
+                        if (in_cluster.find(vmd[i].id) != in_cluster.end()) {
+                            old_size = curr_size;
+                        }
+                    default:
+                        continue;
+                    }
+                }
+            }
+
+            if (old_size == curr_size) {
+                curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
+                FatalAssert(curr_size > old_size, LOG_TAG_DIVFTREE_VERTEX,
+                            "if we have seen an outdated vector our size should have increased!");
+            } else {
+                old_size = curr_size;
+            }
+        }
+    }
+
     // RetStatus Search(const Vector& query, size_t k,
     //                  std::vector<std::pair<VectorID, DTYPE>>& neighbours) override {
     //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
@@ -298,8 +416,8 @@ public:
     //         neighbours.emplace_back(cluster[i].id, distance);
     //         std::push_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
     //         if (neighbours.size() > k) {
-    //             std::pop_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
-    //             neighbours.pop_back();
+                // std::pop_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
+                // neighbours.pop_back();
     //         }
     //         PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE_VERTEX, "Search: Neighbours after checking vector "
     //                                 VECTORID_LOG_FMT, VECTORID_LOG(vectorPair.id));
@@ -317,7 +435,7 @@ public:
     //     return cluster._centroid_id;
     // }
 
-    // inline VPairComparator GetSimilarityComparator(bool reverese) const override {
+    // inline SimilarityComparator GetSimilarityComparator(bool reverese) const override {
     //     CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
     //     return (reverese ? _reverseSimilarityComparator : _similarityComparator);
     // }
@@ -1705,23 +1823,62 @@ protected:
         return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
     }
 
-    RetStatus SearchLayer() {
+    void SearchRoot(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>>& layers,
+                         DIVFTreeVertex* pinned_root_version) {
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
+        CHECK_NOT_NULLPTR(pinned_root_version, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_VALID(pinned_root_version->attr.centroid_id, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(pinned_root_version->attr.centroid_id, LOG_TAG_DIVFTREE);
+        uint8_t level = pinned_root_version->attr.centroid_id._level;
+        FatalAssert(layers[level].size() == 1 &&
+                    layers[level][0].id == pinned_root_version->attr.centroid_id &&
+                    layers[level][0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
+                    "the highest level should only contain the pinned version of the root");
+        FatalAssert(span > 0, LOG_TAG_DIVFTREE, "span cannot be 0");
+        std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
+        layers[level - 1].reserve(span + 1);
+        pinned_root_version->Search(query, span, layers[level - 1], seen);
+    }
+
+    void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>>& layers,
+                         uint8_t level) {
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
+        FatalAssert(level < layers.size(), LOG_TAG_DIVFTREE, "level out of bounds!");
+        FatalAssert((uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_DIVFTREE, "level out of bounds!");
+        FatalAssert(layers[level - 1].empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
+        layers[level - 1].reserve(span + 1);
+        std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
+        for (size_t i = 0; i < layers[level].size(); ++i) {
+            DIVFTreeVertex* vertex =
+                static_cast<DIVFTreeVertex*>(bufferMgr->
+                    ReadAndPinVertex(layers[level][i].id, layers[level][i].version));
+            CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
+            vertex->Search(query, span, layers[level - 1], seen);
+            vertex->Unpin();
+        }
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented yet");
     }
 
-    RetStatus ANNSearch(VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
+    RetStatus ANNSearch(const VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
                         uint8_t start_level, uint8_t end_level, SortType sort_type,
-                        std::vector<std::vector<ANNVectorInfo>>& layers) {
+                        std::vector<std::vector<ANNVectorInfo>>& layers, DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
+        RetStatus rs = RetStatus::Success();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
-        /* todo: what if the root is pruned when we call this function? */
-        FatalAssert(bufferMgr->GetCurrentRootId()._level >= (uint64_t)start_level, LOG_TAG_DIVFTREE,
-                    "start_level should be root level or lower than toor level!");
+        CHECK_NOT_NULLPTR(pinned_root_version, LOG_TAG_DIVFTREE);
+        /*
+         * Since a version of the root is pinned, we basicaly have an MVCC snapshop of the
+         * database based on that root version and it's children are not deleted unless they are unpinned or empty
+         */
+        FatalAssert(pinned_root_version->attr.centroid_id._level >= start_level, LOG_TAG_DIVFTREE,
+                    "start_level should be lower than or equal to root level!");
         FatalAssert(end_level < start_level, LOG_TAG_DIVFTREE, "last level cannot be higher than start level!");
+
         uint8_t current_level = start_level;
         uint8_t span;
         while (current_level > end_level) {
-            /* since current_level is strictly higher than end_level it can not be the vector level in this loop */
             uint8_t next_level = current_level - 1;
             if (next_level == end_level) {
                 span = k;
@@ -1733,12 +1890,33 @@ protected:
                             "if it is at vector level, the first condition will handle it.");
                 span = leaf_node_search_span;
             }
-            bool needReread = SearchLayer();
-            if (layers[next_level].empty()) {
-                /* root may change so we  */
-                /* todo what if root changes?!! */
+            FatalAssert(!layers[current_level].empty(), LOG_TAG_DIVFTREE,
+                        "current level cannot be empty!");
+            FatalAssert(layers[next_level].empty(), LOG_TAG_DIVFTREE,
+                        "next level should be empty!");
+            if (pinned_root_version->attr.centroid_id._level == current_level) {
+                FatalAssert(layers[current_level].size() == 1 &&
+                            layers[current_level][0].id == pinned_root_version->attr.centroid_id &&
+                            layers[current_level][0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
+                            "the highest level should only contain the pinned version of the root");
+                SearchRoot(query, span, layers, pinned_root_version);
+            } else {
+                SearchLayer(query, span, layers, current_level);
             }
+
+            if (layers[next_level].empty()) {
+                layers[current_level].clear();
+                if (current_level == pinned_root_version->attr.centroid_id._level) {
+                    return RetStatus{.stat=RetStatus::FAIL, .message=nullptr};
+                }
+                ++current_level;
+                continue;
+            }
+            --current_level;
         }
+
+        /* todo: sort the last layer based on sort type */
+        return RetStatus::Success();
     }
 
     // RetStatus SearchVertexs(const Vector& query,

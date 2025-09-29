@@ -656,6 +656,36 @@ public:
         return currentRootId.load();
     }
 
+    VectorID GetCurrentRootIdAndVersion(Version& version) const {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        VectorID rootId;
+        while (true) {
+            BufferVertexEntry* entry = GetRootEntry();
+            CHECK_NOT_NULL(entry, LOG_TAG_BUFFER);
+
+            entry->headerLock.Lock(SX_SHARED);
+            if (currentRootId.load(std::memory_order_acquire) != entry->centroidMeta.selfId) {
+                entry->headerLock.Unlock();
+                continue;
+            }
+
+            auto& it = entry->liveVersions.find(entry->currentVersion);
+            if (it == entry->liveVersions.end() || it->second.versionPin.load() == 0) {
+                FatalAssert((entry->state.load(std::memory_order_relaxed) == CLUSTER_DELETED) &&
+                            currentRootId.load(std::memory_order_acquire) != entry->centroidMeta.selfId,
+                            LOG_TAG_BUFFER, "could not find version but it is still root or not deleted!");
+                entry->headerLock.Unlock();
+                continue;
+            }
+
+            version = entry->currentVersion;
+            rootId = entry->centroidMeta.selfId;
+            entry->headerLock.Unlock();
+            CHECK_NOT_NULL(vertex, LOG_TAG_BUFFER);
+            return rootId;
+        }
+    }
+
     inline BufferVectorEntry* GetVectorEntry(VectorID id) {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
@@ -794,10 +824,14 @@ public:
             CHECK_NOT_NULL(entry, LOG_TAG_BUFFER);
 
             entry->headerLock.Lock(SX_SHARED);
+            if (currentRootId.load(std::memory_order_acquire) != entry->centroidMeta.selfId) {
+                entry->headerLock.Unlock();
+                continue;
+            }
             auto& it = entry->liveVersions.find(entry->currentVersion);
             if (it == entry->liveVersions.end() || it->second.versionPin.load() == 0) {
                 FatalAssert((entry->state.load(std::memory_order_relaxed) == CLUSTER_DELETED) &&
-                            currentRootId.load(std::memory_order_aquire) != entry->centroidMeta.selfId,
+                            currentRootId.load(std::memory_order_acquire) != entry->centroidMeta.selfId,
                             LOG_TAG_BUFFER, "could not find version but it is still root or not deleted!");
                 entry->headerLock.Unlock();
                 continue;

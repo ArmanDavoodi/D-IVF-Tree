@@ -38,6 +38,7 @@ struct RetStatus {
 
         TARGET_DELETED,
         TARGET_MIGRATED,
+        TARGET_UPDATED,
         TARGET_IS_ROOT,
         NEW_CONTAINER_DELETED,
         TARGET_VERTEX_UPDATED,
@@ -48,6 +49,8 @@ struct RetStatus {
         DEST_UPDATED,
         SRC_DELETED,
         SRC_HAS_TOO_MANY_VECTORS,
+
+        TREE_HIGHT_TOO_LOW,
 
         FAIL
     } stat;
@@ -105,6 +108,7 @@ union VectorID {
     VectorID() : _id(INVALID_VECTOR_ID) {}
     VectorID(const uint64_t& ID) : _id(ID) {}
     VectorID(const VectorID& ID) : _id(ID._id) {}
+    VectorID(VectorID&& ID) : _id(ID._id) {}
 
     inline bool IsValid() const {
         return (_id != INVALID_VECTOR_ID) && (_val < MAX_ID_PER_LEVEL);
@@ -168,6 +172,76 @@ union VectorID {
 };
 
 typedef uint32_t Version;
+
+template<uint8_t bits>
+constexpr inline uint64_t GET_HALF_MASK() {
+    if (bits == 1) {
+        return (uint64_t)1;
+    } else if (bits == 2) {
+        return (uint64_t)3;
+    } else if (bits == 3) {
+        return (uint64_t)7;
+    } else if (bits == 4) {
+        return (uint64_t)15;
+    } else if (bits == 5) {
+        return (uint64_t)31;
+    } else if (bits == 6) {
+        return (uint64_t)63;
+    } else if (bits == 7) {
+        return (uint64_t)127;
+    } else if (bits == 8) {
+        return (uint64_t)255;
+    }
+    return (uint64_t)0;
+}
+
+template<uint8_t bytes>
+constexpr inline uint64_t GET_MASK() {
+    if (bytes == 1) {
+        return (uint64_t)UINT8_MAX;
+    } else if (bytes == 2) {
+        return (uint64_t)UINT16_MAX;
+    } else if (bytes == 3) {
+        return ((((uint64_t)UINT16_MAX) << 8) | (uint64_t)UINT8_MAX);
+    } else if (bytes == 4) {
+        return (uint64_t)UINT32_MAX;
+    } else if (bytes == 5) {
+        return ((((uint64_t)UINT32_MAX) << 8) | (uint64_t)UINT8_MAX);
+    } else if (bytes == 6) {
+        return ((((uint64_t)UINT32_MAX) << 16) | (uint64_t)UINT16_MAX);
+    } else if (bytes == 7) {
+        return (((uint64_t)UINT32_MAX) << 24) | (((((uint64_t)UINT16_MAX) << 8) | (uint64_t)UINT8_MAX));
+    } else if (bytes == 8) {
+        return (uint64_t)UINT64_MAX;
+    }
+    return (uint64_t)0;
+}
+
+struct VectorIDHash {
+    std::size_t operator()(const std::pair<VectorID, Version>& p) const {
+        return std::hash<uint64_t>(p.first._id);
+    }
+};
+
+struct VectorIDVersionPairHash {
+    std::size_t operator()(const std::pair<VectorID, Version>& p) const {
+        if (p.first.IsCentroid()) {
+            /*
+             * use the first 4 bits of level as level will not exceed 10
+             * use the first 4 bits of creator Id as we won't have too many nodes in our tests
+             * use all 48 bits of valud
+             * use the first 1 byte of version as it is highly unlikely to have two versions with 256 or more distance
+             * in the same function
+             */
+            return ((((((p.first._creator_node_id & GET_HALF_MASK<4>) << 4) |
+                    (p.first._level & GET_HALF_MASK<4>) << 48) |
+                    p.first._val) << 8) |
+                    (p.second & GET_MASK<1>));
+        } else {
+            return std::hash<uint64_t>(p.first._id);
+        }
+    }
+};
 
 typedef void* Address;
 typedef const void* AddressToConst;
@@ -461,6 +535,24 @@ struct BatchVertexUpdate {
                               .result = result};
         urgent ||= is_urgent;
         return RetStatus::Success();
+    }
+};
+
+struct ANNVectorInfo {
+    DTYPE distance_to_query;
+    VectorID id;
+    Version version;
+
+    ANNVectorInfo() = default;
+    ANNVectorInfo(DTYPE dist, VectorID vectorId, Version vectorVersion = 0) : distance_to_query(dist), id(vectorId),
+                                                                              version(version) {}
+
+    inline bool operator==(cosnt ANNVectorInfo& other) {
+        return (id == other.id) && (version == other.version);
+    }
+
+    inline bool operator!=(const ANNVectorInfo& other) {
+        return (id != other.id) || (version != other.version);
     }
 };
 

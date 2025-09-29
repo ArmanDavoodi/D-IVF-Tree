@@ -90,7 +90,7 @@ public:
     }
 
     /* todo: A better method(compared to function pointer) to allow inlining for optimization */
-    inline VPairComparator GetSimilarityComparator(bool reverese) const override {
+    inline SimilarityComparator GetSimilarityComparator(bool reverese) const override {
         CHECK_VERTEX_SELF_IS_VALID(LOG_TAG_DIVFTREE_VERTEX, false);
         return (reverese ? _reverseSimilarityComparator : _similarityComparator);
     }
@@ -115,8 +115,8 @@ protected:
     const ClusteringType _clusteringAlg;
     const DistanceType _distanceAlg;
     const uint16_t _min_size;
-    const VPairComparator _similarityComparator;
-    const VPairComparator _reverseSimilarityComparator;
+    const SimilarityComparator _similarityComparator;
+    const SimilarityComparator _reverseSimilarityComparator;
     Cluster _cluster;
 
 TESTABLE;
@@ -212,8 +212,8 @@ protected:
     const uint16_t internal_max_size;
     const uint16_t split_internal;
     const uint16_t split_leaf;
-    const VPairComparator _similarityComparator;
-    const VPairComparator _reverseSimilarityComparator;
+    const SimilarityComparator _similarityComparator;
+    const SimilarityComparator _reverseSimilarityComparator;
     size_t _size;
     BufferManager _bufmgr;
     VectorID _root;

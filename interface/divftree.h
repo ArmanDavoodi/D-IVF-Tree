@@ -28,8 +28,8 @@ struct DIVFTreeVertexAttributes {
 struct DIVFTreeAttributes {
     ClusteringType clusteringAlg;
     DistanceType distanceAlg;
-    VPairComparator similarityComparator;
-    VPairComparator reverseSimilarityComparator;
+    SimilarityComparator similarityComparator;
+    SimilarityComparator reverseSimilarityComparator;
 
     uint16_t leaf_min_size;
     uint16_t leaf_max_size;
@@ -95,12 +95,6 @@ struct DIVFTreeAttributes {
     CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
     CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
 
-struct ANNVectorInfo {
-    DTYPE distance_to_query;
-    VectorID id;
-    Version version;
-};
-
 class DIVFTreeVertexInterface {
 public:
     virtual ~DIVFTreeVertexInterface() = default;
@@ -135,7 +129,7 @@ public:
     // virtual uint16_t VectorDimension() const = 0;
 
     // /* todo: A better method(compared to polymorphism) to allow inlining for optimization */
-    // virtual VPairComparator GetSimilarityComparator(bool reverese) const = 0;
+    // virtual SimilarityComparator GetSimilarityComparator(bool reverese) const = 0;
     // virtual DTYPE Distance(const Vector& a, const Vector& b) const = 0;
 
     // virtual String ToString(bool detailed = false) const = 0;

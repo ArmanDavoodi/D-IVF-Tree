@@ -9,13 +9,13 @@
 
 namespace divftree {
 
-using VPairComparator = bool (*)(const std::pair<VectorID, DTYPE>&, const std::pair<VectorID, DTYPE>&);
+using SimilarityComparator = bool (*)(const ANNVectorInfo&, const ANNVectorInfo&);
 
 namespace L2 {
 
-inline constexpr DTYPE Distance(const Vector& a, const Vector& b, uint16_t dim) {
-    FatalAssert(a.IsValid(), LOG_TAG_BASIC, "a is invalid");
-    FatalAssert(b.IsValid(), LOG_TAG_BASIC, "b is invalid");
+inline constexpr DTYPE Distance(const VTYPE* a, const VTYPE* b, uint16_t dim) {
+    CHECK_NOT_NULLPTR(a, LOG_TAG_BASIC);
+    CHECK_NOT_NULLPTR(b, LOG_TAG_BASIC);
 
     DTYPE dist = 0;
     for (size_t i = 0; i < dim; ++i) {
@@ -29,12 +29,12 @@ inline constexpr bool MoreSimilar(const DTYPE& a, const DTYPE& b) {
     return a < b;
 }
 
-inline constexpr bool MoreSimilarVPair(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) {
-    return MoreSimilar(a.second, b.second);
+inline constexpr bool MoreSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo& b) {
+    return MoreSimilar(a.distance_to_query, b.distance_to_query);
 }
 
-inline constexpr bool LessSimilarVPair(const std::pair<VectorID, DTYPE>& a, const std::pair<VectorID, DTYPE>& b) {
-    return MoreSimilar(b.second, a.second);
+inline constexpr bool LessSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo& b) {
+    return MoreSimilar(b.distance_to_query, a.distance_to_query);
 }
 
 inline void ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* vectors2, size_t size2, uint16_t dim,
@@ -151,7 +151,7 @@ inline void ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
     return Vector(); // Return an empty vector if the distance type is invalid
 }
 
-inline constexpr DTYPE Distance(const Vector& a, const Vector& b, uint16_t dim, DistanceType distanceAlg) {
+inline constexpr DTYPE Distance(const VTYPE* a, const VTYPE* b, uint16_t dim, DistanceType distanceAlg) {
     switch (distanceAlg) {
     case DistanceType::L2Distance:
         return L2::Distance(a, b, dim);
@@ -173,10 +173,10 @@ inline constexpr bool MoreSimilar(const DTYPE& a, const DTYPE& b, DistanceType d
     return false; // Return false if the distance type is invalid
 }
 
-inline constexpr VPairComparator GetDistancePairSimilarityComparator(DistanceType distanceAlg, bool reverse) {
+inline constexpr SimilarityComparator GetDistancePairSimilarityComparator(DistanceType distanceAlg, bool reverse) {
     switch (distanceAlg) {
     case DistanceType::L2Distance:
-        return (reverse ? L2::MoreSimilarVPair : L2::LessSimilarVPair);
+        return (reverse ? L2::MoreSimilarCmp : L2::LessSimilarCmp);
     default:
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
              "MoreSimilarVPair: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
