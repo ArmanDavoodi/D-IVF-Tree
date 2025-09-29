@@ -52,6 +52,8 @@ struct RetStatus {
 
         TREE_HIGHT_TOO_LOW,
 
+        NO_HANDLE_FOUND_FOR_TARGET,
+
         FAIL
     } stat;
 

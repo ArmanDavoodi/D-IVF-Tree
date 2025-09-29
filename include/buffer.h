@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <atomic>
+#include <unordered_map>
 
 namespace divftree {
 
@@ -691,8 +692,10 @@ public:
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
         CHECK_VECTORID_IS_VECTOR(id, LOG_TAG_BUFFER);
         bufferMgrLock.Lock(SX_SHARED);
-        FatalAssert(vectorDirectory.size() > id._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
-                    VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(id), vectorDirectory.size());
+        if (vectorDirectory.size() <= id._val) {
+            bufferMgrLock.Unlock();
+            return nullptr;
+        }
         BufferVectorEntry* entry = vectorDirectory[id._val];
         bufferMgrLock.Unlock();
         return entry;
@@ -1049,6 +1052,82 @@ public:
         return str;
     }
 
+    RetStatus CreateUpdateHandle(VectorID target) {
+        handleLock.Lock(SX_EXCLUSIVE);
+        auto it = handles.find(target);
+        if (it != handles.end()) {
+            handleLock.Unlock();
+            return RetStatus{.stat=RetStatus::ALREADY_HAS_A_HANDLE,
+                             .message="Cannot have more than one handle per id at a time"};
+        }
+
+        handles[target] = new std::atomic<bool>{false};
+        handleLock.Unlock();
+        return RetStatus::Succsess();
+    }
+
+    void SignalUpdateHandleIfNeeded(VectorID target) {
+        handleLock.Lock(SX_SHARED);
+        auto it = handles.find(target);
+        if (it == handles.end()) {
+            handleLock.Unlock();
+            return;
+        }
+
+        std::atomic<bool>* handle = it->second;
+        CHECK_NOT_NULLPTR(handle, LOG_TAG_BUFFER);
+
+        handle->store(true, std::memory_order_release);
+        handle->notify_all();
+        handleLock.Unlock();
+
+    }
+
+    RetStatus WaitForUpdateToGoThrough(VectorID target) {
+        handleLock.Lock(SX_SHARED);
+        auto it = handles.find(target);
+        if (it == handles.end()) {
+            handleLock.Unlock();
+            return RetStatus{.stat=RetStatus::NO_HANDLE_FOUND_FOR_TARGET,
+                             .message="no handle found for the target vectorId"};
+        }
+        std::atomic<bool>* handle = it->second;
+        CHECK_NOT_NULLPTR(handle, LOG_TAG_BUFFER);
+        handleLock.Unlock();
+
+        handle->wait(false, std::memory_order_acquire);
+        FatalAssert(*handle, LOG_TAG_BUFFER, "at this point, the operation must have gone through!");
+        handleLock.Lock(SX_EXCLUSIVE);
+        handles.erase(target);
+        delete handle;
+        handleLock.Unlock();
+        return RetStatus::Succsess();
+    }
+
+    RetStatus CheckIfUpdateHasGoneThrough(VectorID target, bool& updated) {
+        handleLock.Lock(SX_SHARED);
+        auto it = handles.find(target);
+        if (it == handles.end()) {
+            handleLock.Unlock();
+            return RetStatus{.stat=RetStatus::NO_HANDLE_FOUND_FOR_TARGET,
+                             .message="no handle found for the target vectorId"};
+        }
+        std::atomic<bool>* handle = it->second;
+        CHECK_NOT_NULLPTR(handle, LOG_TAG_BUFFER);
+        handleLock.Unlock();
+
+        if (handle->load(std::memory_order_acquire)) {
+            handleLock.Lock(SX_EXCLUSIVE);
+            handles.erase(target);
+            delete handle;
+            handleLock.Unlock();
+            updated = true;
+        } else {
+            updated = false;
+        }
+        return RetStatus::Succsess();
+    }
+
 protected:
     inline BufferVertexEntry* GetVertexEntry(VectorID id, bool needLock = true) {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
@@ -1089,6 +1168,8 @@ protected:
     std::atomic<VectorID> currentRootId;
     std::vector<BufferVectorEntry*> vectorDirectory;
     std::vector<BufferVertexEntry*> clusterDirectory[MAX_TREE_HIGHT];
+    SXSpinLock handleLock;
+    std::unordered_map<VectorID, std::atomic<bool>*, VectorIDHash> handles;
 
     inline static BufferManager *bufferMgrInstance = nullptr;
 

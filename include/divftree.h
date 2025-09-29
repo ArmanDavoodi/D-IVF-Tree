@@ -578,91 +578,89 @@ public:
     //     return rs;
     // }
 
-    // RetStatus Delete(VectorID vec_id) override {
-    //     FatalAssert(false, LOG_TAG_NOT_IMPLEMENTED, "Delete not implemented");
-    //     UNUSED_VARIABLE(vec_id);
-    //     RetStatus rs = RetStatus::Success();
-    //     return rs;
-    // }
+    /* todo: for now since it is single node, the create_handle here does not do anything and returning
+       from this function indicates that the vector is deleted. But we need to change
+       this in the multi node environment */
+    RetStatus Delete(VectorID vec_id, bool create_handle) override {
+        UNUSED_VARIABLE(create_handle);
+        CHECK_VECTORID_IS_VALID(vec_id, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_VECTOR(vec_id, LOG_TAG_DIVFTREE);
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
-    // RetStatus ApproximateKNearestNeighbours(const Vector& query, size_t k,
-    //                                         uint16_t _internal_k, uint16_t _leaf_k,
-    //                                         std::vector<std::pair<VectorID, DTYPE>>& neighbours,
-    //                                         bool sort = true, bool sort_from_more_similar_to_less = true) override {
+        BufferVectorEntry* entry = bufferMgr->GetVectorEntry(vec_id);
+        if (entry == nullptr) {
+            return RetStatus{.stat=RetStatus::VECTOR_NOT_FOUND, .message="Vector does not exist in this index"};
+        }
+        VectorLocation loc;
+        BufferVertexEntry* parent = nullptr;
+        do {
+            parent = entry->ReadParent(loc);
+            if (parent == nullptr) {
+                return RetStatus{.stat=RetStatus::VECTOR_NOT_FOUND,
+                                .message="Vector is either deleted or is not yet inserted."};
+            }
+        } while(!DeleteVectorAndReleaseContainer(vec_id, parent, loc).IsOK());
 
-    //     FatalAssert(_root.IsValid(), LOG_TAG_DIVFTREE, "Invalid root ID.");
-    //     FatalAssert(_root.IsCentroid(), LOG_TAG_DIVFTREE, "Invalid root ID -> root should be a centroid.");
-    //     FatalAssert(query.IsValid(), LOG_TAG_DIVFTREE, "Invalid query vector.");
-    //     FatalAssert(k > 0, LOG_TAG_DIVFTREE, "Number of neighbours cannot be 0.");
-    //     FatalAssert(_levels > 1, LOG_TAG_DIVFTREE, "Height of the tree should be at least two but is %hhu.",
-    //                 _levels);
+        return RetStatus::Success();
+    }
 
-    //     FatalAssert(_internal_k > 0, LOG_TAG_DIVFTREE, "Number of internal vertex neighbours cannot be 0.");
-    //     FatalAssert(_leaf_k > 0, LOG_TAG_DIVFTREE, "Number of leaf neighbours cannot be 0.");
+    RetStatus ApproximateKNearestNeighbours(const VTYPE* query, size_t k,
+                                            uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
+                                            SortType sort_type, std::vector<ANNVectorInfo>& neighbours) override {
 
-    //     CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-    //          "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
-    //          "num_levels=%hhu", query.ToString(core_attr.dimension).ToCStr(), k, _internal_k,
-    //          _leaf_k, _size, _levels);
+        CHECK_NOT_NULLPTR(query, LOG_TAG_DIVFTREE);
 
-    //     RetStatus rs = RetStatus::Success();
-    //     neighbours.clear();
+        FatalAssert(k > 0, LOG_TAG_DIVFTREE, "Number of neighbours cannot be 0.");
+        FatalAssert(internal_node_search_span > 0, LOG_TAG_DIVFTREE,
+                    "Number of internal vertex neighbours cannot be 0.");
+        FatalAssert(leaf_node_search_span > 0, LOG_TAG_DIVFTREE, "Number of leaf neighbours cannot be 0.");
 
-    //     std::vector<std::pair<VectorID, DTYPE>> upper_layer, lower_layer;
-    //     upper_layer.emplace_back(_root, 0);
-    //     VectorID next = _root;
-    //     while (next.IsCentroid()) {
-    //         CHECK_VECTORID_IS_VALID(next, LOG_TAG_DIVFTREE);
-    //         // Get the next layer of vertices
-    //         size_t search_n = (next.IsLeaf() ? k :
-    //                                            (next._level - 1 == VectorID::LEAF_LEVEL ? _leaf_k : _internal_k));
-    //         rs = SearchVertexs(query, upper_layer, lower_layer, search_n);
-    //         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Search vertices failed with error: %s", rs.Msg());
-    //         FatalAssert(!lower_layer.empty(), LOG_TAG_DIVFTREE, "Lower layer should not be empty.");
-    //         FatalAssert(lower_layer.size() <= search_n,
-    //                     LOG_TAG_DIVFTREE, "Lower layer size (%lu) is larger than %hu (%s).",
-    //                     lower_layer.size(), search_n,
-    //                     (next.IsLeaf() ? "vector case" : (next._level - 1 == VectorID::LEAF_LEVEL ?
-    //                                                                     "leaf case" : "internal case")));
-    //         FatalAssert(lower_layer.front().first._level == next._level - 1, LOG_TAG_DIVFTREE,
-    //                     "Lower layer first element level (%hhu) does not match expected level (%hhu).",
-    //                     lower_layer.front().first._level, next._level - 1);
-    //         next = lower_layer.front().first;
-    //         upper_layer.swap(lower_layer);
-    //     }
+        neighbours.clear();
+        neighbours.reserve(k + 1);
 
-    //     neighbours.swap(upper_layer);
-        // if (sort) {
-        //     std::sort_heap(neighbours.begin(), neighbours.end(), _reverseSimilarityComparator);
-        //     if (!sort_from_more_similar_to_less) {
-        //         std::reverse(neighbours.begin(), neighbours.end());
-        //     }
-        // }
+        // CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+        //      "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
+        //      "num_levels=%hhu", query.ToString(core_attr.dimension).ToCStr(), k, _internal_k,
+        //      _leaf_k, _size);
 
-    //     PRINT_VECTOR_PAIR_BATCH(neighbours, LOG_TAG_DIVFTREE, "ApproximateKNearestNeighbours End: neighbours=");
+        RetStatus rs = RetStatus::Success();
 
-    //     return rs;
-    // }
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+        std::vector<std::vector<ANNVectorInfo>&> layers;
 
-    // size_t Size() const override {
-    //     return _size;
-    // }
+        while (real_size.load(std::memory_order_acquire) > 0) {
+            DIVFTreeVertex* root =
+                static_cast<DIVFTreeVertex*>(bufferMgr->ReadAndPinRoot());
+            CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
-    // inline DTYPE Distance(const Vector& a, const Vector& b) const override {
-    //     switch (core_attr.distanceAlg)
-    //     {
-    //     case DistanceType::L2Distance:
-    //         return L2::Distance(a, b, core_attr.dimension);
-    //     default:
-    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX,
-    //              "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
-    //     }
-    //     return 0; // Return 0 if the distance type is invalid
-    // }
+            for (uint64_t i = 0; i < layers.size() - 1; ++i) {
+                std::vector<ANNVectorInfo>* vec = &layers[i];
+                delete vec;
+            }
+            layers.clear();
+            layers.reserve(root->attr.centroid_id._level + 1);
+            for (uint64_t i = 0; i < root->attr.centroid_id._level; ++i) {
+                layers.emplace_back(*(new std::vector<ANNVectorInfo>));
+            }
+            layers.emplace_back(neighbours);
 
-    // inline size_t Bytes(bool is_internal_vertex) const override {
-    //     return DIVFTreeVertex::Bytes(core_attr.dimension, is_internal_vertex ? internal_max_size : leaf_max_size);
-    // }
+            rs = ANNSearch(query, k, internal_node_search_span, leaf_node_search_span,
+                           (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, sort_type,
+                           layers, root);
+            root->Unpin();
+            if (rs.IsOK()) {
+                break;
+            }
+        }
+
+        return rs;
+    }
+
+    size_t Size() const override {
+        return real_size.load(std::memory_order_acquire);
+    }
 
     // inline String ToString() override {
     //     String out("{Attr=<Dim=%hu, ClusteringAlg=%s, DistanceAlg=%s, "
@@ -734,17 +732,7 @@ public:
 
 protected:
     const DIVFTreeAttributes attr;
-
-    // inline bool MoreSimilar(const DTYPE& a, const DTYPE& b) const {
-    //     switch (core_attr.distanceAlg) {
-    //     case DistanceType::L2Distance:
-    //         return L2::MoreSimilar(a, b);
-    //     default:
-    //         CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
-    //              "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[core_attr.distanceAlg]);
-    //     }
-    //     return false; // Return false if the distance type is invalid
-    // }
+    std::atomic<uint64_t> real_size;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const VectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -1823,7 +1811,7 @@ protected:
         return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
     }
 
-    void SearchRoot(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>>& layers,
+    void SearchRoot(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
                          DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
@@ -1841,8 +1829,8 @@ protected:
         pinned_root_version->Search(query, span, layers[level - 1], seen);
     }
 
-    void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>>& layers,
-                         uint8_t level) {
+    void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
+                     uint8_t level) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
         FatalAssert(level < layers.size(), LOG_TAG_DIVFTREE, "level out of bounds!");
@@ -1863,7 +1851,7 @@ protected:
 
     RetStatus ANNSearch(const VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
                         uint8_t start_level, uint8_t end_level, SortType sort_type,
-                        std::vector<std::vector<ANNVectorInfo>>& layers, DIVFTreeVertex* pinned_root_version) {
+                        std::vector<std::vector<ANNVectorInfo>&>& layers, DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         RetStatus rs = RetStatus::Success();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
@@ -1894,6 +1882,8 @@ protected:
                         "current level cannot be empty!");
             FatalAssert(layers[next_level].empty(), LOG_TAG_DIVFTREE,
                         "next level should be empty!");
+            FatalAssert(span > 0, LOG_TAG_DIVFTREE,
+                        "span should be at least 1");
             if (pinned_root_version->attr.centroid_id._level == current_level) {
                 FatalAssert(layers[current_level].size() == 1 &&
                             layers[current_level][0].id == pinned_root_version->attr.centroid_id &&
