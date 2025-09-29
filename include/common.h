@@ -210,6 +210,12 @@ inline constexpr bool IsValid(DistanceType type) {
     return ((type != DistanceType::InvalidD) && (type != DistanceType::NumTypesD));
 }
 
+enum SortType : int8_t {
+    Unsorted,
+    IncreasingSimilarity,
+    DecreasingSimilarity
+};
+
 
 /*
 

@@ -787,6 +787,30 @@ public:
         }
     }
 
+    DIVFTreeVertexInterface* ReadAndPinRoot() override {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        while (true) {
+            BufferVertexEntry* entry = GetRootEntry();
+            CHECK_NOT_NULL(entry, LOG_TAG_BUFFER);
+
+            entry->headerLock.Lock(SX_SHARED);
+            auto& it = entry->liveVersions.find(entry->currentVersion);
+            if (it == entry->liveVersions.end() || it->second.versionPin.load() == 0) {
+                FatalAssert((entry->state.load(std::memory_order_relaxed) == CLUSTER_DELETED) &&
+                            currentRootId.load(std::memory_order_aquire) != entry->centroidMeta.selfId,
+                            LOG_TAG_BUFFER, "could not find version but it is still root or not deleted!");
+                entry->headerLock.Unlock();
+                continue;
+            }
+
+            it->second.clusterPtr.pin.fetch_add(1);
+            DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
+            entry->headerLock.Unlock();
+            CHECK_NOT_NULL(vertex, LOG_TAG_BUFFER);
+            return vertex;
+        }
+    }
+
     DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version) override {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         BufferVertexEntry* entry = GetVertexEntry(vertexId);
@@ -1006,6 +1030,19 @@ protected:
         FatalAssert(clusterDirectory[levelIdx].size() > id._val, LOG_TAG_BUFFER, "VertexID val is out of bounds. "
                     VECTORID_LOG_FMT ", max_val:%lu", VECTORID_LOG(id), clusterDirectory[levelIdx].size());
         BufferVertexEntry* entry = clusterDirectory[levelIdx][id._val];
+        if (needLock) {
+            bufferMgrLock.Unlock();
+        }
+        return entry;
+    }
+
+    inline BufferVertexEntry* GetRootEntry(bool needLock = true) {
+        FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+        if (needLock) {
+            bufferMgrLock.Lock(SX_SHARED);
+        }
+        threadSelf->SanityCheckLockHeldByMe(&bufferMgrLock);
+        BufferVertexEntry* entry = GetVertexEntry(currentRootId.load(std::memory_order_relaxed), false);
         if (needLock) {
             bufferMgrLock.Unlock();
         }

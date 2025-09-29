@@ -95,6 +95,12 @@ struct DIVFTreeAttributes {
     CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
     CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
 
+struct ANNVectorInfo {
+    DTYPE distance_to_query;
+    VectorID id;
+    Version version;
+};
+
 class DIVFTreeVertexInterface {
 public:
     virtual ~DIVFTreeVertexInterface() = default;

@@ -1331,52 +1331,81 @@ protected:
         return rs;
     }
 
-    inline RetStatus MigrateReadParent(VectorID target, BufferVertexEntry* targetEntry,
-                                       const VectorLocation& expTargetLocation, VectorLocation& currentTargetLocation,
-                                       BufferVertexEntry** entries, uint8_t& num_entries, bool& oldContUpdated) {
-        BufferVertexEntry*& oldContainerEntry = entries[3 - num_entries - 1];
+    inline RetStatus ReadParentAndCheckLocation(VectorID target, BufferVertexEntry* targetEntry,
+                                                const VectorLocation& expTargetLocation,
+                                                VectorLocation& currentTargetLocation, BufferVertexEntry** entries,
+                                                uint8_t& num_entries) {
+        BufferVertexEntry*& parentEntry = entries[3 - num_entries - 1];
         BufferManager* bufferMgr = BufferManager::GetInstance();
+        RetStatus rs = RetStatus::Success();
 
         if (targetEntry != nullptr) {
-            oldContainerEntry = targetEntry->ReadParent(currentTargetLocation);
-            FatalAssert((oldContainerEntry == nullptr) == (currentTargetLocation == INVALID_VECTOR_LOCATION),
+            threadSelf->SanityCheckLockHeldByMe(targetEntry->clusterLock);
+            parentEntry = targetEntry->ReadParent(currentTargetLocation);
+            FatalAssert((parentEntry == nullptr) == (currentTargetLocation == INVALID_VECTOR_LOCATION),
                         LOG_TAG_DIVFTREE, "mismatch location and parentPtr");
-            if (oldContainerEntry == nullptr) {
+            if (parentEntry == nullptr) {
                 /* target is the new root */
-                return RetStatus{.stat=RetStatus::TARGET_IS_ROOT, .message=nullptr};
+                rs = RetStatus{.stat=RetStatus::TARGET_IS_ROOT, .message=nullptr};
             }
         } else {
             BufferVectorEntry* entry = bufferMgr->GetVectorEntry(target);
             CHECK_NOT_NULLPTR(entry, LOG_TAG_DIVFTREE);
-            oldContainerEntry = entry->ReadParent(currentTargetLocation);
-            FatalAssert((oldContainerEntry == nullptr) == (currentTargetLocation == INVALID_VECTOR_LOCATION),
+            parentEntry = entry->ReadParent(currentTargetLocation);
+            FatalAssert((parentEntry == nullptr) == (currentTargetLocation == INVALID_VECTOR_LOCATION),
                         LOG_TAG_DIVFTREE, "mismatch location and parentPtr");
-            if (oldContainerEntry == nullptr) {
+            if (parentEntry == nullptr) {
                 /* the vector is deleted */
-                return RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
+                rs = RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
             }
         }
 
-        CHECK_NOT_NULLPTR(oldContainerEntry, LOG_TAG_DIVFTREE);
-        oldContUpdated = (currentTargetLocation != expTargetLocation);
-        ++num_entries;
-        return RetStatus::Success();
-    }
-
-    inline RetStatus MigrateReadContainer(VectorID newContainerId, Version newContainerVersion,
-                                          BufferVertexEntry** entries, uint8_t& num_entries, bool& newContUpdated,
-                                          LockMode mode = SX_SHARED) {
-        BufferVertexEntry*& newContainerEntry = entries[3 - num_entries - 1];
-        BufferManager* bufferMgr = BufferManager::GetInstance();
-
-        newContainerEntry = bufferMgr->ReadBufferEntry(newContainerId, mode, &newContUpdated);
-        if (newContainerEntry == nullptr) {
-            return RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
+        if (rs.IsOK()) {
+            CHECK_NOT_NULLPTR(parentEntry, LOG_TAG_DIVFTREE);
+            ++num_entries;
+            if ((currentTargetLocation.containerId != expTargetLocation.containerId) ||
+                (currentTargetLocation.containerVersion != expTargetLocation.containerVersion)) {
+                /* this means that either the parent had a major update that was not compaction or we were migrated */
+                rs = RetStatus{.stat=RetStatus::TARGET_UPDATED, .message=nullptr};
+            }
         }
 
-        newContUpdated = newContUpdated || (newContainerEntry->currentVersion != newContainerVersion);
-        ++num_entries;
-        return RetStatus::Success();
+        if (!rs.IsOK()) {
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        }
+
+        return rs;
+    }
+
+    inline RetStatus ReadAndCheckVersion(VectorID containerId, Version containerVersion,
+                                         BufferVertexEntry** entries, uint8_t& num_entries, LockMode mode) {
+        BufferVertexEntry*& containerEntry = entries[3 - num_entries - 1];
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        RetStatus rs = RetStatus::Success();
+
+        /*
+         * we do not care if we are blocked because the block does not necessarily lead to Major Updates +
+         * Compaction does not change the version
+         */
+        containerEntry = bufferMgr->ReadBufferEntry(containerId, mode);
+        if (containerEntry == nullptr) {
+            rs = RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
+        }
+
+        if (rs.IsOK()) {
+            ++num_entries;
+            if (containerEntry->currentVersion != containerVersion) {
+                rs = RetStatus{.stat=RetStatus::TARGET_UPDATED, .message=nullptr};
+            }
+        }
+
+        if (!rs.IsOK()) {
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        }
+
+        return rs;
     }
 
     /* Todo: recheck to see if everything works fine */
@@ -1401,23 +1430,19 @@ protected:
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
         BufferVertexEntry* entries[3];
         VectorLocation currentTargetLocation = INVALID_VECTOR_LOCATION;
-        uint8_t num_entries = 1;
-        BufferVertexEntry** targetEntry = &entries[3 - num_entries];
+        uint8_t num_entries = 0;
+        BufferVertexEntry* dummy = nullptr;
+        BufferVertexEntry** targetEntry;
         BufferVertexEntry** oldContainerEntry;
         BufferVertexEntry** newContainerEntry;
-        bool targetUpdated = false, oldContUpdated = false, newContUpdated = false;
         if (target.IsCentroid()) {
-            *targetEntry = bufferMgr->ReadBufferEntry(target, SX_SHARED, &targetUpdated);
-            if (*targetEntry == nullptr) {
-                return RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
+            rs = ReadAndCheckVersion(target, targetVersion, entries, num_entries, SX_SHARED);
+            if (!rs.IsOK()) {
+                return rs;
             }
-
-            targetUpdated = targetUpdated || ((*targetEntry)->currentVersion != targetVersion);
-            if (targetUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                    ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::TARGET_VERTEX_UPDATED, .message=nullptr};
-            }
+            targetEntry = &entries[3 - num_entries];
+        } else {
+            targetEntry = &dummy;
         }
 
         /* Todo: if we have version logs, maybe we can use that to handle migration when there is an update */
@@ -1426,60 +1451,32 @@ protected:
 
         /* We should first lock the child and then the parents in order of their values to avoid deadlocks! */
         if (targetLocation.containerId < newContainerId) {
-            rs = MigrateReadParent(target, (*targetEntry), targetLocation, currentTargetLocation, entries,
-                                   num_entries, oldContUpdated);
+            rs = ReadParentAndCheckLocation(target, (*targetEntry), targetLocation, currentTargetLocation, entries,
+                                            num_entries);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return rs;
             }
 
             oldContainerEntry = &entries[3 - num_entries];
-            if (oldContUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::OLD_CONTAINER_UPDATED, .message=nullptr};
-            }
 
-            rs = MigrateReadContainer(newContainerId, newContainerVersion, entries, num_entries, newContUpdated);
+            rs = ReadAndCheckVersion(newContainerId, newContainerVersion, entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::NEW_CONTAINER_DELETED, .message=nullptr};
+                return rs;
             }
             newContainerEntry = &entries[3 - num_entries];
-            if (newContUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::NEW_CONTAINER_UPDATED, .message=nullptr};
-            }
         } else {
-            rs = MigrateReadContainer(newContainerId, newContainerVersion, entries, num_entries, newContUpdated);
+            rs = ReadAndCheckVersion(newContainerId, newContainerVersion, entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::NEW_CONTAINER_DELETED, .message=nullptr};
+                return rs;
             }
             newContainerEntry = &entries[3 - num_entries];
-            if (newContUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::NEW_CONTAINER_UPDATED, .message=nullptr};
-            }
 
-            rs = MigrateReadParent(target, (*targetEntry), targetLocation, currentTargetLocation, entries,
-                                   num_entries, oldContUpdated);
+            rs = ReadParentAndCheckLocation(target, (*targetEntry), targetLocation, currentTargetLocation, entries,
+                                            num_entries);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return rs;
             }
             oldContainerEntry = &entries[3 - num_entries];
-            if (oldContUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::OLD_CONTAINER_UPDATED, .message=nullptr};
-            }
         }
 
         DIVFTreeVertex* oldContainer = static_cast<DIVFTreeVertex*>((*oldContainerEntry)->ReadLatestVersion(false));
@@ -1493,8 +1490,6 @@ protected:
                                                ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
             FatalAssert((*targetEntry) == nullptr, LOG_TAG_DIVFTREE,
                         "if the target is a centroid the migration should not fail!");
-            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
             if (expState == VECTOR_STATE_MIGRATED) {
                 rs = RetStatus{.stat=RetStatus::TARGET_MIGRATED, .message=nullptr};
             } else if (expState == VECTOR_STATE_INVALID) {
@@ -1559,7 +1554,6 @@ protected:
         uint8_t num_entries = 0;
         BufferVertexEntry** srcEntry;
         BufferVertexEntry** destEntry;
-        bool srcUpdated = false, destUpdated = false;
         uint16_t reservedSize = 0;
         uint16_t totalSize = 0;
         DIVFTreeVertex* srcCluster = nullptr;
@@ -1570,13 +1564,10 @@ protected:
 
         /* We should first lock the child and then the parents in order of their values to avoid deadlocks! */
         if (srcId < destId) {
-            rs = MigrateReadContainer(srcId, srcVersion, entries, num_entries, srcUpdated, SX_EXCLUSIVE);
+            rs = ReadAndCheckVersion(srcId, srcVersion, entries, num_entries, SX_EXCLUSIVE);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                rs = RetStatus{.stat=RetStatus::SRC_DELETED, .message=nullptr};
+                return rs;
             }
-
             srcEntry = &entries[3 - num_entries];
             srcCluster = static_cast<DIVFTreeVertex*>((*srcEntry)->ReadLatestVersion(false));
             CHECK_NOT_NULLPTR(srcCluster, LOG_TAG_DIVFTREE);
@@ -1593,37 +1584,21 @@ protected:
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
             }
 
-            rs = MigrateReadContainer(destId, destVersion, entries, num_entries, destUpdated);
+            rs = ReadAndCheckVersion(destId, destVersion, entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return rs;
             }
             destEntry = &entries[3 - num_entries];
-            if (destUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
-            }
         } else {
-            rs = MigrateReadContainer(destId, destVersion, entries, num_entries, destUpdated);
+            rs = ReadAndCheckVersion(destId, destVersion, entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return rs;
             }
             destEntry = &entries[3 - num_entries];
-            if (destUpdated) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
-            }
 
-            rs = MigrateReadContainer(srcId, srcVersion, entries, num_entries, srcUpdated, SX_EXCLUSIVE);
+            rs = ReadAndCheckVersion(srcId, srcVersion, entries, num_entries, SX_EXCLUSIVE);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-                rs = RetStatus{.stat=RetStatus::SRC_DELETED, .message=nullptr};
+                return rs;
             }
 
             srcEntry = &entries[3 - num_entries];
@@ -1730,6 +1705,41 @@ protected:
         return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
     }
 
+    RetStatus SearchLayer() {
+        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented yet");
+    }
+
+    RetStatus ANNSearch(VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
+                        uint8_t start_level, uint8_t end_level, SortType sort_type,
+                        std::vector<std::vector<ANNVectorInfo>>& layers) {
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
+        /* todo: what if the root is pruned when we call this function? */
+        FatalAssert(bufferMgr->GetCurrentRootId()._level >= (uint64_t)start_level, LOG_TAG_DIVFTREE,
+                    "start_level should be root level or lower than toor level!");
+        FatalAssert(end_level < start_level, LOG_TAG_DIVFTREE, "last level cannot be higher than start level!");
+        uint8_t current_level = start_level;
+        uint8_t span;
+        while (current_level > end_level) {
+            /* since current_level is strictly higher than end_level it can not be the vector level in this loop */
+            uint8_t next_level = current_level - 1;
+            if (next_level == end_level) {
+                span = k;
+            } else if ((uint64_t)next_level > VectorID::LEAF_LEVEL) {
+                span = internal_node_search_span;
+            } else {
+                FatalAssert((uint64_t)next_level == VectorID::LEAF_LEVEL, LOG_TAG_DIVFTREE,
+                            "since current cannot be lower than end level, "
+                            "if it is at vector level, the first condition will handle it.");
+                span = leaf_node_search_span;
+            }
+            bool needReread = SearchLayer();
+            if (layers[next_level].empty()) {
+                /* root may change so we  */
+                /* todo what if root changes?!! */
+            }
+        }
+    }
 
     // RetStatus SearchVertexs(const Vector& query,
     //                       const std::vector<std::pair<VectorID, DTYPE>>& upper_layer,
