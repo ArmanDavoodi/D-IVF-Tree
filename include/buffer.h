@@ -1,7 +1,6 @@
 #ifndef DIVFTREE_BUFFER_H_
 #define DIVFTREE_BUFFER_H_
 
-#include "interface/buffer.h"
 #include "interface/divftree.h"
 
 #include <memory>
@@ -92,7 +91,12 @@ struct BufferVectorEntry {
      * The atomicity is only meant to synchronize reads with writes and not writes with writes!!
      */
 
-    BufferVectorEntry(VectorID id) : selfId(id), location(INVALID_VECTOR_LOCATION) {}
+    BufferVectorEntry(VectorID id) : selfId(id), location(INVALID_VECTOR_LOCATION) {
+        /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vector entry should be
+        16 byte aligned as well */
+        FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVectorEntry is not alligned!");
+
+    }
 
     /*
      * If self is a centroid, it is recomended to use the BufferVertex function!
@@ -219,6 +223,9 @@ struct BufferVertexEntry {
 
     BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin = 1) :
         centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0) {
+        /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vertex entry should be
+           16 byte aligned as well */
+        FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
         oldVersions[0] = VersionedClusterPtr{initialPin, ClusterPtr{0, cluster}};
         /*
          * set version pin to 1 as BufferVertexEntry is referencing it with currentVersion and
@@ -413,7 +420,14 @@ public:
     ~BufferManager() override {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
 
-        for (size_t level = MAX_TREE_HIGHT - 1; level > 0; --level) {
+        for (BufferVectorEntry* entry : vectorDirectory) {
+            if (entry == nullptr) {
+                continue;
+            }
+            entry->location.Store(INVALID_VECTOR_LOCATION, true);
+        }
+
+        for (size_t level = MAX_TREE_HIGHT - 1; level != (size_t)(-1); --level) {
             for (BufferVertexEntry* entry : clusterDirectory[level]) {
                 if (entry == nullptr) {
                     continue;
@@ -438,54 +452,7 @@ public:
             }
         }
 
-        for (BufferVertexEntry* entry : clusterDirectory[0]) {
-            if (entry == nullptr) {
-                continue;
-            }
-            entry->clusterLock.Lock(SX_EXCLUSIVE);
-            entry->headerLock.Lock(SX_EXCLUSIVE);
-            for (auto& mvccClus : entry->liveVersions) {
-                mvccClus.second.versionPin = 0;
-                uint64_t readerPins = mvccClus.second.clusterPtr.pin.load(std::memory_order_relaxed);
-                DIVFTreeVertexInterface* clusterPtr = mvccClus.second.clusterPtr.clusterPtr;
-                mvccClus.second.clusterPtr.pin.store(0, std::memory_order_relaxed);
-                mvccClus.second.clusterPtr.clusterPtr = nullptr;
-                clusterPtr->MarkForRecycle(readerPins);
-            }
-            entry->liveVersions.clear();
-            entry->currentVersion = 0;
-            entry->state.store(CLUSTER_DELETED);
-            entry->centroidMeta.location.Store(INVALID_VECTOR_LOCATION, true);
-            entry->headerLock.Unlock();
-            entry->clusterLock.Unlock();
-        }
-
-        for (BufferVectorEntry* entry : vectorDirectory) {
-            if (entry == nullptr) {
-                continue;
-            }
-            entry->location.Store(INVALID_VECTOR_LOCATION, true);
-        }
-
         sleep(10);
-
-        for (size_t level = MAX_TREE_HIGHT - 1; level > 0; --level) {
-            for (BufferVertexEntry* entry : clusterDirectory[level]) {
-                if (entry != nullptr) {
-                    delete entry;
-                    entry = nullptr;
-                }
-            }
-            clusterDirectory[level].clear();
-        }
-
-        for (BufferVertexEntry* entry : clusterDirectory[0]) {
-            if (entry != nullptr) {
-                delete entry;
-                entry = nullptr;
-            }
-        }
-        clusterDirectory[0].clear();
 
         for (BufferVectorEntry* entry : vectorDirectory) {
             if (entry != nullptr) {
@@ -494,6 +461,16 @@ public:
             }
         }
         vectorDirectory.clear();
+
+        for (size_t level = MAX_TREE_HIGHT - 1; level != (size_t)(-1); --level) {
+            for (BufferVertexEntry* entry : clusterDirectory[level]) {
+                if (entry != nullptr) {
+                    delete entry;
+                    entry = nullptr;
+                }
+            }
+            clusterDirectory[level].clear();
+        }
     }
 
     /*
@@ -501,13 +478,11 @@ public:
      *
      * will return the rootEntry in the INVALID state and locked in exclusive mode!
      */
-    inline static BufferVertexEntry* Init(uint64_t vertexMetaDataSize, uint16_t cap, uint16_t dim) {
+    inline static BufferVertexEntry* Init(uint64_t vertexMetaDataSize,
+                                          uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim) {
         FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
-        uint64_t internalVertexSize = ALLIGNED_SIZE(ALLIGNED_SIZE(vertexMetaDataSize) +
-                                      ALLIGNED_SIZE(sizeof(ClusterHeader) + Cluster::DataBytes(false, cap, dim)));
-        uint64_t leafVertexSize = ALLIGNED_SIZE(ALLIGNED_SIZE(vertexMetaDataSize) +
-                                                ALLIGNED_SIZE(sizeof(ClusterHeader) +
-                                                              Cluster::DataBytes(true, cap, dim)));
+        uint64_t internalVertexSize = vertexMetaDataSize + Cluster::TotalBytes(false, internal_cap, dim);
+        uint64_t leafVertexSize = vertexMetaDataSize + Cluster::TotalBytes(true, leaf_cap, dim);
         bufferMgrInstance = new BufferManager(internalVertexSize, leafVertexSize);
         BufferVertexEntry* root = bufferMgrInstance->CreateNewRootEntry();
         return root;
@@ -517,11 +492,10 @@ public:
      * Note: No thread should be calling any functions from the bufferMgr the moment
      * shutdown is called or some resources may not be cleaned properly
      */
-    inline static RetStatus Shutdown() {
+    inline static void Shutdown() {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         delete bufferMgrInstance;
         bufferMgrInstance = nullptr;
-        return RetStatus::Success();
     }
 
     inline static BufferManager* GetInstance() {
@@ -582,7 +556,7 @@ public:
         DIVFTreeVertexInterface* memLoc = AllocateMemoryForVertex(newId._level);
         CHECK_NOT_NULLPTR(memLoc, LOG_TAG_BUFFER);
         /* because of the currentVersion + currentRootId pin should be 2 */
-        BufferVertexEntry* newRoot = new BufferVertexEntry(memLoc, id, 2);
+        BufferVertexEntry* newRoot = new (std::align_val_t(16)) BufferVertexEntry(memLoc, id, 2);
         newRoot->clusterLock.Lock(SX_EXCLUSIVE);
         clusterDirectory[newId._level].emplace_back(newRoot);
         newRoot->PinVersion(newRoot->currentVersion);
@@ -622,7 +596,7 @@ public:
             }
             CHECK_NOT_NULLPTR(cluster, LOG_TAG_BUFFER);
 
-            entries[i] = new BufferVertexEntry(cluster, id);
+            entries[i] = new (std::align_val_t(16)) BufferVertexEntry(cluster, id);
             entries[i]->clusterLock.Lock(SX_EXCLUSIVE);
             if (versions != nullptr) {
                 versions[i] = entries[i]->currentVersion;
@@ -633,7 +607,7 @@ public:
         bufferMgrLock.Unlock();
     }
 
-    void BatchCreateVectorEntry(size_t num_entries, BufferVectorEntry** entries) {
+    void BatchCreateVectorEntry(size_t num_entries, BufferVectorEntry** entries, bool create_update_handle = false) {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         CHECK_NOT_NULLPTR(entries, LOG_TAG_BUFFER);
         FatalAssert(num_entries > 0, LOG_TAG_BUFFER, "number of entries cannot be 0!");
@@ -646,8 +620,12 @@ public:
             id._level = VectorID::LEAF_LEVEL;
             id._creator_node_id = 0;
 
-            entries[i] = new BufferVectorEntry(id);
+            entries[i] = new (std::align_val_t(16)) BufferVectorEntry(id);
             vectorDirectory.emplace_back(entries[i]);
+
+            if (create_update_handle) {
+                CreateUpdateHandle(id);
+            }
         }
         bufferMgrLock.Unlock();
     }

@@ -301,11 +301,30 @@ inline String VectorStateToString(VectorState state) {
     }
 }
 
+/* this struct is always moved and never copied! */
 struct VectorBatch {
     VTYPE* data;
     VectorID* id;
     Version* version;
     uint16_t size;
+};
+
+/* this struct is always moved and never copied! */
+struct ConstVectorBatch {
+    const VTYPE* data;
+    const VectorID* id;
+    const Version* version;
+    const uint16_t size;
+
+    ConstVectorBatch() = default;
+    ConstVectorBatch(const ConstVectorBatch& other) = default;
+    ConstVectorBatch(ConstVectorBatch&& other) = default;
+
+    ConstVectorBatch(const VectorBatch& other) :
+        data(other.data), id(other.id), version(other.version), size(other.size) {}
+
+    ConstVectorBatch(const VTYPE* d, const VectorID* i, const Version* v, uint16_t s) :
+        data(d), id(i), version(v), size(s) {}
 };
 
 /* todo: we may need to use packed attrbite for these in the multi node setup to save network bandwidth */
@@ -350,6 +369,10 @@ public:
                ALLIGNED_SIZE(cap % block_size * (header_bytes + data_bytes));
     }
 
+    inline static size_t TotalBytes(bool is_leaf_vertex, uint16_t block_size, uint16_t cap, uint16_t dim) {
+        return ALLIGNED_SIZE(sizeof(ClusterHeader)) + DataBytes(is_leaf_vertex, block_size, cap, dim);
+    }
+
     Cluster(bool is_leaf_vertex, uint16_t block_cap, uint16_t cap, uint16_t dim, bool set_zero = true) :
             header{0, 0, 0} {
         FatalAssert(block_cap > 0, LOG_TAG_CLUSTER, "Block size must be greater than 0. block_size=%hu", block_cap);
@@ -372,7 +395,7 @@ public:
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<AddressToConst>(blocks +
+        return reinterpret_cast<AddressToConst>(ALLIGNED_PTR(blocks) +
                                                 block_number * block_bytes + block_offset * header_bytes);
     }
 
@@ -388,7 +411,7 @@ public:
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<Address>(blocks +
+        return reinterpret_cast<Address>(ALLIGNED_PTR(blocks) +
                                          block_number * block_bytes + block_offset * header_bytes);
     }
 
@@ -407,7 +430,7 @@ public:
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<const VTYPE*>(blocks +
+        return reinterpret_cast<const VTYPE*>(ALLIGNED_PTR(blocks) +
                                               block_number * block_bytes + meta_data_bytes + block_offset * data_bytes);
     }
 
@@ -426,7 +449,7 @@ public:
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<VTYPE*>(blocks +
+        return reinterpret_cast<VTYPE*>(ALLIGNED_PTR(blocks) +
                                         block_number * block_bytes + meta_data_bytes + block_offset * data_bytes);
     }
     /*

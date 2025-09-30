@@ -574,16 +574,34 @@ constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
 constexpr size_t CACHE_LINE_SIZE = 64; // Fallback to common cache line size
 #endif
 
-inline constexpr size_t ALLIGNED_SIZE(size_t size) {
+inline constexpr size_t ALLIGNED_SIZE(const size_t size) {
     return (size % CACHE_LINE_SIZE == 0) ? size : (size + (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE)));
 }
 
-inline constexpr size_t ALLIGNEMENT(size_t size) {
+inline constexpr size_t ALLIGNEMENT(const size_t size) {
     return (size % CACHE_LINE_SIZE == 0) ? 0 : (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE));
 }
 
-inline constexpr bool ALLIGNED(size_t size) {
-    return (size % CACHE_LINE_SIZE == 0);
+inline constexpr bool ALLIGNED(const void* ptr) {
+    return (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0);
+}
+
+inline constexpr bool ALLIGNED(const void* ptr, const size_t size) {
+    return (static_cast<uintptr_t>(ptr) % size == 0);
+}
+
+inline constexpr void* ALLIGNED_PTR(void* ptr) {
+    return (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ?
+            static_cast<void*>(ptr) :
+            static_cast<void*>((static_cast<uintptr_t>(ptr) +
+                                (CACHE_LINE_SIZE - (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
+}
+
+inline constexpr const void* ALLIGNED_PTR(const void* ptr) {
+    return (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ?
+            static_cast<const void*>(ptr) :
+            static_cast<const void*>((static_cast<uintptr_t>(ptr) +
+                                (CACHE_LINE_SIZE - (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
 }
 
 typedef VECTOR_TYPE VTYPE;
