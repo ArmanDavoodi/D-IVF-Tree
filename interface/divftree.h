@@ -76,7 +76,7 @@ struct DIVFTreeAttributes {
 
 class DIVFTreeVertexInterface {
 public:
-    DIVFTreeVertexInterface() = delete;
+    DIVFTreeVertexInterface() = default;
     DIVFTreeVertexInterface(DIVFTreeVertexInterface&) = delete;
     DIVFTreeVertexInterface(const DIVFTreeVertexInterface&) = delete;
     DIVFTreeVertexInterface(DIVFTreeVertexInterface&&) = delete;
@@ -84,14 +84,13 @@ public:
 
     virtual void Unpin() = 0;
     virtual void MarkForRecycle(uint64_t pinCount) = 0;
-    virtual Cluster& GetCluster() = 0;
-
-    virtual const DIVFTreeVertexAttributes& GetAttributes() const = 0;
 
     virtual RetStatus BatchInsert(const ConstVectorBatch& batch, uint16_t marked_for_update = INVALID_OFFSET) = 0;
     virtual RetStatus ChangeVectorState(VectorID target, uint16_t targetOffset,
-                                       VectorState& expectedState, VectorState finalState,
-                                       Version* version = nullptr) = 0;
+                                        VectorState& expectedState, VectorState finalState,
+                                        Version* version = nullptr) = 0;
+    virtual RetStatus ChangeVectorState(Address meta, VectorState& expectedState, VectorState finalState,
+                                        Version* version = nullptr) = 0;
     virtual void Search(const VTYPE* query, size_t k, std::vector<ANNVectorInfo>& neighbours,
                      std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) = 0;
     // virtual String ToString(bool detailed = false) const = 0;

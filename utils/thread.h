@@ -183,9 +183,19 @@ public:
                     LOG_TAG_LOCK, "Lock %p is held by thread %lu in mode %hhu", lockAddr, _id, (uint8_t)(mode));
 #endif
     }
+
+    /* todo: check if it works better than a random number generator */
+    inline bool RandomizedBinary(size_t target, size_t base = 100) {
+        FatalAssert(base >= target, LOG_TAG_BASIC, "base cannot be less than target!");
+        ++rand_num;
+        return (rand_num % base < target);
+    }
 protected:
     // Thread implementation details
     DIVFThreadID _id;
+
+    // for randomized algs
+    size_t rand_num = 0;
 #ifdef LOCK_DEBUG
     std::unordered_set<void*> heldShared;
     std::unordered_set<void*> heldExclusive;

@@ -42,6 +42,19 @@
 
 namespace divftree {
 
+struct MigrationInfo {
+    VectorID id;
+    uint16_t offset;
+    Version version;
+
+    MigrationInfo() = default;
+    MigrationInfo(VectorID vec_id, uint16_t vec_off, Version ver = 0) : id(vec_id), offset(vec_off), version(ver) {}
+
+    inline bool operator<(const MigrationInfo& other) const {
+        return id < other.id;
+    }
+};
+
 class DIVFTreeVertex : public DIVFTreeVertexInterface {
 public:
     DIVFTreeVertex() = delete;
@@ -256,6 +269,64 @@ public:
         }
 
         if (target.IsCentroid()) {
+            if (finalState == VECTOR_STATE_INVALID) {
+                /* deletion */
+                /* todo: check target should be locked in exclusive mode! */
+                FatalAssert((*state).load(std::memory_order_acquire) == VECTOR_STATE_VALID, LOG_TAG_DIVFTREE_VERTEX,
+                            "mismatch state!");
+                state->store(finalState, std::memory_order_release);
+                return RetStatus::Success();
+            } else {
+                /* todo: check target should be locked in shared mode! */
+                FatalAssert((*state).load(std::memory_order_acquire) != VECTOR_STATE_INVALID, LOG_TAG_DIVFTREE_VERTEX,
+                            "mismatch state!");
+            }
+        }
+
+        return (state->compare_exchange_strong(expectedState, finalState) ?
+                RetStatus::Success() :
+                RetStatus{.stat=RetStatus::FAILED_TO_CAS_VECTOR_STATE, .message=nullptr});
+    }
+
+    /*
+     * if id.level is vertex/cluster and targetState is Invalid then the cluster should be locked in exclusive mode
+     * otherwise if id.level is vertex/cluster then target should be locked in shared mode
+     */
+    inline RetStatus ChangeVectorState(Address meta, VectorState& expectedState, VectorState finalState,
+                                       Version* version = nullptr) override {
+        FatalAssert(expectedState == VECTOR_STATE_VALID || expectedState == VECTOR_STATE_MIGRATED,
+                    LOG_TAG_DIVFTREE_VERTEX, "expected state can be either VALID or MIGRATED");
+        FatalAssert(finalState == VECTOR_STATE_VALID || finalState == VECTOR_STATE_MIGRATED ||
+                    finalState == VECTOR_STATE_INVALID, LOG_TAG_DIVFTREE_VERTEX,
+                    "final state can only be valid, invalid or migrated!");
+        FatalAssert((expectedState == VECTOR_STATE_MIGRATED) == (finalState == VECTOR_STATE_VALID),
+                    LOG_TAG_DIVFTREE_VERTEX, "excpected state is migrated is migrated if and only "
+                    "if final state is valid. this can only happen when a migration fails and "
+                    "we want to revert our state back to valid");
+
+        VectorID* id = nullptr;
+        std::atomic<VectorState>* state = nullptr;
+        if (attr.centroid_id.IsLeaf()) {
+            VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
+            id = &(vmd->id);
+            state = &(vmd->state);
+        } else {
+            CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
+            id = &(vmd->id);
+            if (version != nullptr) {
+                *version = vmd->version;
+            }
+            state = &(vmd->state);
+        }
+
+        if (expectedState == VECTOR_STATE_MIGRATED) {
+            FatalAssert((*state).load(std::memory_order_acquire) == VECTOR_STATE_MIGRATED, LOG_TAG_DIVFTREE_VERTEX,
+                        "mismatch state!");
+            state->store(finalState, std::memory_order_release);
+            return RetStatus::Success();
+        }
+
+        if (attr.centroid_id.IsInternalVertex()) {
             if (finalState == VECTOR_STATE_INVALID) {
                 /* deletion */
                 /* todo: check target should be locked in exclusive mode! */
@@ -509,13 +580,11 @@ public:
                 bufferMgr->ReleaseBufferEntryIfNotNull(leaf_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 continue;
             }
+            /* todo: maybe we can read the parent and only go one layer up instead of rereading from root */
         } while(!BatchInsertInto(leaf_entry, batch, true).IsOK());
 
         return rs;
     }
-
-    // BatchInsertInto(BufferVertexEntry* container_entry, const ConstVectorBatch& batch, bool releaseEntry,
-    //                           uint16_t marked_for_update = INVALID_OFFSET
 
     /* todo: for now since it is single node, the create_completion_notification here does not do anything and returning
        from this function indicates that the vector is deleted. But we need to change
@@ -534,7 +603,7 @@ public:
         VectorLocation loc;
         BufferVertexEntry* parent = nullptr;
         do {
-            parent = entry->ReadParent(loc);
+            parent = entry->ReadParentEntry(loc);
             if (parent == nullptr) {
                 return RetStatus{.stat=RetStatus::VECTOR_NOT_FOUND,
                                 .message="Vector is either deleted or is not yet inserted."};
@@ -1021,7 +1090,7 @@ protected:
         BufferVertexEntry* parent = nullptr;
         while (true) {
             VectorLocation currentLocation = INVALID_VECTOR_LOCATION;
-            parent = container_entry->ReadParent(currentLocation);
+            parent = container_entry->ReadParentEntry(currentLocation);
             if (parent == nullptr) {
                 FatalAssert(currentLocation == INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
                             "null parent with valid location!");
@@ -1250,7 +1319,7 @@ protected:
 
         VectorLocation loc = bufferMgr->LoadCurrentVectorLocation(container_entry->centroidMeta.selfId);
         BufferVertexEntry* parent = nullptr;
-        if ((loc == INVALID_VECTOR_LOCATION) || ((parent = container_entry->ReadParent(loc)) == nullptr)) {
+        if ((loc == INVALID_VECTOR_LOCATION) || ((parent = container_entry->ReadParentEntry(loc)) == nullptr)) {
             FatalAssert((parent == nullptr) && (loc == INVALID_VECTOR_LOCATION), LOG_TAG_DIVFTREE,
                         "mismatch between parent ptr and location");
             PruneAtRootAndRelease(container_entry);
@@ -1382,56 +1451,10 @@ protected:
         return rs;
     }
 
-    inline RetStatus ReadParentAndCheckLocation(VectorID target, BufferVertexEntry* targetEntry,
-                                                const VectorLocation& expTargetLocation,
-                                                VectorLocation& currentTargetLocation, BufferVertexEntry** entries,
-                                                uint8_t& num_entries) {
-        BufferVertexEntry*& parentEntry = entries[3 - num_entries - 1];
-        BufferManager* bufferMgr = BufferManager::GetInstance();
-        RetStatus rs = RetStatus::Success();
-
-        if (targetEntry != nullptr) {
-            threadSelf->SanityCheckLockHeldByMe(targetEntry->clusterLock);
-            parentEntry = targetEntry->ReadParent(currentTargetLocation);
-            FatalAssert((parentEntry == nullptr) == (currentTargetLocation == INVALID_VECTOR_LOCATION),
-                        LOG_TAG_DIVFTREE, "mismatch location and parentPtr");
-            if (parentEntry == nullptr) {
-                /* target is the new root */
-                rs = RetStatus{.stat=RetStatus::TARGET_IS_ROOT, .message=nullptr};
-            }
-        } else {
-            BufferVectorEntry* entry = bufferMgr->GetVectorEntry(target);
-            CHECK_NOT_NULLPTR(entry, LOG_TAG_DIVFTREE);
-            parentEntry = entry->ReadParent(currentTargetLocation);
-            FatalAssert((parentEntry == nullptr) == (currentTargetLocation == INVALID_VECTOR_LOCATION),
-                        LOG_TAG_DIVFTREE, "mismatch location and parentPtr");
-            if (parentEntry == nullptr) {
-                /* the vector is deleted */
-                rs = RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
-            }
-        }
-
-        if (rs.IsOK()) {
-            CHECK_NOT_NULLPTR(parentEntry, LOG_TAG_DIVFTREE);
-            ++num_entries;
-            if ((currentTargetLocation.containerId != expTargetLocation.containerId) ||
-                (currentTargetLocation.containerVersion != expTargetLocation.containerVersion)) {
-                /* this means that either the parent had a major update that was not compaction or we were migrated */
-                rs = RetStatus{.stat=RetStatus::TARGET_UPDATED, .message=nullptr};
-            }
-        }
-
-        if (!rs.IsOK()) {
-            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-        }
-
-        return rs;
-    }
-
     inline RetStatus ReadAndCheckVersion(VectorID containerId, Version containerVersion,
-                                         BufferVertexEntry** entries, uint8_t& num_entries, LockMode mode) {
-        BufferVertexEntry*& containerEntry = entries[3 - num_entries - 1];
+                                         BufferVertexEntry** entries, uint16_t max_entries, uint16_t& num_entries,
+                                         LockMode mode) {
+        BufferVertexEntry*& containerEntry = entries[max_entries - num_entries - 1];
         BufferManager* bufferMgr = BufferManager::GetInstance();
         RetStatus rs = RetStatus::Success();
 
@@ -1452,7 +1475,7 @@ protected:
         }
 
         if (!rs.IsOK()) {
-            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
         }
 
@@ -1461,39 +1484,43 @@ protected:
 
     /* Todo: recheck to see if everything works fine */
     /* todo: need to refactor */
-    RetStatus Migrate(VectorLocation targetLocation,
-                      VectorID newContainerId, Version newContainerVersion,
-                      VectorID target, Version targetVersion = 0) {
-        CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
-        FatalAssert(targetLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE, "Invalid location");
-        CHECK_VECTORID_IS_CENTROID(targetLocation.containerId, LOG_TAG_DIVFTREE);
-        CHECK_VECTORID_IS_VALID(newContainerId, LOG_TAG_DIVFTREE);
-        CHECK_VECTORID_IS_CENTROID(newContainerId, LOG_TAG_DIVFTREE);
-        FatalAssert(newContainerId != targetLocation.containerId, LOG_TAG_DIVFTREE,
+    RetStatus Migrate(std::vector<MigrationInfo> targetBatch,
+                      VectorID src_id, VectorID dest_id,
+                      Version src_ver, Version dest_ver) {
+        FatalAssert(!targetBatch.empty(), LOG_TAG_DIVFTREE, "Empty batch!");
+        CHECK_VECTORID_IS_VALID(src_id, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(src_id, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_VALID(dest_id, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(dest_id, LOG_TAG_DIVFTREE);
+        FatalAssert(src_id != dest_id, LOG_TAG_DIVFTREE,
                     "containers should not be the same!");
-        FatalAssert(newContainerId._level == targetLocation.containerId._level, LOG_TAG_DIVFTREE,
+        FatalAssert(src_id._level == dest_id._level, LOG_TAG_DIVFTREE,
                     "containers should be on the same level!");
-        FatalAssert(target._level + 1 == targetLocation.containerId._level, LOG_TAG_DIVFTREE,
-                    "level mismatch between target and containers");
 
         RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
-        BufferVertexEntry* entries[3];
-        VectorLocation currentTargetLocation = INVALID_VECTOR_LOCATION;
-        uint8_t num_entries = 0;
-        BufferVertexEntry* dummy = nullptr;
-        BufferVertexEntry** targetEntry;
-        BufferVertexEntry** oldContainerEntry;
-        BufferVertexEntry** newContainerEntry;
-        if (target.IsCentroid()) {
-            rs = ReadAndCheckVersion(target, targetVersion, entries, num_entries, SX_SHARED);
-            if (!rs.IsOK()) {
-                return rs;
+        uint16_t max_entries = 2;
+        if (src_id.IsInternalVertex()) {
+            max_entries += targetBatch.size();
+        }
+        std::vector<BufferVertexEntry*> entries;
+        BufferVertexEntry** src_entry;
+        BufferVertexEntry** dest_entry;
+        entries.resize(max_entries, nullptr);
+        uint16_t num_entries = 0;
+
+        if (src_id.IsInternalVertex()) {
+            for (size_t i = 0; i < targetBatch.size(); ++i) {
+                FatalAssert((i == 0) || (targetBatch[i - 1].id <= targetBatch[i].id), LOG_TAG_DIVFTREE,
+                            "target batch should be sorder in the increasing order of IDs");
+                FatalAssert(targetBatch[i].id._level + 1 == src_id._level, LOG_TAG_DIVFTREE, "level mismatch!");
+                rs = ReadAndCheckVersion(targetBatch[i].id, targetBatch[i].version, &entries[0], max_entries,
+                                         num_entries, SX_SHARED);
+                if (!rs.IsOK()) {
+                    return rs;
+                }
             }
-            targetEntry = &entries[3 - num_entries];
-        } else {
-            targetEntry = &dummy;
         }
 
         /* Todo: if we have version logs, maybe we can use that to handle migration when there is an update */
@@ -1501,89 +1528,331 @@ protected:
         /* Todo: collect stats on the failure percentages, the reason and the target level */
 
         /* We should first lock the child and then the parents in order of their values to avoid deadlocks! */
-        if (targetLocation.containerId < newContainerId) {
-            rs = ReadParentAndCheckLocation(target, (*targetEntry), targetLocation, currentTargetLocation, entries,
-                                            num_entries);
+        if (src_id <= dest_id) {
+            rs = ReadAndCheckVersion(src_id, src_ver, &entries[0], max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
                 return rs;
             }
 
-            oldContainerEntry = &entries[3 - num_entries];
+            src_entry = &entries[max_entries - num_entries];
 
-            rs = ReadAndCheckVersion(newContainerId, newContainerVersion, entries, num_entries, SX_SHARED);
+            rs = ReadAndCheckVersion(dest_id, dest_ver, &entries[0], max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
                 return rs;
             }
-            newContainerEntry = &entries[3 - num_entries];
+            dest_entry = &entries[max_entries - num_entries];
         } else {
-            rs = ReadAndCheckVersion(newContainerId, newContainerVersion, entries, num_entries, SX_SHARED);
+            rs = ReadAndCheckVersion(dest_id, dest_ver, &entries[0], max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
                 return rs;
             }
-            newContainerEntry = &entries[3 - num_entries];
+            dest_entry = &entries[max_entries - num_entries];
 
-            rs = ReadParentAndCheckLocation(target, (*targetEntry), targetLocation, currentTargetLocation, entries,
-                                            num_entries);
+            rs = ReadAndCheckVersion(src_id, src_ver, &entries[0], max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
                 return rs;
             }
-            oldContainerEntry = &entries[3 - num_entries];
+
+            src_entry = &entries[max_entries - num_entries];
         }
 
-        DIVFTreeVertex* oldContainer = static_cast<DIVFTreeVertex*>((*oldContainerEntry)->ReadLatestVersion(false));
-        CHECK_NOT_NULLPTR(oldContainer, LOG_TAG_DIVFTREE);
-
-        VectorState expState = VECTOR_STATE_VALID;
-        rs = oldContainer->ChangeVectorState(target, currentTargetLocation.entryOffset,
-                                             expState, VECTOR_STATE_MIGRATED);
-        if (!rs.IsOK()) {
-            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-            FatalAssert((*targetEntry) == nullptr, LOG_TAG_DIVFTREE,
-                        "if the target is a centroid the migration should not fail!");
-            if (expState == VECTOR_STATE_MIGRATED) {
-                rs = RetStatus{.stat=RetStatus::TARGET_MIGRATED, .message=nullptr};
-            } else if (expState == VECTOR_STATE_INVALID) {
-                rs = RetStatus{.stat=RetStatus::TARGET_DELETED, .message=nullptr};
-            } else {
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here!");
-                rs = RetStatus{.stat=RetStatus::FAIL, .message=nullptr};
-            }
-            return rs;
-        }
+        DIVFTreeVertex* src_cluster = static_cast<DIVFTreeVertex*>((*src_entry)->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(src_cluster, LOG_TAG_DIVFTREE);
+        VTYPE* data = src_cluster->cluster.Data(0, src_id.IsLeaf(), src_cluster->attr.block_size,
+                                                    src_cluster->attr.cap, attr.dimension);
+        void* meta = src_cluster->cluster.MetaData(0, src_id.IsLeaf(), src_cluster->attr.block_size,
+                                                   src_cluster->attr.cap, attr.dimension);
+        FatalAssert(src_cluster->cluster.NumBlocks(src_cluster->attr.block_size, src_cluster->attr.cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "cannot handle more than 1 block!");
 
         VectorBatch batch;
-        batch.size = 1;
-        batch.id = new VectorID;
-        *(batch.id) = target;
-        batch.data = oldContainer->cluster.Data(currentTargetLocation.entryOffset, ((*targetEntry) == nullptr),
-                                                oldContainer->attr.block_size, oldContainer->attr.cap, attr.dimension);
-        if ((*targetEntry) == nullptr) {
-            batch.version = new Version;
-            *(batch.version) = targetVersion;
+        batch.size = 0;
+        batch.data = new VTYPE[targetBatch.size()];
+        batch.id = new VectorID[targetBatch.size()];
+        uint16_t* migrated_offsets = new uint16_t[targetBatch.size()];
+
+        if (src_id.IsLeaf()) {
+            batch.version = new Version[targetBatch.size()];
         }
-        rs = BatchInsertInto((*newContainerEntry), batch, true);
-        *newContainerEntry = nullptr;
-        delete batch.id;
-        batch.id = nullptr;
-        if ((*targetEntry) == nullptr) {
-            delete batch.version;
-            batch.version = nullptr;
+        bool compacted = false;
+        for (size_t i = 0; i < targetBatch.size(); ++i) {
+            if (compacted) {
+                VectorLocation cur_loc = bufferMgr->LoadCurrentVectorLocation(targetBatch[i].id);
+                if (cur_loc.containerId != src_id) {
+                    continue;
+                }
+
+                FatalAssert(cur_loc.containerVersion == src_ver, LOG_TAG_DIVFTREE,
+                            "Eventhough the src version is the same as what was used container version has changed!");
+                targetBatch[i].offset = cur_loc.entryOffset;
+            }
+
+            if (src_id.IsLeaf()) {
+                VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
+                if (vmd[targetBatch[i].offset].id != targetBatch[i].id) {
+                    /* There was a compaction */
+                    FatalAssert(!compacted, LOG_TAG_DIVFTREE, "Already checked for compaction!");
+                    compacted = true;
+                    --i;
+                    continue;
+                }
+
+                VectorState excp_state = VECTOR_STATE_VALID;
+                rs = src_cluster->ChangeVectorState(&vmd[targetBatch[i].offset],
+                                                    excp_state, VECTOR_STATE_MIGRATED);
+                if (!rs.IsOK()) {
+                    continue;
+                }
+
+                memcpy(&batch.data[(size_t)batch.size * (size_t)attr.dimension],
+                       &data[(size_t)attr.dimension * (size_t)targetBatch[i].offset],
+                       sizeof(VTYPE) * (size_t)attr.dimension);
+                batch.id[batch.size] = vmd[targetBatch[i].offset].id;
+                migrated_offsets[batch.size] = targetBatch[i].offset;
+                ++batch.size;
+            } else {
+                CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
+                if (vmd[targetBatch[i].offset].id != targetBatch[i].id) {
+                    /* There was a compaction */
+                    compacted = true;
+                    --i;
+                    continue;
+                }
+
+                VectorState excp_state = VECTOR_STATE_VALID;
+                rs = src_cluster->ChangeVectorState(&vmd[targetBatch[i].offset],
+                                                    excp_state, VECTOR_STATE_MIGRATED);
+                if (!rs.IsOK()) {
+                    continue;
+                }
+
+                memcpy(&batch.data[(size_t)batch.size * (size_t)attr.dimension],
+                       &data[(size_t)attr.dimension * (size_t)targetBatch[i].offset],
+                       sizeof(VTYPE) * (size_t)attr.dimension);
+                batch.id[batch.size] = vmd[targetBatch[i].offset].id;
+                batch.version[batch.size] = vmd[targetBatch[i].offset].version;
+                migrated_offsets[batch.size] = targetBatch[i].offset;
+                ++batch.size;
+            }
         }
+
+        /* todo: we may be able to avoid this extra copy */
+        rs = BatchInsertInto((*dest_entry), batch, true);
+        *dest_entry = nullptr;
+        delete[] batch.data;
+        batch.data = nullptr;
+
         if (!rs.IsOK()) {
-            VectorState expState = VECTOR_STATE_MIGRATED;
-            rs = oldContainer->ChangeVectorState(target, currentTargetLocation.entryOffset,
-                                                 expState, VECTOR_STATE_VALID);
-            FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "this should not fail!");
+            for (uint16_t i = 0; i < batch.size; ++i) {
+                VectorState expState = VECTOR_STATE_MIGRATED;
+                rs = src_cluster->ChangeVectorState(batch.id[i], migrated_offsets[i],
+                                                    expState, VECTOR_STATE_VALID);
+                FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "this should not fail!");
+            }
             rs = RetStatus{.stat=RetStatus::NEW_CONTAINER_UPDATED, .message=nullptr};
-            bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                            ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
         } else {
-            oldContainer->cluster.header.num_deleted.fetch_add(1);
-            PruneIfNeededAndRelease(*oldContainerEntry);
+            src_cluster->cluster.header.num_deleted.fetch_add(batch.size);
+            BufferVertexEntry* src_entry_cpy = *src_entry;
+            *src_entry = nullptr;
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            PruneIfNeededAndRelease(src_entry_cpy);
+        }
+
+        delete[] migrated_offsets;
+        migrated_offsets = nullptr;
+        delete[] batch.id;
+        batch.id = nullptr;
+        if (src_id.IsInternalVertex()) {
+            delete[] batch.version;
+            batch.version = nullptr;
         }
 
         return rs;
+    }
+
+    void MigrationCheck(VectorID first_cluster, VectorID second_cluster) {
+        CHECK_VECTORID_IS_VALID(first_cluster, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(first_cluster, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_VALID(second_cluster, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(second_cluster, LOG_TAG_DIVFTREE);
+        FatalAssert(first_cluster != second_cluster, LOG_TAG_DIVFTREE,
+                    "clusters should be different!");
+        FatalAssert(first_cluster._level == second_cluster._level, LOG_TAG_DIVFTREE,
+                    "clusters should be on the same level!");
+
+        RetStatus rs = RetStatus::Success();
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+        constexpr uint8_t max_entries = 2;
+        BufferVertexEntry* entries[max_entries];
+        DIVFTreeVertex* clusters[max_entries];
+        DIVFTreeVertex* parents[max_entries];
+        VTYPE* centroidData[max_entries];
+        uint16_t visible_size[max_entries];
+        Version versions[max_entries];
+        VectorID ids[max_entries];
+        uint8_t num_entries = 0;
+
+        if (first_cluster > second_cluster) {
+            std::swap(first_cluster, second_cluster);
+        }
+        ids[1] = first_cluster;
+        ids[0] = second_cluster;
+
+        entries[1] = bufferMgr->ReadBufferEntry(ids[1], SX_SHARED);
+        if (entries[1] == nullptr) {
+            return;
+        }
+        ++num_entries;
+        entries[0] = bufferMgr->ReadBufferEntry(ids[0], SX_SHARED);
+        if (entries[0] == nullptr) {
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+        ++num_entries;
+
+        versions[1] = entries[1]->currentVersion;
+        versions[0] = entries[0]->currentVersion;
+
+        clusters[1] = static_cast<DIVFTreeVertex*>(entries[1]->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(clusters[1], LOG_TAG_DIVFTREE);
+        clusters[0] = static_cast<DIVFTreeVertex*>(entries[0]->ReadLatestVersion(false));
+        CHECK_NOT_NULLPTR(clusters[0], LOG_TAG_DIVFTREE);
+
+        VectorLocation loc;
+        parents[1] = static_cast<DIVFTreeVertex*>(entries[1]->centroidMeta.ReadAndPinParent(loc));
+        if (parents[1] == nullptr) {
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+        FatalAssert(
+            (static_cast<CentroidMetaData*>(parents[1]->
+                cluster.MetaData(loc.entryOffset, false, parents[1]->attr.block_size,
+                                 parents[1]->attr.cap, attr.dimension))->id == ids[1]) &&
+            (static_cast<CentroidMetaData*>(parents[1]->
+                cluster.MetaData(loc.entryOffset, false, parents[1]->attr.block_size,
+                                 parents[1]->attr.cap, attr.dimension))->version == versions[1]),
+            LOG_TAG_DIVFTREE,
+            "Invalid centroid location returned!"
+        );
+
+        // if ((static_cast<CentroidMetaData*>(parents[1]->
+        //         cluster.MetaData(loc.entryOffset, false, parents[1]->attr.block_size,
+        //                          parents[1]->attr.cap, attr.dimension))->id != ids[1])) {
+        //     parents[1]->Unpin();
+        //     bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+        //                                        ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        //     return;
+
+        // }
+
+        parents[0] = static_cast<DIVFTreeVertex*>(entries[0]->centroidMeta.ReadAndPinParent(loc));
+        if (parents[0] == nullptr) {
+            parents[1]->Unpin();
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+
+        FatalAssert(
+            static_cast<CentroidMetaData*>(parents[0]->
+                cluster.MetaData(loc.entryOffset, false, parents[0]->attr.block_size,
+                                 parents[0]->attr.cap, attr.dimension))->id == ids[0] &&
+            (static_cast<CentroidMetaData*>(parents[0]->
+                cluster.MetaData(loc.entryOffset, false, parents[0]->attr.block_size,
+                                 parents[0]->attr.cap, attr.dimension))->version == versions[0]),
+            LOG_TAG_DIVFTREE,
+            "Invalid centroid location returned!"
+        );
+
+        // if ((static_cast<CentroidMetaData*>(parents[0]->
+        //         cluster.MetaData(loc.entryOffset, false, parents[0]->attr.block_size,
+        //                          parents[0]->attr.cap, attr.dimension))->id != ids[0])) {
+        //     parents[1]->Unpin();
+        //     parents[0]->Unpin();
+        //     bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+        //                                        ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        //     return;
+
+        // }
+
+        std::vector<MigrationInfo> migration_batch[max_entries];
+        for (uint8_t cn = 0; cn < max_entries; ++cn) {
+            centroidData[cn] = parents[cn]->cluster.Data(loc.entryOffset, false, parents[cn]->attr.block_size,
+                                                       parents[cn]->attr.cap, attr.dimension);
+            visible_size[cn] = clusters[cn]->cluster.header.visible_size.load(std::memory_order_acquire);
+            FatalAssert(visible_size[cn] > 0, LOG_TAG_DIVFTREE, "size should be greater than 0!");
+            migration_batch[cn].reserve(visible_size[cn]);
+        }
+
+        FatalAssert(clusters[0]->cluster.NumBlocks(clusters[0]->attr.block_size, clusters[0]->attr.cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "cannot handle more than 1 block!");
+
+        for (int cn = 0; cn < max_entries; ++cn) {
+            VTYPE* data = clusters[cn]->cluster.Data(0, ids[1].IsLeaf(), clusters[cn]->attr.block_size,
+                                                     clusters[cn]->attr.cap, attr.dimension);
+            void* meta = clusters[cn]->cluster.MetaData(0, ids[1].IsLeaf(), clusters[cn]->attr.block_size,
+                                                        clusters[cn]->attr.cap, attr.dimension);
+            std::unordered_set<VectorID, VectorIDHash> seen;
+            for (uint16_t i = visible_size[cn] - 1; i != UINT16_MAX; --i) {
+                if (ids[1].IsLeaf()) {
+                    VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
+                    if ((seen.find(vmd[i].id) != seen.end()) ||
+                        (vmd[i].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID)) {
+                        continue;
+                    }
+                    seen.emplace(vmd[i].id);
+                    /* todo: is it worth the additional memory usage to
+                    cache the distance of each vector to it's centroid? */
+                    if (MoreSimilar(Distance(&data[(size_t)i * (size_t)attr.dimension], centroidData[1 - cn],
+                                             attr.dimension, attr.distanceAlg),
+                                    Distance(&data[(size_t)i * (size_t)attr.dimension], centroidData[cn],
+                                             attr.dimension, attr.distanceAlg),
+                                    attr.distanceAlg)) {
+                        migration_batch[cn].emplace_back(vmd[i].id, i);
+                    }
+                } else {
+                    CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
+                    if ((seen.find(vmd[i].id) != seen.end()) ||
+                        (vmd[i].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID)) {
+                        continue;
+                    }
+                    seen.emplace(vmd[i].id);
+                    /* todo: is it worth the additional memory usage to
+                    cache the distance of each vector to it's centroid? */
+                    if (MoreSimilar(Distance(&data[(size_t)i * (size_t)attr.dimension], centroidData[1 - cn],
+                                             attr.dimension, attr.distanceAlg),
+                                    Distance(&data[(size_t)i * (size_t)attr.dimension], centroidData[cn],
+                                             attr.dimension, attr.distanceAlg),
+                                    attr.distanceAlg)) {
+                        migration_batch[cn].emplace_back(vmd[i].id, i, vmd[i].version);
+                    }
+                }
+            }
+
+            if (ids[1].IsInternalVertex()) {
+                std::sort(migration_batch[cn].begin(), migration_batch[cn].end());
+            }
+            seen.clear();
+            parents[cn]->Unpin();
+        }
+
+        bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                           ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+
+        /* todo: have to change for multi ndoe setup */
+        if (threadSelf->RandomizedBinary(1, 2)) {
+            Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1]);
+            Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0]);
+        } else {
+            Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0]);
+            Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1]);
+        }
     }
 
     /* todo: need to refactor */
@@ -1601,8 +1870,9 @@ protected:
         RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
-        BufferVertexEntry* entries[2];
-        uint8_t num_entries = 0;
+        constexpr uint16_t max_entries = 2;
+        BufferVertexEntry* entries[max_entries];
+        uint16_t num_entries = 0;
         BufferVertexEntry** srcEntry;
         BufferVertexEntry** destEntry;
         uint16_t reservedSize = 0;
@@ -1615,11 +1885,11 @@ protected:
 
         /* We should first lock the child and then the parents in order of their values to avoid deadlocks! */
         if (srcId < destId) {
-            rs = ReadAndCheckVersion(srcId, srcVersion, entries, num_entries, SX_EXCLUSIVE);
+            rs = ReadAndCheckVersion(srcId, srcVersion, entries, max_entries, num_entries, SX_EXCLUSIVE);
             if (!rs.IsOK()) {
                 return rs;
             }
-            srcEntry = &entries[3 - num_entries];
+            srcEntry = &entries[max_entries - num_entries];
             srcCluster = static_cast<DIVFTreeVertex*>((*srcEntry)->ReadLatestVersion(false));
             CHECK_NOT_NULLPTR(srcCluster, LOG_TAG_DIVFTREE);
             reservedSize = srcCluster->cluster.header.reserved_size.load(std::memory_order_relaxed);
@@ -1630,29 +1900,29 @@ protected:
             /* size should not be 0 because the one who 0ed the size will also delete the cluster! */
             totalSize = reservedSize - srcCluster->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if (totalSize >= srcCluster->attr.min_size) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+                bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                    ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
             }
 
-            rs = ReadAndCheckVersion(destId, destVersion, entries, num_entries, SX_SHARED);
+            rs = ReadAndCheckVersion(destId, destVersion, entries, max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
                 return rs;
             }
-            destEntry = &entries[3 - num_entries];
+            destEntry = &entries[max_entries - num_entries];
         } else {
-            rs = ReadAndCheckVersion(destId, destVersion, entries, num_entries, SX_SHARED);
+            rs = ReadAndCheckVersion(destId, destVersion, entries, max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
                 return rs;
             }
-            destEntry = &entries[3 - num_entries];
+            destEntry = &entries[max_entries - num_entries];
 
-            rs = ReadAndCheckVersion(srcId, srcVersion, entries, num_entries, SX_EXCLUSIVE);
+            rs = ReadAndCheckVersion(srcId, srcVersion, entries, max_entries, num_entries, SX_EXCLUSIVE);
             if (!rs.IsOK()) {
                 return rs;
             }
 
-            srcEntry = &entries[3 - num_entries];
+            srcEntry = &entries[max_entries - num_entries];
             srcCluster = static_cast<DIVFTreeVertex*>((*srcEntry)->ReadLatestVersion(false));
             CHECK_NOT_NULLPTR(srcCluster, LOG_TAG_DIVFTREE);
             reservedSize = srcCluster->cluster.header.reserved_size.load(std::memory_order_relaxed);
@@ -1663,7 +1933,7 @@ protected:
             /* size should not be 0 because the one who 0ed the size will also delete the cluster! */
             totalSize = reservedSize - srcCluster->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if (totalSize >= srcCluster->attr.min_size) {
-                bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+                bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                    ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
             }
@@ -1689,6 +1959,7 @@ protected:
         for (uint16_t offset = 0; offset < reservedSize; ++offset) {
             FatalAssert(i < totalSize, LOG_TAG_DIVFTREE, "more elements than excpected!");
             if (is_leaf) {
+                /* todo: use new API for changestate */
                 VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
                 if (vmd[offset].state.load(std::memory_order_relaxed) == VECTOR_STATE_VALID) {
                     vmd[offset].state.store(VECTOR_STATE_MIGRATED, std::memory_order_release);
@@ -1745,7 +2016,7 @@ protected:
             }
         }
 
-        bufferMgr->ReleaseEntriesIfNotNull(&entries[3 - num_entries], num_entries,
+        bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                            ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
         delete[] batch.data;
         if (is_leaf) {

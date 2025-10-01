@@ -23,6 +23,11 @@ union alignas(16) VectorLocation {
     };
     __int128_t raw;
 
+    inline VectorLocation& operator=(const VectorLocation& other) {
+        raw = other.raw;
+        return *this;
+    }
+
     inline bool operator==(const VectorLocation& other) {
         return raw == other.raw;
     }
@@ -102,7 +107,7 @@ struct BufferVectorEntry {
      * If self is a centroid, it is recomended to use the BufferVertex function!
      *  Also, if this is a centroid, it should be locked in X mode.
      */
-    BufferVertexEntry* ReadParent(VectorLocation& currentLocation) {
+    BufferVertexEntry* ReadParentEntry(VectorLocation& currentLocation) {
         BufferManager* bufferMgr = BufferMgr::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_BUFFER);
         currentLocation = INVALID_VECTOR_LOCATION;
@@ -110,18 +115,18 @@ struct BufferVectorEntry {
             return nullptr;
         }
 
-        BufferVertexEntry* parent = nullptr
+        BufferVertexEntry* parent = nullptr;
         while (true) {
             currentLocation = INVALID_VECTOR_LOCATION;
-            VectorLocation location = location.Load();
-            if (location == INVALID_VECTOR_LOCATION) {
+            VectorLocation expLocation = location.Load();
+            if (expLocation == INVALID_VECTOR_LOCATION) {
                 /* this means that we should have become the new root! */
                 FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
                             "if location is invalid and we are a centroid we have to be the root!");
                 return nullptr;
             }
 
-            parent = bufferMgr->ReadBufferEntry(location.containerId, SX_SHARED);
+            parent = bufferMgr->ReadBufferEntry(expLocation.containerId, SX_SHARED);
             currentLocation = location.Load();
             if (currentLocation == INVALID_VECTOR_LOCATION) {
                 /* this means that we should have become the new root! */
@@ -134,9 +139,9 @@ struct BufferVectorEntry {
                 return nullptr;
             }
 
-            if (currentLocation != location) {
-                if ((parent != nullptr) && (currentLocation.containerId == location.containerId) &&
-                    (currentLocation.containerVersion == location.containerVersion)) {
+            if (currentLocation != expLocation) {
+                if ((parent != nullptr) && (currentLocation.containerId == expLocation.containerId) &&
+                    (currentLocation.containerVersion == expLocation.containerVersion)) {
                     /* This just means that there was a compaction and out offset has changed */
                     break
                 }
@@ -173,6 +178,41 @@ struct BufferVectorEntry {
             }
         )
         return parent;
+    }
+
+    DIVFTreeVertexInterface* ReadAndPinParent(VectorLocation& currentLocation) {
+        BufferManager* bufferMgr = BufferMgr::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_BUFFER);
+        currentLocation = INVALID_VECTOR_LOCATION;
+        if (selfId == bufferMgr->GetCurrentRootId()) {
+            return nullptr;
+        }
+
+        DIVFTreeVertexInterface* parent = nullptr;
+        while (true) {
+            VectorLocation excpectedLocation = location.Load();
+            if (excpectedLocation == INVALID_VECTOR_LOCATION) {
+                /* this means that we should have become the new root! */
+                FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
+                            "if location is invalid and we are a centroid we have to be the root!");
+                return nullptr;
+            }
+
+            parent = bufferMgr->ReadAndPin(excpectedLocation.containerId, excpectedLocation.containerVersion);
+            if (parent == nullptr) {
+                continue;
+            }
+            currentLocation = location.Load();
+            if (currentLocation.containerId != excpectedLocation.containerId ||
+                currentLocation.containerVersion != excpectedLocation.containerVersion) {
+                parent->Unpin();
+                parent = nullptr;
+                continue;
+            }
+
+            /* todo: stat collect how many times we have to retry */
+            return parent;
+        }
     }
 };
 
@@ -233,9 +273,9 @@ struct BufferVertexEntry {
          */
     }
 
-    inline BufferVertexEntry* ReadParent(VectorLocation& currentLocation) {
+    inline BufferVertexEntry* ReadParentEntry(VectorLocation& currentLocation) {
         threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_EXCLUSIVE);
-        return centroidMeta.ReadParent(currentLocation);
+        return centroidMeta.ReadParentEntry(currentLocation);
     }
 
     DIVFTreeVertexInterface* ReadLatestVersion(bool pinCluster = true, bool needsHeaderLock = false) {
@@ -853,15 +893,15 @@ public:
         it->second.clusterPtr.pin.fetch_add(1);
         DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
         entry->headerLock.Unlock();
-        if (vertex == nullptr) {
-            return vertex;
-        }
+        CHECK_NOT_NULLPTR(vertex, LOG_TAG_BUFFER);
+        // if (vertex == nullptr) {
+        //     return vertex;
+        // }
 
         FatalAssert(vertex->CentroidID() == vertexId, LOG_TAG_BUFFER, "Mismatch in ID. BaseID=" VECTORID_LOG_FMT
                     ", Found ID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId), VECTORID_LOG(vertex->CentroidID()));
         return vertex;
     }
-
     /*
      * If we need to lock multiple clusters, then lower level clusters always take priority and
      * are locked first(i.e root is locked the last). If we want to lock to clusters in the same level,
@@ -954,6 +994,7 @@ public:
         for (uint8_t i = 0; i < num_entries; ++i) {
             if (entries[i] != nullptr) {
                 ReleaseBufferEntry(entries[i], flags);
+                entries[i] = nullptr;
             }
         }
     }
