@@ -1,0 +1,3 @@
+[submodule "third_party/moodycamel/concurrentqueue"]
+	path = third_party/moodycamel/concurrentqueue
+	url = https://github.com/cameron314/concurrentqueue.git

@@ -7,6 +7,9 @@
 
 #include "utils/string.h"
 
+#include "third_party/moodycamel/concurrentqueue/concurrentqueue.h"
+#include "third_party/moodycamel/concurrentqueue/blockingconcurrentqueue.h"
+
 namespace divftree {
 
 /* Todo better implementations -> lockfree */
@@ -73,80 +76,39 @@ protected:
     std::mutex _mutex;
 };
 
-template<typename T, typename seq = std::deque<T>>
-class ConcurrentQueue {
+template<typename T>
+class BlockingQueue {
 public:
-    void Push(const T& value) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        _queue.push(value);
+    BlockingQueue() : q() {}
+
+    BlockingQueue(size_t initial) : q(initial) {}
+
+    inline bool Push(T&& value) {
+        return q.enqueue(std::forward<T>(value));
     }
 
-    bool PushIfNotInQueue(const T& value) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        for (const T& item : _queue) {
-            if (item == value) {
-                return false; // Value already in queue
-            }
-        }
-        _queue.push(value);
-        return true;
+    inline void Push(const T& value) {
+        return q.enqueue(value)
     }
 
-    bool PopHead(T& value) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        if (_queue.empty()) {
-            return false;
-        }
-        value = _queue.front();
-        _queue.pop();
-        return true;
+    inline bool PopHead(T& value) {
+        return q.wait_dequeue_timed(value, std::chrono::milliseconds(1));
     }
 
-    bool Empty() {
-        std::lock_guard<std::mutex> lock(_mutex);
-        return _queue.empty();
+    inline bool TryPopHead(T& value) {
+        return q.try_dequeue(value);
     }
 
-    size_t Size() {
-        std::lock_guard<std::mutex> lock(_mutex);
-        return _queue.size();
+    inline bool Empty() {
+        return q.size_approx() == 0;
     }
 
-    void Clear() {
-        std::lock_guard<std::mutex> lock(_mutex);
-        while (!_queue.empty()) {
-            _queue.pop();
-        }
+    inline size_t Size() {
+        return q.size_approx();
     }
 
-    bool Contains(const T& value) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        for (const T& item : _queue) {
-            if (item == value) {
-                return true; // Value already in queue
-            }
-        }
-        return false;
-    }
-
-    divftree::String ToString(divftree::String (*ConvertToString)(const T&)) {
-        std::lock_guard<std::mutex> lock(_mutex);
-        divftree::String result = divftree::String("ConcurrentQueue<size=%lu, elements=[");
-        uint64_t size = _queue.size();
-        uint64_t index = 0;
-        for (const T& item : _queue) {
-            result += ConvertToString(item);
-            if (index < size - 1) {
-                result += ", ";
-            }
-            index++;
-        }
-        result += "]>";
-        return result;
-    }
 protected:
-    std::queue<T, seq> _queue;
-    std::mutex _mutex;
+    moodycamel::BlockingConcurrentQueue<T> q;
 };
 
 };

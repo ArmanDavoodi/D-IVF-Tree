@@ -5,6 +5,8 @@
 #include "vector_utils.h"
 #include "distance.h"
 
+#include "utils/thread.h"
+
 #include <map>
 
 namespace divftree {
@@ -43,6 +45,13 @@ struct DIVFTreeAttributes {
     uint16_t split_leaf;
 
     uint16_t dimension;
+
+    size_t num_migrators;
+
+    uint32_t migration_check_triger_rate;
+    uint32_t migration_check_triger_single_rate;
+
+    uint32_t random_base_perc;
 
     String ToString() const {
         return String("{dimension=%hu, clusteringAlg=%s, distanceAlg=%s, "

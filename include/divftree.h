@@ -8,6 +8,7 @@
 #include "distributed_common.h"
 
 #include "utils/synchronization.h"
+#include "utils/concurrent_datastructures.h"
 
 #include "interface/divftree.h"
 
@@ -41,6 +42,11 @@
  */
 
 namespace divftree {
+
+struct MigrationCheckTask {
+    VectorID first;
+    VectorID second;
+};
 
 struct MigrationInfo {
     VectorID id;
@@ -479,7 +485,9 @@ friend class DIVFTree;
 
 class DIVFTree : public DIVFTreeInterface {
 public:
-    DIVFTree(DIVFTreeAttributes attributes) : attr(attributes), real_size(0) {
+    DIVFTree(DIVFTreeAttributes attributes) : attr(attributes), real_size(0), end_signal(false) {
+        Thread* _self = new Thread(attr.random_base_perc);
+        _self->InitDIVFThread();
         CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
         VectorID root_id;
         BufferVertexEntry* root_entry =
@@ -489,13 +497,23 @@ public:
         (void)(new (root_entry->ReadLatestVersion(false)) DIVFTreeVertex(attr, root_entry->centroidMeta.selfId, this));
         BufferManager::GetInstance()->
             ReleaseBufferEntryIfNotNull(root_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+
+        StartBGThreads();
         CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index End");
     }
 
     ~DIVFTree() override {
         CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index Start");
+        end_signal.store(true, std::memory_order_release);
+
+        DestroyBGThreads();
+
         BufferManager::GetInstance()->Shutdown();
         CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End");
+
+        FatalAssert(threadSelf != nullptr, LOG_TAG_DIVFTREE, "threadself not inited!");
+        threadSelf->DestroyDIVFThread();
+        delete threadSelf;
     }
 
     /* todo: for now since it is single node, the create_completion_notification here does not do anything and returning
@@ -747,6 +765,10 @@ public:
 protected:
     const DIVFTreeAttributes attr;
     std::atomic<uint64_t> real_size;
+    std::atomic<bool> end_signal;
+
+    std::vector<Thread*> migrators;
+    BlockingQueue<MigrationCheckTask> migration_tasks;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -754,7 +776,7 @@ protected:
         FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
         FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
         FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
-        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+        threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_EXCLUSIVE);
 
         DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
@@ -1051,7 +1073,7 @@ protected:
         FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
         FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
         FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
-        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+        threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_EXCLUSIVE);
 
         RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
@@ -1161,7 +1183,7 @@ protected:
         FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
         RetStatus rs = RetStatus::Success();
 
-        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
+        threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_SHARED);
         FatalAssert(container_entry->state.load() != CLUSTER_DELETED, LOG_TAG_DIVFTREE, "Container vertex is deleted.");
         while (true) {
             /*
@@ -1240,7 +1262,7 @@ protected:
     }
 
     inline void PruneAtRootAndRelease(BufferVertexEntry* container_entry) {
-        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+        threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_EXCLUSIVE);
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
 
         BufferManager* bufferMgr = BufferManager::GetInstance();
@@ -1296,7 +1318,7 @@ protected:
     }
 
     inline void PruneEmptyVertexAndRelease(BufferVertexEntry* container_entry) {
-        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_EXCLUSIVE);
+        threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_EXCLUSIVE);
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
 
         BufferManager* bufferMgr = BufferManager::GetInstance();
@@ -1338,7 +1360,7 @@ protected:
 
     inline void PruneIfNeededAndRelease(BufferVertexEntry* container_entry) {
         while (true) {
-            threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
+            threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_SHARED);
             CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
 
             BufferManager* bufferMgr = BufferManager::GetInstance();
@@ -1426,7 +1448,7 @@ protected:
         FatalAssert(loc.containerId == container_entry->centroidMeta.selfId, LOG_TAG_DIVFTREE, "Location Id mismatch");
         FatalAssert(container_entry->currentVersion == loc.containerVersion, LOG_TAG_DIVFTREE,
                     "Location version mismatch");
-        threadSelf->SanityCheckLockHeldInModeByMe(container_entry->clusterLock, SX_SHARED);
+        threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_SHARED);
         DIVFTreeVertex* container = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
         Version version = 0;
@@ -1846,7 +1868,7 @@ protected:
                                            ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
 
         /* todo: have to change for multi ndoe setup */
-        if (threadSelf->RandomizedBinary(1, 2)) {
+        if (threadSelf->UniformBinary(attr.random_base_perc / 2)) {
             Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1]);
             Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0]);
         } else {
@@ -2045,6 +2067,9 @@ protected:
         pinned_root_version->Search(query, span, layers[level - 1], seen);
     }
 
+    /* todo: use multiple threads for searching each layer -> what if we use a single pool for all searches?
+       if there are few threads, they will do the search layer themselves but if there are free threads they 
+       can help each other */
     void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
                      uint8_t level) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
@@ -2059,6 +2084,7 @@ protected:
                 static_cast<DIVFTreeVertex*>(bufferMgr->
                     ReadAndPinVertex(layers[level][i].id, layers[level][i].version));
             CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
+            FatalAssert(vertex->attr.centroid_id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
             vertex->Search(query, span, layers[level - 1], seen);
             vertex->Unpin();
         }
@@ -2083,6 +2109,38 @@ protected:
         uint8_t current_level = start_level;
         uint8_t span;
         while (current_level > end_level) {
+            if ((layers[current_level].size() > 1) &&
+                (threadSelf->UniformBinary(attr.migration_check_triger_rate))) {
+                VectorID firstId = INVALID_VECTOR_ID;
+                VectorID secondId = INVALID_VECTOR_ID;
+                if (threadSelf->UniformBinary(attr.migration_check_triger_single_rate)) {
+                    uint64_t index = threadSelf->UniformRange64(0, layers[current_level].size());
+                    firstId = layers[current_level][index].id;
+                    /* todo: this will not work when we have multi node system as it relies on creator node id to be 0*/
+                    do {
+                        uint64_t second_vertex_idx =
+                            threadSelf->UniformRange64(0, bufferMgr->GetVertexLayerSize(current_level));
+                        secondId._val = second_vertex_idx;
+                        secondId._level = current_level;
+                        secondId._creator_node_id = 0;
+                    } while(secondId == firstId); /* todo: a better approach than while! */
+                } else {
+                    auto indices = threadSelf->UniformRangeTwo64(0, layers[current_level].size());
+                    firstId = layers[current_level][indices.first].id;
+                    secondId = layers[current_level][indices.second].id;
+                    /* todo: a better approach than while! */
+                    while(secondId == firstId) {
+                        uint64_t index = threadSelf->UniformRange64(0, layers[current_level].size());
+                        secondId = layers[current_level][index].id;
+                    }
+                }
+
+                bool res = migration_tasks.Push(MigrationCheckTask{.first=firstId, .second=secondId});
+                UNUSED_VARIABLE(res);
+                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+            }
+
+
             uint8_t next_level = current_level - 1;
             if (next_level == end_level) {
                 span = k;
@@ -2128,6 +2186,38 @@ protected:
             }
         }
         return RetStatus::Success();
+    }
+
+    inline void BGMigration(Thread* self) {
+        CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
+        self->InitDIVFThread();
+
+        while (!end_signal.load(std::memory_order_acquire)) {
+            MigrationCheckTask nextTask;
+            if (migration_tasks.PopHead(nextTask)) {
+                if (nextTask.first > nextTask.second) {
+                    std::swap(nextTask.first, nextTask.second);
+                }
+                MigrationCheck(nextTask.first, nextTask.second);
+            } /* todo: add else clause and chose two random clusters to migrate? or maybe use tryPop instead */
+        }
+        self->DestroyDIVFThread();
+    }
+
+    inline void StartBGThreads() {
+        migrators.reserve(attr.num_migrators);
+        for (size_t i = 0; i < attr.num_migrators; ++i) {
+            migrators.emplace_back(new Thread(attr.random_base_perc));
+            migrators.back()->Start(BGMigration, migrators.back());
+        }
+    }
+
+    inline void DestroyBGThreads() {
+        FatalAssert(end_signal.load(std::memory_order_acquire), LOG_TAG_DIVFTREE,
+                    "We should be ending if we are here!");
+        for (size_t i = 0; i < attr.num_migrators; ++i) {
+            delete migrators[i];
+        }
     }
 
 TESTABLE;

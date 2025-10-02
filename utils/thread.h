@@ -6,6 +6,7 @@
 #include <thread>
 #include <cstdint>
 #include <unordered_set>
+ #include <random>
 
 #include "debug.h"
 
@@ -28,6 +29,11 @@
 #else
 #define DIVFTREE_YIELD()
 #endif
+
+
+#ifndef DIVF_SEED
+#define DIVF_SEED std::random_device()()
+#endif
 namespace divftree {
 
 enum LockMode : uint8_t  {
@@ -49,19 +55,122 @@ String LockModeToString(LockMode mode) {
 typedef uint64_t DIVFThreadID;
 inline constexpr DIVFThreadID INVALID_DIVF_THREAD_ID = UINT64_MAX;
 
+class Thread;
+
 inline thread_local Thread* threadSelf = nullptr;
+
 class Thread {
 public:
-    Thread() {}
-    ~Thread() {}
+    Thread(uint32_t random_perc) : _parent_id((threadSelf == nullptr) ? INVALID_DIVF_THREAD_ID : threadSelf->ID()),
+                                   _id(nextId.fetch_add(1)), _thrd(nullptr), _done(true), _safty_net(false),
+                                   _gen(DIVF_SEED), _gen64(DIVF_SEED), _uniform_dist(1, random_perc) {}
+
+    ~Thread() {
+        if ((threadSelf == nullptr) || (threadSelf->ID() != _parent_id)) {
+            return;
+        }
+
+        WaitForThreadToFinish();
+
+        if (JoinableByMe()) {
+            _thrd->join();
+        }
+
+        if (_thrd != nullptr) {
+            delete _thrd;
+            _thrd = nullptr;
+        }
+    }
+
+    inline void InitDIVFThread() {
+        FatalAssert(threadSelf == nullptr, LOG_TAG_THREAD, "thread should not be inited yet!");
+        FatalAssert(_thrd != nullptr, LOG_TAG_THREAD, "thread should have started!");
+        FatalAssert(_thrd->get_id() == std::this_thread::get_id(), LOG_TAG_THREAD,
+                    "the thread itself should call this function");
+        FatalAssert(_done.load(std::memory_order_relaxed), LOG_TAG_THREAD, "thread should be in the initial state");
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Initing thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        threadSelf = this;
+        _done.store(false, std::memory_order_release);
+    }
+
+    /* should be the last thing called before exiting the thread */
+    inline void DestroyDIVFThread() {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(!_done.load(std::memory_order_relaxed), LOG_TAG_THREAD,
+                    "thread should not be in the initial state");
+        FatalAssert(_thrd != nullptr, LOG_TAG_THREAD, "thread should have started!");
+        FatalAssert(_thrd->get_id() == std::this_thread::get_id(), LOG_TAG_THREAD,
+                    "the thread itself should call this function");
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Destroying thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        threadSelf = nullptr;
+        _safty_net.store(true, std::memory_order_release);
+        _done.store(true, std::memory_order_release);
+        _done.notify_all();
+        _safty_net.store(false, std::memory_order_release);
+    }
+
+    template<class _Callable, class... Args>
+    inline void Start(_Callable&& func, Args&&... args) {
+        FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller should be a valid thread!");
+        FatalAssert(threadSelf->ID() == _parent_id, LOG_TAG_THREAD, "caller should be parent");
+        FatalAssert(_thrd == nullptr, LOG_TAG_THREAD, "thread should be null");
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        _thrd = new std::thread(std::forward<_Callable>(func), this, (std::forward<Args>(args))...)
+    }
+
+    inline void Detach() {
+        FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller should be a valid thread!");
+        FatalAssert(threadSelf->ID() == _parent_id, LOG_TAG_THREAD, "caller should be parent");
+        FatalAssert(_id != 0, LOG_TAG_THREAD, "cannot detach the main thread!");
+        FatalAssert(_thrd != nullptr, LOG_TAG_THREAD, "cannot detach a thread which is not started!");
+        _thrd->detach();
+    }
+
+    inline void WaitForThreadToFinish() {
+        FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller should be a valid thread!");
+        FatalAssert(threadSelf->ID() != _id, LOG_TAG_THREAD, "caller cannot be self!");
+#ifdef LOCK_DEBUG
+        FatalAssert(waitingFor == INVALID_DIVF_THREAD_ID, LOG_TAG_THREAD, "we cannot be waiting on two threads!");
+        waitingFor = _id;
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Waiting for thread %p - ID:%lu", this, _id);
+#endif
+        if (!_done.load(std::memory_order_acquire)) {
+            _done.wait(false, std::memory_order_acquire);
+        }
+        FatalAssert(_done.load(std::memory_order_relaxed), LOG_TAG_THREAD, "thread should be done!");
+
+        while (_safty_net.load(std::memory_order_acquire)) {
+            DIVFTREE_YIELD();
+        }
+        FatalAssert(!_safty_net.load(std::memory_order_acquire), LOG_TAG_THREAD, "safty net should be disabled");
+#ifdef LOCK_DEBUG
+        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "done Waiting for thread %p - ID:%lu", this, _id);
+        waitingFor = INVALID_DIVF_THREAD_ID;
+#endif
+    }
+
+    inline void Join() {
+        FatalAssert(JoinableByMe(), LOG_TAG_THREAD, "The thread should be joinable!");
+        _thrd->join();
+    }
+
+    inline bool JoinableByMe() const {
+        FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller thread not inited!");
+        if ((_id == 0) || (threadSelf->ID() != _parent_id) || (_thrd == nullptr)) {
+            return false;
+        }
+        return _thrd->joinable();
+    }
 
     inline const DIVFThreadID ID() const {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         return _id;
     }
 
     inline void AcquireLockSanityLog(void* lockAddr, LockMode mode) {
         UNUSED_VARIABLE(lockAddr);
         UNUSED_VARIABLE(mode);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldByMe(lockAddr);
         if (mode == SX_EXCLUSIVE) {
@@ -76,6 +185,7 @@ public:
 
     inline void DowngradeLockSanityLog(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockHeldInModeByMe(lockAddr, SX_EXCLUSIVE);
         heldExclusive.erase(lockAddr);
@@ -86,6 +196,7 @@ public:
 
     inline void UpgradeLockSanityLog(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockHeldInModeByMe(lockAddr, SX_SHARED);
         heldShared.erase(lockAddr);
@@ -97,6 +208,7 @@ public:
     inline void ReleaseLockSanityLog(void* lockAddr, LockMode mode) {
         UNUSED_VARIABLE(lockAddr);
         UNUSED_VARIABLE(mode);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockHeldInModeByMe(lockAddr, mode);
         if (mode == SX_EXCLUSIVE) {
@@ -111,6 +223,7 @@ public:
 
     inline void SanityCheckLockNotHeldInBothModesByMe(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         FatalAssert((heldExclusive.find(lockAddr) == heldExclusive.end()) ||
                     (heldShared.find(lockAddr) == heldShared.end()),
@@ -120,9 +233,10 @@ public:
 
     inline LockHeld LockHeldByMe(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
-        if (heldExclusive.find(lockAddr) != heldExclusive.end()) || (heldShared.find(lockAddr) != heldShared.end()) {
+        if ((heldExclusive.find(lockAddr) != heldExclusive.end()) || (heldShared.find(lockAddr) != heldShared.end())) {
             return LockHeld::LOCKED;
         } else {
             return LockHeld::UNLOCKED;
@@ -134,6 +248,7 @@ public:
     inline LockHeld LockHeldInModeByMe(void* lockAddr, LockMode mode) {
         UNUSED_VARIABLE(lockAddr);
         UNUSED_VARIABLE(mode);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         if (((mode == LockMode::SX_EXCLUSIVE) && (heldExclusive.find(lockAddr) != heldExclusive.end())) ||
@@ -148,6 +263,7 @@ public:
 
     inline void SanityCheckLockHeldByMe(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         FatalAssert(LockHeldByMe(lockAddr) == LockHeld::LOCKED,
@@ -158,6 +274,7 @@ public:
     inline void SanityCheckLockHeldInModeByMe(void* lockAddr, LockMode mode) {
         UNUSED_VARIABLE(lockAddr);
         UNUSED_VARIABLE(mode);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         FatalAssert(LockHeldInModeByMe(lockAddr, mode) == LockHeld::LOCKED,
@@ -167,6 +284,7 @@ public:
 
     inline void SanityCheckLockNotHeldByMe(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         FatalAssert(LockHeldByMe(lockAddr) == LockHeld::UNLOCKED,
@@ -177,6 +295,7 @@ public:
     inline void SanityCheckLockNotHeldInModeByMe(void* lockAddr, LockMode mode) {
         UNUSED_VARIABLE(lockAddr);
         UNUSED_VARIABLE(mode);
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
 #ifdef LOCK_DEBUG
         SanityCheckLockNotHeldInBothModesByMe(lockAddr);
         FatalAssert(LockHeldInModeByMe(lockAddr, mode) == LockHeld::UNLOCKED,
@@ -185,18 +304,66 @@ public:
     }
 
     /* todo: check if it works better than a random number generator */
-    inline bool RandomizedBinary(size_t target, size_t base = 100) {
-        FatalAssert(base >= target, LOG_TAG_BASIC, "base cannot be less than target!");
-        ++rand_num;
-        return (rand_num % base < target);
+    // inline bool PeriodicBinary(size_t target, size_t base = 100) {
+    //     FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+    //     FatalAssert(base >= target, LOG_TAG_BASIC, "base cannot be less than target!");
+    //     ++rand_num;
+    //     return (rand_num % base < target);
+    // }
+
+    inline uint32_t UniformRandom(uint32_t range) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(range > 0, LOG_TAG_THREAD, "range cannot be 0!");
+        return (_gen(_uniform_dist) % range);
+    }
+
+    inline bool UniformBinary(uint32_t rate) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        return (_gen(_uniform_dist) <= rate)
+    }
+
+    inline uint32_t UniformRange32(uint32_t first, uint32_t second) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
+        return _gen(std::uniform_int_distribution<uint32_t>(first, second))
+    }
+
+    inline uint64_t UniformRange64(uint64_t first, uint64_t second) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
+        return _gen(std::uniform_int_distribution<uint64_t>(first, second))
+    }
+
+    inline std::pair<uint32_t, uint32_t> UniformRangeTwo32(uint32_t first, uint32_t second) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
+        std::uniform_int_distribution<uint32_t> temp_dist(first, second);
+        return std::make_pair(_gen(temp_dist), _gen(temp_dist));
+    }
+
+    inline std::pair<uint64_t, uint64_t> UniformRangeTwo64(uint64_t first, uint64_t second) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
+        std::uniform_int_distribution<uint64_t> temp_dist(first, second);
+        return std::make_pair(_gen64(temp_dist), _gen64(temp_dist));
     }
 protected:
+    static inline std::atomic<DIVFThreadID> nextId = 0;
+
     // Thread implementation details
-    DIVFThreadID _id;
+    const DIVFThreadID _parent_id;
+    const DIVFThreadID _id;
+    std::atomic<bool> _done;
+    std::atomic<bool> _safty_net;
+    std::thread* _thrd;
+    std::mt19937 _gen;
+    std::mt19937_64 _gen64;
+    std::uniform_int_distribution<uint32_t> _uniform_dist;
 
     // for randomized algs
-    size_t rand_num = 0;
+    // size_t rand_num = 0;
 #ifdef LOCK_DEBUG
+    DIVFThreadID waitingFor = INVALID_DIVF_THREAD_ID;
     std::unordered_set<void*> heldShared;
     std::unordered_set<void*> heldExclusive;
 #endif

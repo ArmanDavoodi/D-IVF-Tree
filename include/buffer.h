@@ -1147,6 +1147,15 @@ public:
         return RetStatus::Succsess();
     }
 
+    inline size_t GetVertexLayerSize(uint8_t level) {
+        FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+        handleLock.Lock(SX_SHARED);
+        size_t s = clusterDirectory[level - 1].size();
+        handleLock.Unlock();
+        return s;
+    }
+
 protected:
     inline BufferVertexEntry* GetVertexEntry(VectorID id, bool needLock = true) {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
