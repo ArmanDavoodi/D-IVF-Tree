@@ -87,8 +87,12 @@ public:
         return q.enqueue(std::forward<T>(value));
     }
 
-    inline void Push(const T& value) {
+    inline bool Push(const T& value) {
         return q.enqueue(value)
+    }
+
+    inline bool BatchPush(const T* value, size_t size) {
+        return q.enqueue_bulk(value, size);
     }
 
     inline bool PopHead(T& value) {

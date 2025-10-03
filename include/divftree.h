@@ -58,6 +58,23 @@ struct CompactionTask {
     VectorID target;
 };
 
+struct SearchTask {
+    DIVFThreadID master;
+    uint64_t taskId;
+    VectorID target;
+    Version version;
+    std::atomic<bool> taken;
+    std::atomic<bool> done;
+    bool done_waiting;
+    const VTYPE* query;
+    size_t k;
+    std::vector<ANNVectorInfo>** neighbours;
+
+    SearchTask(VectorID id, Version ver, const VTYPE* q, size_t span) : master(threadSelf->ID()),
+        taskId(threadSelf->GetNextTaskID()), target(id), version(ver), taken(false),
+        done(false), done_waiting(false), query(q), k(span), neighbours(nullptr) {}
+};
+
 struct MigrationInfo {
     VectorID id;
     uint16_t offset;
@@ -363,7 +380,7 @@ public:
     }
 
     void Search(const VTYPE* query, size_t k, std::vector<ANNVectorInfo>& neighbours,
-                     std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) override {
+                std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) override {
         /* todo: should I also ignore same vectors with different versions? e.g. if it is newer replace o.w ignore */
         const uint16_t dim = attr.index->GetAttributes().dimension;
         const DistanceType dtype = attr.index->GetAttributes().distanceAlg;
@@ -785,6 +802,8 @@ protected:
     BlockingQueue<MergeTask> merge_tasks;
     std::vector<Thread*> bg_compactors;
     BlockingQueue<CompactionTask> compaction_tasks;
+    std::vector<Thread*> searchers;
+    BlockingQueue<SearchTask&> search_tasks;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -2228,13 +2247,41 @@ protected:
         pinned_root_version->Search(query, span, layers[level - 1], seen);
     }
 
+    void SearchVertex(VectorID id, Version version, const VTYPE* query, size_t span,
+                      std::vector<ANNVectorInfo>& neighbours,
+                      std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen,
+                      SortType sort) {
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(query, LOG_TAG_DIVFTREE);
+        FatalAssert(span > 0, LOG_TAG_DIVFTREE, "span should be larget than 0!");
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
+        bool outdated;
+        DIVFTreeVertex* vertex =
+            static_cast<DIVFTreeVertex*>(bufferMgr->
+                ReadAndPinVertex(id, version, &outdated));
+        CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
+        if (!outdated) {
+            uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);
+            uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);
+            if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
+                                    (double)deleted / (double)reserved)))) {
+                bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
+                UNUSED_VARIABLE(res);
+                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+            }
+        }
+        vertex->Search(query, span, neighbours, seen, sort);
+        vertex->Unpin();
+    }
+
     /* todo: use multiple threads for searching each layer -> what if we use a single pool for all searches?
        if there are few threads, they will do the search layer themselves but if there are free threads they
        can help each other */
     void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
                      uint8_t level) {
-        BufferManager* bufferMgr = BufferManager::GetInstance();
-        FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
         FatalAssert(level < layers.size(), LOG_TAG_DIVFTREE, "level out of bounds!");
         FatalAssert((uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_DIVFTREE, "level out of bounds!");
         FatalAssert(layers[level - 1].empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
@@ -2242,27 +2289,81 @@ protected:
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
         seen.reserve(layers[level].size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
                                                                                          attr.internal_max_size));
+        // if (layers[level].size() == 1) {
+        //     FatalAssert(layers[level][0].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+        //     SearchVertex(layers[level][0].id, layers[level][0].version, query, span, layers[level - 1], seen);
+        // }
+
+        // bool outdated;
+        // DIVFTreeVertex* vertex =
+        //     static_cast<DIVFTreeVertex*>(bufferMgr->
+        //         ReadAndPinVertex(layers[level][i].id, layers[level][i].version, &outdated));
+        // CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
+        // FatalAssert(vertex->attr.centroid_id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+        // if (!outdated) {
+        //     uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);
+        //     uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);
+        //     if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
+        //                           (double)deleted / (double)reserved)))) {
+        //         bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
+        //         UNUSED_VARIABLE(res);
+        //         FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+        //     }
+        // }
+        // vertex->Search(query, span, layers[level - 1], seen);
+        // vertex->Unpin();
+        std::vector<SearchTask> tasks;
+        tasks.reserve(layers[level].size());
         for (size_t i = 0; i < layers[level].size(); ++i) {
-            bool outdated;
-            DIVFTreeVertex* vertex =
-                static_cast<DIVFTreeVertex*>(bufferMgr->
-                    ReadAndPinVertex(layers[level][i].id, layers[level][i].version, &outdated));
-            CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
-            FatalAssert(vertex->attr.centroid_id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-            if (!outdated) {
-                uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);
-                uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);
-                if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
-                                      (double)deleted / (double)reserved)))) {
-                    bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
-                    UNUSED_VARIABLE(res);
-                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+            FatalAssert(layers[level][i].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+            tasks.emplace_back(layers[level][i].id, layers[level][i].version, query, span);
+        }
+
+        bool rs = search_tasks.BatchPush(&tasks[0], tasks.size());
+        UNUSED_VARIABLE(rs);
+        FatalAssert(rs, LOG_TAG_DIVFTREE, "should not fail!");
+
+        for (size_t i = tasks.size() - 1; i != UINT64_MAX; --i) {
+            bool exp = false;
+            if (!tasks[i].taken.compare_exchange_strong(exp, true)) {
+                continue;
+            }
+
+            SearchVertex(tasks[i].target, tasks[i].version, query, span, layers[level - 1], seen);
+            tasks[i].done.store(true, std::memory_order_relaxed);
+        }
+
+        size_t num_done = 0;
+        bool first_time = true;
+        while(num_done != tasks.size()) {
+            if (first_time) {
+                first_time = false;
+            } else {
+                /* todo: is this too much and if so maybe we should use wait and notify instead or use YEILD */
+                usleep(1);
+            }
+            for (size_t i = 0; i < tasks.size(); ++i) {
+                if (tasks[i].done_waiting) {
+                    continue;
+                }
+                if (tasks[i].done.load(std::memory_order_acquire)) {
+                    ++num_done;
+                    tasks[i].done_waiting = true;
                 }
             }
-            vertex->Search(query, span, layers[level - 1], seen);
-            vertex->Unpin();
         }
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "not implemented yet");
+
+        /* todo: check if I need a better algorithm for this */
+        const SimilarityComparator cmp = attr.similarityComparator;
+        for (size_t i = 0; i < tasks.size(); ++i) {
+            if (tasks[i].neighbours == nullptr) {
+                continue;
+            }
+            CHECK_NOT_NULLPTR(*tasks[i].neighbours, LOG_TAG_DIVFTREE);
+
+            std::vector<ANNVectorInfo>& current_neigh = **tasks[i].neighbours;
+            while(!current_neigh.empty() && MoreSimilar(current_neigh.))
+        }
     }
 
     RetStatus ANNSearch(const VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
@@ -2367,6 +2468,8 @@ protected:
         }
         return RetStatus::Success();
     }
+
+
 
     inline void BGMigration(Thread* self) {
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);

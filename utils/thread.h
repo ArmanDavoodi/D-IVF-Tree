@@ -63,7 +63,8 @@ class Thread {
 public:
     Thread(uint32_t random_perc) : _parent_id((threadSelf == nullptr) ? INVALID_DIVF_THREAD_ID : threadSelf->ID()),
                                    _id(nextId.fetch_add(1)), _thrd(nullptr), _done(true), _safty_net(false),
-                                   _gen(DIVF_SEED), _gen64(DIVF_SEED), _uniform_dist(1, random_perc) {}
+                                   _gen(DIVF_SEED), _gen64(DIVF_SEED), _uniform_dist(1, random_perc),
+                                   _next_task_id(0) {}
 
     ~Thread() {
         if ((threadSelf == nullptr) || (threadSelf->ID() != _parent_id)) {
@@ -348,6 +349,10 @@ public:
         return std::make_pair(_gen64(temp_dist), _gen64(temp_dist));
     }
 
+    inline uint64_t GetNextTaskID() {
+        return (_next_task_id++);
+    }
+
     /*
      * even if there are only 5 vectors in a layer the probablity of choosing taht cluster is 20%.
      * Therefore, if we retry 21 times it should be highly unlikely that this happens. In case we do not succeed.
@@ -368,6 +373,7 @@ protected:
     std::mt19937 _gen;
     std::mt19937_64 _gen64;
     std::uniform_int_distribution<uint32_t> _uniform_dist;
+    uint64_t _next_task_id;
 
     // for randomized algs
     // size_t rand_num = 0;
