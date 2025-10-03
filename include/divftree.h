@@ -54,6 +54,10 @@ struct MergeTask {
     VectorID target;
 };
 
+struct CompactionTask {
+    VectorID target;
+}
+
 struct MigrationInfo {
     VectorID id;
     uint16_t offset;
@@ -775,23 +779,28 @@ protected:
     std::atomic<uint64_t> real_size;
     std::atomic<bool> end_signal;
 
-    std::vector<Thread*> migrators;
+    std::vector<Thread*> bg_migrators;
     BlockingQueue<MigrationCheckTask> migration_tasks;
-    std::vector<Thread*> mergers;
+    std::vector<Thread*> bg_mergers;
     BlockingQueue<MergeTask> merge_tasks;
+    std::vector<Thread*> bg_compactors;
+    BlockingQueue<CompactionTask> compaction_tasks;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
-        FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
-        FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
-        FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE, "Batch of vector IDs to insert is null.");
+        FatalAssert(((batch.size == 0) || ((batch.data != nullptr) && (batch.id != nullptr))), LOG_TAG_DIVFTREE,
+                    "Invalid batch");
+        FatalAssert((batch.size != 0) || (marked_for_update == INVALID_OFFSET), LOG_TAG_DIVFTREE,
+                    "If there is no batch, marked_for_update should be invalid!");
         threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_EXCLUSIVE);
 
         DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
         FatalAssert(current->attr.index == this, LOG_TAG_DIVFTREE,
                     "input entry does not belong to this index!");
+        FatalAssert(current->cluster.header.num_deleted.load(std::memory_order_relaxed) > 0, LOG_TAG_DIVFTREE,
+                    "Cannot compact a cluster with no deleted elemetns!");
 
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
@@ -809,7 +818,8 @@ protected:
         FatalAssert(current->cluster.NumBlocks(blckSize, cap) == 1,
                     LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
 
-        FatalAssert(!is_leaf || (batch.version != nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
+        FatalAssert(!is_leaf || (batch.size == 0) || (batch.version != nullptr), LOG_TAG_DIVFTREE,
+                    "Batch of versions to insert is null!");
 
         Address srcMetaData = current->cluster.MetaData(0, is_leaf, blckSize, cap, dim);
         VTYPE* srcData = current->cluster.Data(0, is_leaf, blckSize, cap, dim);
@@ -868,8 +878,8 @@ protected:
         FatalAssert(new_size == current->cluster.header.reserved_size.load(std::memory_order_relaxed) -
                                 current->cluster.header.num_deleted.load(std::memory_order_relaxed),
                     LOG_TAG_DIVFTREE, "not all deletes went through!");
-        FatalAssert(new_size + batch.size > new_size, LOG_TAG_DIVFTREE, "overflow detected!");
-        FatalAssert(new_size + batch.size < cap, LOG_TAG_DIVFTREE, "Cluster cannot contain all of these vectors!");
+        FatalAssert(new_size + batch.size >= new_size, LOG_TAG_DIVFTREE, "overflow detected!");
+        FatalAssert(new_size + batch.size <= cap, LOG_TAG_DIVFTREE, "Cluster cannot contain all of these vectors!");
 
         uint16_t old_reserved = new_size;
 
@@ -920,6 +930,32 @@ protected:
         }
 
         return RetStatus::Success();
+    }
+
+    inline void CompactionCheck(VectorID target) {
+        CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(target, LOG_TAG_DIVFTREE);
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        BufferVertexEntry* entry = bufferMgr->ReadBufferEntry(target, SX_EXCLUSIVE);
+        if (entry == nullptr) {
+            return;
+        }
+
+        DIVFTreeVertex* cluster = static_cast<DIVFTreeVertex*>(entry->ReadLatestVersion());
+        CHECK_NOT_NULLPTR(cluster, LOG_TAG_DIVFTREE);
+
+        if (cluster->cluster.header.num_deleted.load(std::memory_order_relaxed) == 0) {
+            bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+
+        entry->state.store(CLUSTER_FULL, std::memory_order_release);
+        VectorBatch dummy;
+        (void)CompactAndInsert(entry, dummy);
+        bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
     }
 
     inline void SimpleDivideClustering(const DIVFTreeVertex* base, const ConstVectorBatch& batch,
@@ -1248,7 +1284,8 @@ protected:
                 container_vertex->cluster.header.reserved_size.load(std::memory_order_relaxed) + batch.size;
             uint16_t real_size =
                 reserved_size - container_vertex->cluster.header.num_deleted.load(std::memory_order_relaxed);
-            if ((float)real_size * COMPACTION_FACTOR <= (float)container_vertex->attr.cap) {
+            if ((container_vertex->cluster.header.num_deleted.load(std::memory_order_relaxed) > 0) &&
+                ((float)real_size * COMPACTION_FACTOR <= (float)container_vertex->attr.cap)) {
                 rs = CompactAndInsert(container_entry, batch, marked_for_update);
             } else if (reserved_size < container_vertex->attr.cap) {
                 container_entry->DowngradeAccessToShared();
@@ -1421,6 +1458,11 @@ protected:
             if ((reserved - deleted) >= 1) {
                 if ((reserved - deleted) < container->attr.min_size) {
                     bool res = merge_tasks.Push(MergeTask{container_entry->centroidMeta.selfId});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                } else if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
+                                             (double)deleted / (double)reserved)))) {
+                    bool res = compaction_tasks.Push(CompactionTask{container_entry->centroidMeta.selfId});
                     UNUSED_VARIABLE(res);
                     FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
                 }
@@ -1696,11 +1738,16 @@ protected:
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                            ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
         } else {
-            src_cluster->cluster.header.num_deleted.fetch_add(batch.size);
-            if ((src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire) -
-                src_cluster->cluster.header.num_deleted.load(std::memory_order_acquire)) <
-                src_cluster->attr.min_size) {
+            uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) - batch.size;
+            uint16_t reserved = src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire);
+            if ((reserved - num_deleted) < src_cluster->attr.min_size) {
                 bool res = merge_tasks.Push(MergeTask{src_id});
+                UNUSED_VARIABLE(res);
+                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+            } else if ((num_deleted > 0) &&
+                       (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
+                                                  ((double)num_deleted / (double)reserved))))) {
+                bool res = compaction_tasks.Push(CompactionTask{src_id});
                 UNUSED_VARIABLE(res);
                 FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
             }
@@ -2129,7 +2176,7 @@ protected:
                                            parent_cluster->attr.cap, attr.dimension));
 
         uint16_t parent_size = parent_cluster->cluster.header.visible_size.load(std::memory_order_acquire);
-        unordered_set<VectorID, VectorIDHash> seen;
+        std::unordered_set<VectorID, VectorIDHash> seen;
         seen.reserve(parent_size);
         DTYPE best_dist;
         VectorID best_id = INVALID_VECTOR_ID;
@@ -2196,11 +2243,22 @@ protected:
         seen.reserve(layers[level].size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
                                                                                          attr.internal_max_size));
         for (size_t i = 0; i < layers[level].size(); ++i) {
+            bool outdated;
             DIVFTreeVertex* vertex =
                 static_cast<DIVFTreeVertex*>(bufferMgr->
-                    ReadAndPinVertex(layers[level][i].id, layers[level][i].version));
+                    ReadAndPinVertex(layers[level][i].id, layers[level][i].version, &outdated));
             CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
             FatalAssert(vertex->attr.centroid_id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+            if (!outdated) {
+                uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);
+                uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);
+                if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
+                                      (double)deleted / (double)reserved)))) {
+                    bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                }
+            }
             vertex->Search(query, span, layers[level - 1], seen);
             vertex->Unpin();
         }
@@ -2349,29 +2407,55 @@ protected:
         self->DestroyDIVFThread();
     }
 
+    inline void BGCompaction(Thread* self) {
+        CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
+        self->InitDIVFThread();
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        while (!end_signal.load(std::memory_order_acquire)) {
+            CompactionTask nextTask;
+            if (compaction_tasks.PopHead(nextTask)) {
+                CompactionCheck(nextTask.target);
+            }
+        }
+        self->DestroyDIVFThread();
+    }
+
     inline void StartBGThreads() {
-        migrators.reserve(attr.num_migrators);
+        bg_migrators.reserve(attr.num_migrators);
         for (size_t i = 0; i < attr.num_migrators; ++i) {
-            migrators.emplace_back(new Thread(attr.random_base_perc));
-            migrators.back()->Start(BGMigration, migrators.back());
+            bg_migrators.emplace_back(new Thread(attr.random_base_perc));
+            bg_migrators.back()->Start(BGMigration, bg_migrators.back());
         }
 
-        mergers.reserve(attr.num_mergers);
+        bg_mergers.reserve(attr.num_mergers);
         for (size_t i = 0; i < attr.num_mergers; ++i) {
-            mergers.emplace_back(new Thread(attr.random_base_perc));
-            mergers.back()->Start(BGMerge, mergers.back());
+            bg_mergers.emplace_back(new Thread(attr.random_base_perc));
+            bg_mergers.back()->Start(BGMerge, bg_mergers.back());
+        }
+
+        bg_compactors.reserve(attr.num_compactors);
+        for (size_t i = 0; i < attr.num_compactors; ++i) {
+            bg_compactors.emplace_back(new Thread(attr.random_base_perc));
+            bg_compactors.back()->Start(BGCompaction, bg_compactors.back());
         }
     }
 
     inline void DestroyBGThreads() {
         FatalAssert(end_signal.load(std::memory_order_acquire), LOG_TAG_DIVFTREE,
                     "We should be ending if we are here!");
+        for (size_t i = 0; i < attr.num_compactors; ++i) {
+            delete bg_compactors[i];
+        }
+
         for (size_t i = 0; i < attr.num_mergers; ++i) {
-            delete mergers[i];
+            delete bg_mergers[i];
         }
 
         for (size_t i = 0; i < attr.num_migrators; ++i) {
-            delete migrators[i];
+            delete bg_migrators[i];
         }
     }
 

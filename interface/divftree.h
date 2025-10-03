@@ -48,6 +48,7 @@ struct DIVFTreeAttributes {
 
     size_t num_migrators;
     size_t num_mergers;
+    size_t num_compactors;
 
     uint32_t migration_check_triger_rate;
     uint32_t migration_check_triger_single_rate;

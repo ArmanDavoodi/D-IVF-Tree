@@ -866,7 +866,7 @@ public:
         }
     }
 
-    DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version) override {
+    DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated = nullptr) override {
         FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
         BufferVertexEntry* entry = GetVertexEntry(vertexId);
         if (entry == nullptr) {
@@ -884,6 +884,9 @@ public:
         FatalAssert(version <= entry->currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
                     VECTORID_LOG_FMT ", latest version = %u, input version = %u",
                     VECTORID_LOG(vertexId), entry->currentVersion, version);
+        if (outdated != nullptr) {
+            *outdated = (version == entry->currentVersion);
+        }
         auto& it = entry->liveVersions.find(version);
         if (it == entry->liveVersions.end() || it->second.versionPin.load() == 0) {
             entry->headerLock.Unlock();
