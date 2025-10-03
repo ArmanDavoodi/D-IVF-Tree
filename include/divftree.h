@@ -56,7 +56,7 @@ struct MergeTask {
 
 struct CompactionTask {
     VectorID target;
-}
+};
 
 struct MigrationInfo {
     VectorID id;
