@@ -63,7 +63,7 @@ inline void ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* ve
     }
 }
 
-inline void ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_t cluster_cap, bool is_leaf,
+inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_t cluster_cap, bool is_leaf,
                             const VTYPE* vectors, size_t size, uint16_t dim, VTYPE* centroid) {
     uint16_t cluster_size = cluster.header.visible_size.load(std::memory_order_acquire);
     FatalAssert(cluster_size > 0, LOG_TAG_BASIC, "cluster_size cannot be 0");
@@ -114,17 +114,18 @@ inline void ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
 
     real_size += size;
     if (real_size == 0) {
-        memset(centroid, 0, sizeof(VTYPE) * dim);
+        return false;
     } else {
         for (uint16_t e = 0; e < dim; ++e) {
             centroid[e] /= real_size;
         }
     }
+    return true;
 }
 
 };
 
-inline void ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* vectors2, size_t size2,
+inline bool ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* vectors2, size_t size2,
                               uint16_t dim, DistanceType distanceAlg, VTYPE* centroid) {
     switch (distanceAlg) {
     case DistanceType::L2Distance:
@@ -133,11 +134,11 @@ inline void ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* ve
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
              "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
     }
-    return Vector(); // Return an empty vector if the distance type is invalid
+    return false; // Return an empty vector if the distance type is invalid
 }
 
 /* cluster should be locked in S or X mode! This will only caount Valid vectors and it will use visible size not reserved size!*/
-inline void ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_t cluster_cap, bool is_leaf,
+inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_t cluster_cap, bool is_leaf,
                             const VTYPE* vectors, size_t size, uint16_t dim,
                             DistanceType distanceAlg, VTYPE* centroid) {
     switch (distanceAlg) {
@@ -148,7 +149,7 @@ inline void ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
         CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
              "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
     }
-    return Vector(); // Return an empty vector if the distance type is invalid
+    return false; // Return an empty vector if the distance type is invalid
 }
 
 inline constexpr DTYPE Distance(const VTYPE* a, const VTYPE* b, uint16_t dim, DistanceType distanceAlg) {

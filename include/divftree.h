@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <unordered_map>
+#include <vector>
 
 // Todo: better logs and asserts -> style: <Function name>(self data(a=?), input data): msg, additonal variables if needed
 
@@ -46,6 +48,10 @@ namespace divftree {
 struct MigrationCheckTask {
     VectorID first;
     VectorID second;
+};
+
+struct MergeTask {
+    VectorID target;
 };
 
 struct MigrationInfo {
@@ -364,6 +370,8 @@ public:
         uint16_t curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
         std::unordered_map<VectorID, uint16_t, VectorIDHash> in_list;
         std::unordered_set<VectorID, VectorIDHash> in_cluster;
+        in_cluster.reserve(curr_size);
+        in_list.reserve(curr_size);
         while(curr_size != old_size) {
             /* this will overflow and i will get greater than size when it gets to 0 */
             uint16_t last_seen = old_size - 1;
@@ -769,6 +777,8 @@ protected:
 
     std::vector<Thread*> migrators;
     BlockingQueue<MigrationCheckTask> migration_tasks;
+    std::vector<Thread*> mergers;
+    BlockingQueue<MergeTask> merge_tasks;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -1033,8 +1043,12 @@ protected:
             clusters[i]->cluster.header.num_deleted.store(0, std::memory_order_relaxed);
             clusters[i]->cluster.header.visible_size.store(size, std::memory_order_relaxed);
 
-            ComputeCentroid(clusters[i]->cluster.Data(0, is_leaf, base->attr.block_size, base->attr.cap, attr.dimension),
-                            size, nullptr, 0, attr.dimension, attr.distanceAlg, &centroids.data[i * attr.dimension]);
+            bool res = ComputeCentroid(clusters[i]->cluster.Data(0, is_leaf, base->attr.block_size,
+                                                                 base->attr.cap, attr.dimension),
+                                       size, nullptr, 0, attr.dimension, attr.distanceAlg,
+                                       &centroids.data[i * attr.dimension]);
+            UNUSED_VARIABLE(res);
+            FatalAssert(res, LOG_TAG_CLUSTERING, "cluster is empty!");
         }
 
     }
@@ -1379,6 +1393,7 @@ protected:
             CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
             if (container_entry->centroidMeta.selfId == rootId) {
                 /* we can be sure that we remain root as changing the current root requires exclusive lock on it */
+                /* todo: can it cause problems since we are loading reserve first then deleted? -> we may see num_deleted > reserved */
                 if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
                     container->cluster.header.num_deleted.load(std::memory_order_acquire)) > 1) {
                     bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
@@ -1401,8 +1416,14 @@ protected:
                 }
             }
 
-            if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
-                container->cluster.header.num_deleted.load(std::memory_order_acquire)) >= 1) {
+            uint16_t deleted = container->cluster.header.num_deleted.load(std::memory_order_acquire);
+            uint16_t reserved = container->cluster.header.reserved_size.load(std::memory_order_acquire);
+            if ((reserved - deleted) >= 1) {
+                if ((reserved - deleted) < container->attr.min_size) {
+                    bool res = merge_tasks.Push(MergeTask{container_entry->centroidMeta.selfId});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                }
                 bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
                 return;
             }
@@ -1676,6 +1697,13 @@ protected:
                                            ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
         } else {
             src_cluster->cluster.header.num_deleted.fetch_add(batch.size);
+            if ((src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire) -
+                src_cluster->cluster.header.num_deleted.load(std::memory_order_acquire)) <
+                src_cluster->attr.min_size) {
+                bool res = merge_tasks.Push(MergeTask{src_id});
+                UNUSED_VARIABLE(res);
+                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+            }
             BufferVertexEntry* src_entry_cpy = *src_entry;
             *src_entry = nullptr;
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
@@ -1821,6 +1849,7 @@ protected:
             void* meta = clusters[cn]->cluster.MetaData(0, ids[1].IsLeaf(), clusters[cn]->attr.block_size,
                                                         clusters[cn]->attr.cap, attr.dimension);
             std::unordered_set<VectorID, VectorIDHash> seen;
+            seen.reserve(visible_size[cn]);
             for (uint16_t i = visible_size[cn] - 1; i != UINT16_MAX; --i) {
                 if (ids[1].IsLeaf()) {
                     VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
@@ -2049,8 +2078,92 @@ protected:
         return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
     }
 
+    void MergeCheck(VectorID target) {
+        CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
+        CHECK_VECTORID_IS_CENTROID(target, LOG_TAG_DIVFTREE);
+
+        RetStatus rs = RetStatus::Success();
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+        BufferVertexEntry* target_entry = bufferMgr->ReadBufferEntry(target, SX_SHARED);
+        if (target_entry == nullptr) {
+            return;
+        }
+        Version target_ver = target_entry->currentVersion;
+
+        VectorLocation target_loc;
+        BufferVertexEntry* parent_entry = target_entry->ReadParentEntry(target_loc);
+        if (parent_entry == nullptr) {
+            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+
+        DIVFTreeVertex* target_cluster = static_cast<DIVFTreeVertex*>(target_entry->ReadLatestVersion());
+        CHECK_NOT_NULLPTR(target_cluster, LOG_TAG_DIVFTREE);
+        DIVFTreeVertex* parent_cluster = static_cast<DIVFTreeVertex*>(parent_entry->ReadLatestVersion());
+        CHECK_NOT_NULLPTR(parent_cluster, LOG_TAG_DIVFTREE);
+
+        uint16_t target_num_deleted = target_cluster->cluster.header.num_deleted.load(std::memory_order_acquire);
+        uint16_t target_size = target_cluster->cluster.header.visible_size.load(std::memory_order_acquire);
+        if (target_size - target_num_deleted == 0) {
+            bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+
+        VTYPE target_centroid[attr.dimension];
+        bool res = ComputeCentroid(target_cluster->cluster, target_cluster->attr.block_size, target_cluster->attr.cap,
+                                   target.IsLeaf(), nullptr, 0, attr.dimension, attr.distanceAlg, target_centroid);
+        if (!res) {
+            bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            return;
+        }
+
+        FatalAssert(parent_cluster->cluster.NumBlocks(parent_cluster->attr.block_size, parent_cluster->attr.cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "cannot handle more than 1 block!");
+        VTYPE* data = parent_cluster->cluster.Data(0, false, parent_cluster->attr.block_size, parent_cluster->attr.cap,
+                                                   attr.dimension);
+        CentroidMetaData* vmd =
+            static_cast<CentroidMetaData*>(parent_cluster->cluster.MetaData(0, false, parent_cluster->attr.block_size,
+                                           parent_cluster->attr.cap, attr.dimension));
+
+        uint16_t parent_size = parent_cluster->cluster.header.visible_size.load(std::memory_order_acquire);
+        unordered_set<VectorID, VectorIDHash> seen;
+        seen.reserve(parent_size);
+        DTYPE best_dist;
+        VectorID best_id = INVALID_VECTOR_ID;
+        Version best_version;
+        for (uint16_t i = parent_size - 1; i != UINT16_MAX; --i) {
+            if ((vmd[i].id == target) || (seen.find(vmd[i].id) != seen.end()) ||
+                vmd[i].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID) {
+                continue;
+            }
+            seen.emplace(vmd[i].id);
+
+            if (best_id == INVALID_VECTOR_ID) {
+                best_id = vmd[i].id;
+                best_version = vmd[i].version;
+                best_dist = Distance(target_centroid, &data[i * attr.dimension], attr.dimension, attr.distanceAlg);
+            } else {
+                DTYPE dist = Distance(target_centroid, &data[i * attr.dimension], attr.dimension, attr.distanceAlg);
+                if (MoreSimilar(dist, best_dist, attr.distanceAlg)) {
+                    best_id = vmd[i].id;
+                    best_version = vmd[i].version;
+                    best_dist = dist;
+                }
+            }
+        }
+
+        bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+
+        /* todo: change in multi node */
+        Merge(target, target_ver, best_id, best_version);
+    }
+
     void SearchRoot(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
-                         DIVFTreeVertex* pinned_root_version) {
+                    DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
         CHECK_NOT_NULLPTR(pinned_root_version, LOG_TAG_DIVFTREE);
@@ -2063,12 +2176,13 @@ protected:
                     "the highest level should only contain the pinned version of the root");
         FatalAssert(span > 0, LOG_TAG_DIVFTREE, "span cannot be 0");
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
+        seen.reserve(pinned_root_version->attr.cap);
         layers[level - 1].reserve(span + 1);
         pinned_root_version->Search(query, span, layers[level - 1], seen);
     }
 
     /* todo: use multiple threads for searching each layer -> what if we use a single pool for all searches?
-       if there are few threads, they will do the search layer themselves but if there are free threads they 
+       if there are few threads, they will do the search layer themselves but if there are free threads they
        can help each other */
     void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
                      uint8_t level) {
@@ -2079,6 +2193,8 @@ protected:
         FatalAssert(layers[level - 1].empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
         layers[level - 1].reserve(span + 1);
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
+        seen.reserve(layers[level].size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
+                                                                                         attr.internal_max_size));
         for (size_t i = 0; i < layers[level].size(); ++i) {
             DIVFTreeVertex* vertex =
                 static_cast<DIVFTreeVertex*>(bufferMgr->
@@ -2217,17 +2333,43 @@ protected:
         self->DestroyDIVFThread();
     }
 
+    inline void BGMerge(Thread* self) {
+        CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
+        self->InitDIVFThread();
+
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        while (!end_signal.load(std::memory_order_acquire)) {
+            MergeTask nextTask;
+            if (merge_tasks.PopHead(nextTask)) {
+                MergeCheck(nextTask.target);
+            }
+        }
+        self->DestroyDIVFThread();
+    }
+
     inline void StartBGThreads() {
         migrators.reserve(attr.num_migrators);
         for (size_t i = 0; i < attr.num_migrators; ++i) {
             migrators.emplace_back(new Thread(attr.random_base_perc));
             migrators.back()->Start(BGMigration, migrators.back());
         }
+
+        mergers.reserve(attr.num_mergers);
+        for (size_t i = 0; i < attr.num_mergers; ++i) {
+            mergers.emplace_back(new Thread(attr.random_base_perc));
+            mergers.back()->Start(BGMerge, mergers.back());
+        }
     }
 
     inline void DestroyBGThreads() {
         FatalAssert(end_signal.load(std::memory_order_acquire), LOG_TAG_DIVFTREE,
                     "We should be ending if we are here!");
+        for (size_t i = 0; i < attr.num_mergers; ++i) {
+            delete mergers[i];
+        }
+
         for (size_t i = 0; i < attr.num_migrators; ++i) {
             delete migrators[i];
         }

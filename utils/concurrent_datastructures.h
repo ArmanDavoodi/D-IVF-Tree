@@ -92,7 +92,7 @@ public:
     }
 
     inline bool PopHead(T& value) {
-        return q.wait_dequeue_timed(value, std::chrono::milliseconds(1));
+        return q.wait_dequeue_timed(value, std::chrono::microseconds(10));
     }
 
     inline bool TryPopHead(T& value) {

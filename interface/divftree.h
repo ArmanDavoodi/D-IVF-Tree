@@ -7,7 +7,7 @@
 
 #include "utils/thread.h"
 
-#include <map>
+#include <unordered_set>
 
 namespace divftree {
 
@@ -47,6 +47,7 @@ struct DIVFTreeAttributes {
     uint16_t dimension;
 
     size_t num_migrators;
+    size_t num_mergers;
 
     uint32_t migration_check_triger_rate;
     uint32_t migration_check_triger_single_rate;
