@@ -1147,13 +1147,156 @@ public:
         return RetStatus::Succsess();
     }
 
-    inline size_t GetVertexLayerSize(uint8_t level) {
+    VectorID GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclude = INVALID_VECTOR_ID,
+                                        bool need_lock = true, uint64_t* num_retries = nullptr) const {
         FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                     "Level is out of bounds.");
-        handleLock.Lock(SX_SHARED);
-        size_t s = clusterDirectory[level - 1].size();
-        handleLock.Unlock();
-        return s;
+        if (need_lock) {
+            bufferMgrLock.Lock(SX_SHARED);
+        }
+        threadSelf->SanityCheckLockHeldByMe(&bufferMgrLocK);
+
+        if ((uint64_t)level >= currentRootId.load(std::memory_order_relaxed)._level) {
+            if (need_lock) {
+                bufferMgrLock.Unlock();
+            }
+            return INVALID_VECTOR_ID;
+        }
+
+        VectorID ret = exclude;
+        uint64_t num_retry = 0;
+        if (num_retries == nullptr) {
+            num_retries = &num_retry;
+        }
+        /* todo: add a stat collection code here to see how many times this fails and rethink if it is a bottelneck */
+        while (ret == exclude) {
+            ret._level = level;
+            ret._creator_node_id = 0; /* todo: rething in multi-node */
+            ret._val = threadSelf->UniformRange64(0, clusterDirectory[level - 1].size());
+            BufferVertexEntry* vertex = GetVertexEntry(ret, false);
+            if (vertex == nullptr || vertex->state.load(std::memory_order_acquire) != CLUSTER_STABLE) {
+                ret = exclude;
+            }
+            ++(*num_retries);
+            if ((*num_retries) >= Thread::MAX_RETRY) {
+                ret = INVALID_VECTOR_ID;
+                break;
+            }
+        }
+
+        if (need_lock) {
+            bufferMgrLock.Unlock();
+        }
+
+        return ret;
+    }
+
+    std::pair<VectorID, VectorID> GetTwoRandomCentroidIdAtLayer(uint8_t level, bool need_lock = true) const {
+        FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+        if (need_lock) {
+            bufferMgrLock.Lock(SX_SHARED);
+        }
+        threadSelf->SanityCheckLockHeldByMe(&bufferMgrLocK);
+
+        if ((uint64_t)level >= currentRootId.load(std::memory_order_relaxed)._level) {
+            if (need_lock) {
+                bufferMgrLock.Unlock();
+            }
+            return INVALID_VECTOR_ID;
+        }
+
+        uint64_t num_retries = 0;
+
+        VectorID first = INVALID_VECTOR_ID;
+        VectorID second = INVALID_VECTOR_ID;
+
+        first._level = level;
+        first._creator_node_id = 0; /* todo: rething in multi-node */
+        second._level = level;
+        second._creator_node_id = 0; /* todo: rething in multi-node */
+
+        /* todo: add a stat collection code here to see how many times this fails and rethink if it is a bottelneck */
+        while (true) {
+            auto& index = threadSelf->UniformRangeTwo64(0, clusterDirectory[level - 1].size());
+            first._val = index.first;
+
+            if (index.first == index.second) {
+                BufferVertexEntry* vertex = GetVertexEntry(first, false);
+                if (vertex == nullptr || vertex->state.load(std::memory_order_acquire) != CLUSTER_STABLE) {
+                    ++num_retries;
+                    if (num_retries >= Thread::MAX_RETRY) {
+                        first = INVALID_VECTOR_ID;
+                        second = INVALID_VECTOR_ID;
+                        break;
+                    }
+                    continue;
+                }
+
+                second = GetRandomCentroidIdAtLayer(level, first, false, &num_retries);
+                if (second == INVALID_VECTOR_ID) {
+                    first = INVALID_VECTOR_ID;
+                }
+                break;
+            }
+            second._val = index.second;
+
+            BufferVertexEntry* first_vertex = GetVertexEntry(first, false);
+            BufferVertexEntry* second_vertex = GetVertexEntry(second, false);
+            bool first_unusable =
+                (first_vertex == nullptr || first_vertex->state.load(std::memory_order_acquire) != CLUSTER_STABLE);
+            bool second_unusable =
+                (second_vertex == nullptr || second_vertex->state.load(std::memory_order_acquire) != CLUSTER_STABLE);
+            if (first_unusable && second_unusable) {
+                ++num_retries;
+                if (num_retries >= Thread::MAX_RETRY) {
+                    first = INVALID_VECTOR_ID;
+                    second = INVALID_VECTOR_ID;
+                    break;
+                }
+                continue;
+            }
+
+            if (first_unusable) {
+                std::swap(first, second);
+                second_unusable = true;
+            }
+
+            if (second_unusable) {
+                second = GetRandomCentroidIdAtLayer(level, first, false, &num_retries);
+            }
+
+            if ((num_retries >= Thread::MAX_RETRY) || (first == INVALID_VECTOR_ID) || (second == INVALID_VECTOR_ID)) {
+                first = INVALID_VECTOR_ID;
+                second = INVALID_VECTOR_ID;
+            }
+            break;
+        }
+
+        if (need_lock) {
+            bufferMgrLock.Unlock();
+        }
+        return std::make_pair(first, second);
+    }
+
+    VectorID GetRandomCentroidIdAtNonRootLayer(VectorID exclude = INVALID_VECTOR_ID) const {
+        FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+        bufferMgrLock.Lock(SX_SHARED);
+        uint8_t level = threadSelf->UniformRange32(1, currentRootId.load(std::memory_order_relaxed)._level - 1);
+        VectorID ret = GetRandomCentroidIdAtLayer(level, exclude, false);
+        bufferMgrLock.Unlock();
+        return ret;
+    }
+
+    std::pair<VectorID, VectorID> GetTwoRandomCentroidIdAtNonRootLayer() const {
+        FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
+                    "Level is out of bounds.");
+        bufferMgrLock.Lock(SX_SHARED);
+        uint8_t level = threadSelf->UniformRange32(1, currentRootId.load(std::memory_order_relaxed)._level - 1);
+        std::pair<VectorID, VectorID> ret = GetTwoRandomCentroidIdAtLayer(level, exclude, false);
+        bufferMgrLock.Unlock();
+        return ret;
     }
 
 protected:

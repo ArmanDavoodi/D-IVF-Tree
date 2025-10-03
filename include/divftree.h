@@ -2109,6 +2109,7 @@ protected:
         uint8_t current_level = start_level;
         uint8_t span;
         while (current_level > end_level) {
+            /* migration trigger check */
             if ((layers[current_level].size() > 1) &&
                 (threadSelf->UniformBinary(attr.migration_check_triger_rate))) {
                 VectorID firstId = INVALID_VECTOR_ID;
@@ -2117,27 +2118,32 @@ protected:
                     uint64_t index = threadSelf->UniformRange64(0, layers[current_level].size());
                     firstId = layers[current_level][index].id;
                     /* todo: this will not work when we have multi node system as it relies on creator node id to be 0*/
-                    do {
-                        uint64_t second_vertex_idx =
-                            threadSelf->UniformRange64(0, bufferMgr->GetVertexLayerSize(current_level));
-                        secondId._val = second_vertex_idx;
-                        secondId._level = current_level;
-                        secondId._creator_node_id = 0;
-                    } while(secondId == firstId); /* todo: a better approach than while! */
+                    secondId = bufferMgr->GetRandomCentroidIdAtLayer(current_level, firstId);
+                    if (secondId == INVALID_VECTOR_ID) {
+                        firstId = INVALID_VECTOR_ID;
+                    }
                 } else {
                     auto indices = threadSelf->UniformRangeTwo64(0, layers[current_level].size());
                     firstId = layers[current_level][indices.first].id;
                     secondId = layers[current_level][indices.second].id;
-                    /* todo: a better approach than while! */
+                    uint64_t num_retry = 0;
                     while(secondId == firstId) {
                         uint64_t index = threadSelf->UniformRange64(0, layers[current_level].size());
                         secondId = layers[current_level][index].id;
+                        ++num_retry;
+                        if (num_retry >= Thread::MAX_RETRY) {
+                            firstId = INVALID_VECTOR_ID;
+                            secondId = INVALID_VECTOR_ID;
+                            break;
+                        }
                     }
                 }
 
-                bool res = migration_tasks.Push(MigrationCheckTask{.first=firstId, .second=secondId});
-                UNUSED_VARIABLE(res);
-                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                if ((secondId != INVALID_VECTOR_ID) && (firstId != INVALID_VECTOR_ID)) {
+                    bool res = migration_tasks.Push(MigrationCheckTask{.first=firstId, .second=secondId});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                }
             }
 
 
@@ -2192,14 +2198,21 @@ protected:
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
         self->InitDIVFThread();
 
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
         while (!end_signal.load(std::memory_order_acquire)) {
             MigrationCheckTask nextTask;
-            if (migration_tasks.PopHead(nextTask)) {
-                if (nextTask.first > nextTask.second) {
-                    std::swap(nextTask.first, nextTask.second);
-                }
+            if (migration_tasks.TryPopHead(nextTask)) {
                 MigrationCheck(nextTask.first, nextTask.second);
-            } /* todo: add else clause and chose two random clusters to migrate? or maybe use tryPop instead */
+            } else {
+                auto ids = bufferMgr->GetTwoRandomCentroidIdAtNonRootLayer();
+                if ((ids.first != INVALID_VECTOR_ID) && (ids.second != INVALID_VECTOR_ID)) {
+                    MigrationCheck(ids.first, ids.second);
+                } else {
+                    usleep(1);
+                }
+            }
         }
         self->DestroyDIVFThread();
     }

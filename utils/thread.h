@@ -347,6 +347,15 @@ public:
         std::uniform_int_distribution<uint64_t> temp_dist(first, second);
         return std::make_pair(_gen64(temp_dist), _gen64(temp_dist));
     }
+
+    /*
+     * even if there are only 5 vectors in a layer the probablity of choosing taht cluster is 20%.
+     * Therefore, if we retry 21 times it should be highly unlikely that this happens. In case we do not succeed.
+     * Now if 80% of the clusters in the layer are unusable(delete/Not stable), (which is not a good case!) the
+     * probablity of us failing to get a good cluster after 21 retries is less than 1%.
+     */
+    inline static constexpr Thread::MAX_RETRY = 21;
+
 protected:
     static inline std::atomic<DIVFThreadID> nextId = 0;
 
