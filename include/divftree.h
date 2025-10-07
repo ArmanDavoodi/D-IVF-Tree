@@ -2341,7 +2341,7 @@ protected:
             }
 
             lists.insert(reinterpret_cast<uintptr_t>(tasks[i].neighbours));
-            layers[level - 1].MergeWith(*tasks[i].neighbours, span);
+            layers[level - 1].MergeWith(*tasks[i].neighbours, span, false);
             delete tasks[i].neighbours;
             tasks[i].neighbours = nullptr;
         }

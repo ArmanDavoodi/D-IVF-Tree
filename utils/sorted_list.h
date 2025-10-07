@@ -104,20 +104,21 @@ public:
         data.clear();
     }
 
-    inline void MergeWith(const SortedList<T, CMP>& other) {
-        FatalAssert(other.cmp == cmp, LOG_TAG_BASIC, "cannot merge two lists with different comparators!");
-        std::vector<T> tmp;
-        tmp.reserve(data.size() + other.Size());
-        std::merge(data.begin(), data.end(), other.data.begin(), other.data.end(), std::back_inserter(tmp));
-        data.swap(tmp);
-    }
-
-    inline void MergeWith(const SortedList<T, CMP>& other, size_t limit) {
+    inline void MergeWith(const SortedList<T, CMP>& other, size_t limit, bool include_duplicates = true) {
         FatalAssert(other.cmp == cmp, LOG_TAG_BASIC, "cannot merge two lists with different comparators!");
         std::vector<T> tmp;
         tmp.reserve(std::min(limit, data.size() + other.Size()));
         size_t i = 0, j = 0;
         while (tmp.size() < limit && i < data.size() && j < other.data.size()) {
+            if (!include_duplicates && tmp.size() > 0) {
+                while (tmp.back() == data[i]) {
+                    i++;
+                }
+
+                while (tmp.back() == other.data[j]) {
+                    j++;
+                }
+            }
             if (data[i] <= other.data[j]) {
                 tmp.push_back(data[i++]);
             } else {
@@ -126,10 +127,18 @@ public:
         }
 
         while (tmp.size() < limit && i < data.size()) {
+            if (!include_duplicates && tmp.size() > 0 && tmp.back() == data[i]) {
+                i++;
+                continue;
+            }
             tmp.push_back(data[i++]);
         }
 
         while (tmp.size() < limit && j < other.data.size()) {
+            if (!include_duplicates && tmp.size() > 0 && tmp.back() == other.data.[j]) {
+                j++;
+                continue;
+            }
             tmp.push_back(other.data[j++]);
         }
 
