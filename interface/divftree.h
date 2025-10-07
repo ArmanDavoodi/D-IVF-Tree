@@ -6,6 +6,7 @@
 #include "distance.h"
 
 #include "utils/thread.h"
+#include "utils/sorted_list.h"
 
 #include <unordered_set>
 
@@ -23,7 +24,7 @@ struct DIVFTreeVertexAttributes {
     DIVFTreeVertexAttributes() : centroid_id{INVALID_VECTOR_ID}, version{0}, min_size{0}, cap{0}, block_size{0}, index{nullptr}; /* todo: to be remvoed */
     DIVFTreeVertexAttributes(VectorID id, Version ver, uint16_t min,
                              uint16_t max, uint16_t blck_size, DIVFTreeInterface* idx) :
-                                centroid_id{id}, version{ver}, min_size{min}, cap{max}, block_size{blck_size},\
+                                centroid_id{id}, version{ver}, min_size{min}, cap{max}, block_size{blck_size},
                                 index{idx};
 };
 
@@ -102,8 +103,9 @@ public:
                                         Version* version = nullptr) = 0;
     virtual RetStatus ChangeVectorState(Address meta, VectorState& expectedState, VectorState finalState,
                                         Version* version = nullptr) = 0;
-    virtual void Search(const VTYPE* query, size_t k, std::vector<ANNVectorInfo>& neighbours,
-                     std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) = 0;
+    virtual void Search(const VTYPE* query, size_t k,
+                        SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
+                        std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) = 0;
     // virtual String ToString(bool detailed = false) const = 0;
 };
 

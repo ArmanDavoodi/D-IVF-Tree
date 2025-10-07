@@ -9,7 +9,7 @@
 
 namespace divftree {
 
-using SimilarityComparator = bool (*)(const ANNVectorInfo&, const ANNVectorInfo&);
+using SimilarityComparator = int (*)(const ANNVectorInfo&, const ANNVectorInfo&);
 
 namespace L2 {
 
@@ -25,15 +25,15 @@ inline constexpr DTYPE Distance(const VTYPE* a, const VTYPE* b, uint16_t dim) {
 }
 
 /* todo: A better method(compared to passing a pointer) to allow inlining for optimization */
-inline constexpr bool MoreSimilar(const DTYPE& a, const DTYPE& b) {
-    return a < b;
+inline constexpr int MoreSimilar(const DTYPE& a, const DTYPE& b) {
+    return (a == b ? 0 : (a < b ? 1 : -1));
 }
 
-inline constexpr bool MoreSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo& b) {
+inline constexpr int MoreSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo& b) {
     return MoreSimilar(a.distance_to_query, b.distance_to_query);
 }
 
-inline constexpr bool LessSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo& b) {
+inline constexpr int LessSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo& b) {
     return MoreSimilar(b.distance_to_query, a.distance_to_query);
 }
 

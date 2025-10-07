@@ -59,20 +59,22 @@ struct CompactionTask {
 };
 
 struct SearchTask {
-    DIVFThreadID master;
-    uint64_t taskId;
-    VectorID target;
-    Version version;
+    const DIVFThreadID master;
+    const uint64_t taskId;
+    const VectorID target;
+    const Version version;
+    const VTYPE* query;
+    const size_t k;
+
     std::atomic<bool> taken;
     std::atomic<bool> done;
     bool done_waiting;
-    const VTYPE* query;
-    size_t k;
-    std::vector<ANNVectorInfo>** neighbours;
+    SortedList<ANNVectorInfo, SimilarityComparator>* neighbours;
 
-    SearchTask(VectorID id, Version ver, const VTYPE* q, size_t span) : master(threadSelf->ID()),
-        taskId(threadSelf->GetNextTaskID()), target(id), version(ver), taken(false),
-        done(false), done_waiting(false), query(q), k(span), neighbours(nullptr) {}
+    SearchTask(VectorID id, Version ver, const VTYPE* q, size_t span) :
+        master(threadSelf->ID()), taskId(threadSelf->GetNextTaskID()),
+        target(id), version(ver), query(q), k(span),
+        taken(false), done(false), done_waiting(false), neighbours(nullptr) {}
 };
 
 struct MigrationInfo {
@@ -379,17 +381,17 @@ public:
                 RetStatus{.stat=RetStatus::FAILED_TO_CAS_VECTOR_STATE, .message=nullptr});
     }
 
-    void Search(const VTYPE* query, size_t k, std::vector<ANNVectorInfo>& neighbours,
+    void Search(const VTYPE* query, size_t k, SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
                 std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) override {
         /* todo: should I also ignore same vectors with different versions? e.g. if it is newer replace o.w ignore */
+        FatalAssert(neighbours.Size() <= k, LOG_TAG_DIVFTREE_VERTEX, "neighbour list size out of bounds!");
         const uint16_t dim = attr.index->GetAttributes().dimension;
         const DistanceType dtype = attr.index->GetAttributes().distanceAlg;
-        const SimilarityComparator cmp = attr.index->GetAttributes().reverseSimilarityComparator;
         VTYPE* data = cluster.Data(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
         Address meta = cluster.MetaData(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
         uint16_t old_size = 0;
         uint16_t curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
-        std::unordered_map<VectorID, uint16_t, VectorIDHash> in_list;
+        std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash> in_list;
         std::unordered_set<VectorID, VectorIDHash> in_cluster;
         in_cluster.reserve(curr_size);
         in_list.reserve(curr_size);
@@ -408,12 +410,10 @@ public:
                     case VECTOR_STATE_VALID:
                     case VECTOR_STATE_MIGRATED:
                         new_vector = ANNVectorInfo(Distance(query, &data[i * dim], dim, dtype), vmd[i].id);
-                        neighbours.emplace_back(new_vector);
+                        neighbours.Insert(new_vector);
                         seen.emplace(new_vector.id, new_vector.version);
-                        std::push_heap(neighbours.begin(), neighbours.end(), cmp);
-                        while (neighbours.size() > k) {
-                            std::pop_heap(neighbours.begin(), neighbours.end(), cmp);
-                            neighbours.pop_back();
+                        if (neighbours.Size() > k) {
+                            neighbours.PopBack();
                         }
                         break;
                     case VECTOR_STATE_OUTDATED:
@@ -427,44 +427,39 @@ public:
                         continue;
                     }
 
-                    std::unordered_map<divftree::VectorID, uint16_t, divftree::VectorIDHash>::iterator emplace_res;
+                    std::unordered_map<divftree::VectorID, std::pair<uint16_t, DTYPE>,
+                                       divftree::VectorIDHash>::iterator emplace_res;
                     switch (vmd[i].state.load(std::memory_order_acquire)) {
                     case VECTOR_STATE_VALID:
                     case VECTOR_STATE_MIGRATED:
                         auto check = in_list.find(vmd[i].id);
                         if (check != in_list.end()) { /* todo: we can handle this case much more efficiently! */
                             /* a vector was outdated in a previous pass */
-                            FatalAssert((vmd[check->second].id == vmd[i].id) &&
-                                        (vmd[check->second].state.load(std::memory_order_acquire) ==
-                                        VECTOR_STATE_OUTDATED) && (vmd[check->second].version < vmd[i].version),
+                            FatalAssert((vmd[check->second.first].id == vmd[i].id) &&
+                                        (vmd[check->second.first].state.load(std::memory_order_acquire) ==
+                                        VECTOR_STATE_OUTDATED) && (vmd[check->second.first].version < vmd[i].version),
                                         LOG_TAG_DIVFTREE_VERTEX,
                                         "the one that we have seen before should be outdated!");
-                            size_t j = 0;
-                            for (; j < neighbours.size(); ++j) {
-                                if (neighbours[j].id == vmd[i].id) {
-                                    break;
-                                }
-                            }
-                            FatalAssert((j < neighbours.size()) &&
-                                        neighbours[j].version ==
-                                        vmd[check->second].state.load(std::memory_order_acquire),
+                            ANNVectorInfo outdated(check->second.second, vmd[check->second.first].id,
+                                                   vmd[check->second.first].version);
+                            auto it = neighbours.Find(outdated);
+                            FatalAssert((it != neighbours.end()),
                                         LOG_TAG_DIVFTREE_VERTEX, "Could not find the outdated version!");
-                            neighbours[j] = neighbours.back();
-                            neighbours.pop_back();
-                            std::make_heap(neighbours.begin(), neighbours.end());
-                            check->second = i;
+                            neighbours.Erase(it);
+                            check->second.first = i;
+                            check->second.second = Distance(query, &data[i * dim], dim, dtype);
                             emplace_res = check;
                         } else {
-                            emplace_res = in_list.emplace(new_vector.id, i).first;
+                            emplace_res = in_list.emplace(new_vector.id, i,
+                                                          Distance(query, &data[i * dim], dim, dtype)).first;
                         }
-                        new_vector = ANNVectorInfo(Distance(query, &data[i * dim], dim, dtype), vmd[i].id);
-                        neighbours.emplace_back(new_vector);
+                        new_vector = ANNVectorInfo(emplace_res->second.second, vmd[i].id, vmd[i].version);
+                        neighbours.Insert(new_vector);
                         in_cluster.emplace(new_vector.id);
                         seen.emplace(new_vector.id, new_vector.version);
-                        std::push_heap(neighbours.begin(), neighbours.end(), cmp);
-                        while (neighbours.size() > k) {
-                            std::pop_heap(neighbours.begin(), neighbours.end(), cmp);
-                            if (new_vector == neighbours.back()) {
+                        if (neighbours.Size() > k) {
+                            auto to_be_deleted = std::prev(neighbours.end());
+                            if (new_vector == *to_be_deleted) {
                                 in_list.erase(emplace_res);
                             } else {
                                 auto it = in_list.find(new_vector.id);
@@ -472,7 +467,7 @@ public:
                                     in_list.erase(it);
                                 }
                             }
-                            neighbours.pop_back();
+                            neighbours.Erase(to_be_deleted);
                         }
                         break;
                     case VECTOR_STATE_OUTDATED:
@@ -571,7 +566,7 @@ public:
         CHECK_VECTORID_IS_VECTOR(vec_id, LOG_TAG_DIVFTREE);
         const ConstVectorBatch batch(vec, &vec_id, nullptr, 1);
 
-        std::vector<std::vector<ANNVectorInfo>&> layers;
+        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&> layers;
         VectorID target_leaf;
         Version target_version;
         BufferVertexEntry* leaf_entry = nullptr;
@@ -591,26 +586,28 @@ public:
                 }
 
                 layers.reserve(root->attr.centroid_id._level + 1);
-                for (uint64_t i = 0; i < root->attr.centroid_id._level; ++i) {
-                    layers.emplace_back(*(new std::vector<ANNVectorInfo>));
+                /* this layer represents vectors and we do not need them */
+                layers.emplace_back(nullptr);
+                for (uint64_t i = 1; i <= root->attr.centroid_id._level; ++i) {
+                    layers.emplace_back(
+                        *(new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator)));
                 }
-                layers.emplace_back(nullptr); /* this layer represents vectors and we do not need them */
 
                 rs = ANNSearch(vec, 1, search_span, 1,
-                            (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::LEAF_LEVEL,
-                            SortType::DecreasingSimilarity, layers, root);
+                               (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::LEAF_LEVEL,
+                               layers, root);
                 root->Unpin();
 
                 if (rs.IsOK()) {
-                    FatalAssert(layers[VectorID::LEAF_LEVEL].size() == 1, LOG_TAG_DIVFTREE,
+                    FatalAssert(layers[VectorID::LEAF_LEVEL].Size() == 1, LOG_TAG_DIVFTREE,
                                 "if rs is OK we should have found the leaf!");
                     VectorID leaf_id = layers[VectorID::LEAF_LEVEL][0].id;
                     Version leaf_version = layers[VectorID::LEAF_LEVEL][0].version;
                 }
 
-                for (uint64_t i = 0; i < layers.size() - 1; ++i) {
-                    std::vector<ANNVectorInfo>* vec = &layers[i];
-                    delete vec;
+                for (uint64_t i = 1; i < layers.size(); ++i) {
+                    SortedList<ANNVectorInfo, SimilarityComparator>* list = &layers[i];
+                    delete list;
                 }
                 layers.clear();
 
@@ -660,8 +657,8 @@ public:
         return RetStatus::Success();
     }
 
-    RetStatus ApproximateKNearestNeighbours(const VTYPE* query, size_t k,
-                                            uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
+    RetStatus ApproximateKNearestNeighbours(const VTYPE* query,
+                                            size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
                                             SortType sort_type, std::vector<ANNVectorInfo>& neighbours) override {
 
         CHECK_NOT_NULLPTR(query, LOG_TAG_DIVFTREE);
@@ -670,9 +667,6 @@ public:
         FatalAssert(internal_node_search_span > 0, LOG_TAG_DIVFTREE,
                     "Number of internal vertex neighbours cannot be 0.");
         FatalAssert(leaf_node_search_span > 0, LOG_TAG_DIVFTREE, "Number of leaf neighbours cannot be 0.");
-
-        neighbours.clear();
-        neighbours.reserve(k + 1);
 
         // CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
         //      "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
@@ -683,7 +677,7 @@ public:
 
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
-        std::vector<std::vector<ANNVectorInfo>&> layers;
+        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&> layers;
 
         while (real_size.load(std::memory_order_acquire) > 0) {
             DIVFTreeVertex* root =
@@ -691,25 +685,26 @@ public:
             CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
             layers.reserve(root->attr.centroid_id._level + 1);
-            for (uint64_t i = 0; i < root->attr.centroid_id._level; ++i) {
-                layers.emplace_back(*(new std::vector<ANNVectorInfo>));
+            for (uint64_t i = 0; i <= root->attr.centroid_id._level; ++i) {
+                layers.emplace_back(*(new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator)));
             }
-            layers.emplace_back(neighbours);
 
             rs = ANNSearch(query, k, internal_node_search_span, leaf_node_search_span,
-                           (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, sort_type,
-                           layers, root);
+                           (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, layers, root);
             root->Unpin();
 
-            for (uint64_t i = 0; i < layers.size() - 1; ++i) {
-                std::vector<ANNVectorInfo>* vec = &layers[i];
-                delete vec;
+            layers[0].Extract(neighbours, (sort_type == SortType::IncreasingSimilarity));
+            for (uint64_t i = 0; i < layers.size(); ++i) {
+                SortedList<ANNVectorInfo, SimilarityComparator>* list = &layers[i];
+                delete list;
             }
             layers.clear();
 
             if (rs.IsOK()) {
                 break;
             }
+
+            neighbours.clear();
         }
 
         return rs;
@@ -2228,7 +2223,8 @@ protected:
         Merge(target, target_ver, best_id, best_version);
     }
 
-    void SearchRoot(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
+    void SearchRoot(const VTYPE* query, size_t span,
+                    std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&>& layers,
                     DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
@@ -2236,21 +2232,19 @@ protected:
         CHECK_VECTORID_IS_VALID(pinned_root_version->attr.centroid_id, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(pinned_root_version->attr.centroid_id, LOG_TAG_DIVFTREE);
         uint8_t level = pinned_root_version->attr.centroid_id._level;
-        FatalAssert(layers[level].size() == 1 &&
+        FatalAssert(layers[level].Size() == 1 &&
                     layers[level][0].id == pinned_root_version->attr.centroid_id &&
                     layers[level][0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
                     "the highest level should only contain the pinned version of the root");
         FatalAssert(span > 0, LOG_TAG_DIVFTREE, "span cannot be 0");
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
         seen.reserve(pinned_root_version->attr.cap);
-        layers[level - 1].reserve(span + 1);
         pinned_root_version->Search(query, span, layers[level - 1], seen);
     }
 
     void SearchVertex(VectorID id, Version version, const VTYPE* query, size_t span,
-                      std::vector<ANNVectorInfo>& neighbours,
-                      std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen,
-                      SortType sort) {
+                      SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
+                      std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_DIVFTREE);
         CHECK_NOT_NULLPTR(query, LOG_TAG_DIVFTREE);
@@ -2273,50 +2267,30 @@ protected:
                 FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
             }
         }
-        vertex->Search(query, span, neighbours, seen, sort);
+        vertex->Search(query, span, neighbours, seen);
         vertex->Unpin();
     }
 
     /* todo: use multiple threads for searching each layer -> what if we use a single pool for all searches?
        if there are few threads, they will do the search layer themselves but if there are free threads they
        can help each other */
-    void SearchLayer(const VTYPE* query, size_t span, std::vector<std::vector<ANNVectorInfo>&>& layers,
-                     uint8_t level) {
-        FatalAssert(level < layers.size(), LOG_TAG_DIVFTREE, "level out of bounds!");
+    void SearchLayer(const VTYPE* query, size_t span,
+                     std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&>& layers, uint8_t level) {
+        FatalAssert(level < layers.size() - 1, LOG_TAG_DIVFTREE, "level out of bounds!");
         FatalAssert((uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_DIVFTREE, "level out of bounds!");
-        FatalAssert(layers[level - 1].empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
-        layers[level - 1].reserve(span + 1);
+        FatalAssert(layers[level - 1].Empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
-        seen.reserve(layers[level].size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
+        seen.reserve(layers[level].Size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
                                                                                          attr.internal_max_size));
-        // if (layers[level].size() == 1) {
-        //     FatalAssert(layers[level][0].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-        //     SearchVertex(layers[level][0].id, layers[level][0].version, query, span, layers[level - 1], seen);
-        // }
-
-        // bool outdated;
-        // DIVFTreeVertex* vertex =
-        //     static_cast<DIVFTreeVertex*>(bufferMgr->
-        //         ReadAndPinVertex(layers[level][i].id, layers[level][i].version, &outdated));
-        // CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
-        // FatalAssert(vertex->attr.centroid_id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-        // if (!outdated) {
-        //     uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);
-        //     uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);
-        //     if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
-        //                           (double)deleted / (double)reserved)))) {
-        //         bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
-        //         UNUSED_VARIABLE(res);
-        //         FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
-        //     }
-        // }
-        // vertex->Search(query, span, layers[level - 1], seen);
-        // vertex->Unpin();
+        if (layers[level].Size() == 1) {
+            FatalAssert(layers[level][0].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+            SearchVertex(layers[level][0].id, layers[level][0].version, query, span, layers[level - 1], seen);
+        }
         std::vector<SearchTask> tasks;
-        tasks.reserve(layers[level].size());
-        for (size_t i = 0; i < layers[level].size(); ++i) {
-            FatalAssert(layers[level][i].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-            tasks.emplace_back(layers[level][i].id, layers[level][i].version, query, span);
+        tasks.reserve(layers[level].Size());
+        for (auto it : layers[level]) {
+            FatalAssert(it.id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+            tasks.emplace_back(it.id, it.version, query, span);
         }
 
         bool rs = search_tasks.BatchPush(&tasks[0], tasks.size());
@@ -2354,21 +2328,27 @@ protected:
         }
 
         /* todo: check if I need a better algorithm for this */
-        const SimilarityComparator cmp = attr.similarityComparator;
+        std::unordered_set<uintptr_t> lists;
         for (size_t i = 0; i < tasks.size(); ++i) {
             if (tasks[i].neighbours == nullptr) {
                 continue;
             }
-            CHECK_NOT_NULLPTR(*tasks[i].neighbours, LOG_TAG_DIVFTREE);
+            if (lists.find(reinterpret_cast<uintptr_t>(tasks[i].neighbours)) != lists.end()) {
+                tasks[i].neighbours = nullptr;
+                continue;
+            }
 
-            std::vector<ANNVectorInfo>& current_neigh = **tasks[i].neighbours;
-            while(!current_neigh.empty() && MoreSimilar(current_neigh.))
+            lists.insert(reinterpret_cast<uintptr_t>(tasks[i].neighbours));
+            layers[level - 1].MergeWith(*tasks[i].neighbours, span);
+            delete tasks[i].neighbours;
+            tasks[i].neighbours = nullptr;
         }
     }
 
     RetStatus ANNSearch(const VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
-                        uint8_t start_level, uint8_t end_level, SortType sort_type,
-                        std::vector<std::vector<ANNVectorInfo>&>& layers, DIVFTreeVertex* pinned_root_version) {
+                        uint8_t start_level, uint8_t end_level,
+                        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&>& layers,
+                        DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         RetStatus rs = RetStatus::Success();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
@@ -2385,12 +2365,12 @@ protected:
         uint8_t span;
         while (current_level > end_level) {
             /* migration trigger check */
-            if ((layers[current_level].size() > 1) &&
+            if ((layers[current_level].Size() > 1) &&
                 (threadSelf->UniformBinary(attr.migration_check_triger_rate))) {
                 VectorID firstId = INVALID_VECTOR_ID;
                 VectorID secondId = INVALID_VECTOR_ID;
                 if (threadSelf->UniformBinary(attr.migration_check_triger_single_rate)) {
-                    uint64_t index = threadSelf->UniformRange64(0, layers[current_level].size());
+                    uint64_t index = threadSelf->UniformRange64(0, layers[current_level].Size());
                     firstId = layers[current_level][index].id;
                     /* todo: this will not work when we have multi node system as it relies on creator node id to be 0*/
                     secondId = bufferMgr->GetRandomCentroidIdAtLayer(current_level, firstId);
@@ -2398,12 +2378,12 @@ protected:
                         firstId = INVALID_VECTOR_ID;
                     }
                 } else {
-                    auto indices = threadSelf->UniformRangeTwo64(0, layers[current_level].size());
+                    auto indices = threadSelf->UniformRangeTwo64(0, layers[current_level].Size());
                     firstId = layers[current_level][indices.first].id;
                     secondId = layers[current_level][indices.second].id;
                     uint64_t num_retry = 0;
                     while(secondId == firstId) {
-                        uint64_t index = threadSelf->UniformRange64(0, layers[current_level].size());
+                        uint64_t index = threadSelf->UniformRange64(0, layers[current_level].Size());
                         secondId = layers[current_level][index].id;
                         ++num_retry;
                         if (num_retry >= Thread::MAX_RETRY) {
@@ -2433,14 +2413,14 @@ protected:
                             "if it is at vector level, the first condition will handle it.");
                 span = leaf_node_search_span;
             }
-            FatalAssert(!layers[current_level].empty(), LOG_TAG_DIVFTREE,
+            FatalAssert(!layers[current_level].Empty(), LOG_TAG_DIVFTREE,
                         "current level cannot be empty!");
-            FatalAssert(layers[next_level].empty(), LOG_TAG_DIVFTREE,
+            FatalAssert(layers[next_level].Empty(), LOG_TAG_DIVFTREE,
                         "next level should be empty!");
             FatalAssert(span > 0, LOG_TAG_DIVFTREE,
                         "span should be at least 1");
             if (pinned_root_version->attr.centroid_id._level == current_level) {
-                FatalAssert(layers[current_level].size() == 1 &&
+                FatalAssert(layers[current_level].Size() == 1 &&
                             layers[current_level][0].id == pinned_root_version->attr.centroid_id &&
                             layers[current_level][0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
                             "the highest level should only contain the pinned version of the root");
@@ -2449,8 +2429,8 @@ protected:
                 SearchLayer(query, span, layers, current_level);
             }
 
-            if (layers[next_level].empty()) {
-                layers[current_level].clear();
+            if (layers[next_level].Empty()) {
+                layers[current_level].Clear();
                 if (current_level == pinned_root_version->attr.centroid_id._level) {
                     return RetStatus{.stat=RetStatus::FAIL, .message=nullptr};
                 }
@@ -2460,12 +2440,6 @@ protected:
             --current_level;
         }
 
-        if (sort_type != SortType::Unsorted) {
-            std::sort_heap(layers[end_level].begin(), layers[end_level].end(), attr.reverseSimilarityComparator);
-            if (sort_type == SortType::DecreasingSimilarity) {
-                std::reverse(layers[end_level].begin(), layers[end_level].end());
-            }
-        }
         return RetStatus::Success();
     }
 

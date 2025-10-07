@@ -1,0 +1,167 @@
+#ifndef SORTED_LIST_H_
+#define SORTED_LIST_H_
+
+#include <vector>
+#include <algorithm>
+
+#include "debug.h"
+
+struct A {
+    int a;
+    int b;
+};
+
+template<typename T, typename CMP>
+class SortedList {
+public:
+    typedef std::vector<T>::iterator Iterator;
+
+    SortedList(const CMP& comparator, size_t size = 0) : cmp(comparator) {
+        if (size > 0) {
+            data.reserve(size);
+        }
+    }
+
+    SortedList(CMP&& comparator, size_t size = 0) : cmp(std::forward<CMP>(comparator)) {
+        if (size > 0) {
+            data.reserve(size);
+        }
+    }
+
+    SortedList(const CMP& comparator, std::vector<T>&& base) : cmp(comparator),
+                                                               data(std::forward<std::vector<T>>(base)) {}
+
+    SortedList(CMP&& comparator, std::vector<T>&& base) : cmp(std::forward<CMP>(comparator)),
+                                                          data(std::forward<std::vector<T>>(base)) {}
+
+    inline T& operator[](size_t idx) {
+        return data[idx];
+    }
+
+    inline const T& operator[](size_t idx) const {
+        return data[idx];
+    }
+
+    inline size_t Size() const {
+        return data.size();
+    }
+
+    inline bool Empty() const {
+        return data.empty();
+    }
+
+    inline void reserve(size_t size) {
+        data.reserve(size);
+    }
+
+    inline void Insert(const T& d) {
+        data.insert(std::upper_bound(data.begin(), data.end(), d, cmp), d);
+    }
+
+    inline void Insert(T&& d) {
+        data.insert(std::upper_bound(data.begin(), data.end(), d, cmp), std::forward<T>(d));
+    }
+
+    inline Iterator Find(const T& d) const {
+        auto it = std::lower_bound(data.begin(), data.end(), d, cmp);
+        if (it == data.end()) {
+            return it;
+        }
+
+        while (it != data.end() && (cmp(*it, d) == 0) && (*it != d)) {
+            ++it;
+        }
+
+        if (it != data.end() && *it != d) {
+            it = data.end();
+        }
+
+        return it;
+    }
+
+    inline void PopBack() {
+        data.pop_back();
+    }
+
+    inline void PopBack(size_t num) {
+        if (num == 0) {
+            return;
+        }
+
+        if (num >= data.size()) {
+            data.clear();
+            return;
+        }
+
+        data.resize(data.size() - num);
+    }
+
+    inline void Erase(Iterator it) {
+        data.erase(it);
+    }
+
+    inline void Clear() {
+        data.clear();
+    }
+
+    inline void MergeWith(const SortedList<T, CMP>& other) {
+        FatalAssert(other.cmp == cmp, LOG_TAG_BASIC, "cannot merge two lists with different comparators!");
+        std::vector<T> tmp;
+        tmp.reserve(data.size() + other.Size());
+        std::merge(data.begin(), data.end(), other.data.begin(), other.data.end(), std::back_inserter(tmp));
+        data.swap(tmp);
+    }
+
+    inline void MergeWith(const SortedList<T, CMP>& other, size_t limit) {
+        FatalAssert(other.cmp == cmp, LOG_TAG_BASIC, "cannot merge two lists with different comparators!");
+        std::vector<T> tmp;
+        tmp.reserve(std::min(limit, data.size() + other.Size()));
+        size_t i = 0, j = 0;
+        while (tmp.size() < limit && i < data.size() && j < other.data.size()) {
+            if (data[i] <= other.data[j]) {
+                tmp.push_back(data[i++]);
+            } else {
+                tmp.push_back(other.data[j++]);
+            }
+        }
+
+        while (tmp.size() < limit && i < data.size()) {
+            tmp.push_back(data[i++]);
+        }
+
+        while (tmp.size() < limit && j < other.data.size()) {
+            tmp.push_back(other.data[j++]);
+        }
+
+        data.swap(tmp);
+    }
+
+    inline Iterator& begin() {
+        return data.begin();
+    }
+
+    inline Iterator& end() {
+        return data.end();
+    }
+
+    inline const Iterator& begin() const {
+        return data.begin();
+    }
+
+    inline const Iterator& end() const {
+        return data.end();
+    }
+
+    inline void Extract(std::vector<T>& dest, bool reverse = false) {
+        if (reverse) {
+            std::reverse(data.begin(), data.end());
+        }
+        dest = std::move(data);
+    }
+
+protected:
+    CMP cmp;
+    std::vector<T> data;
+};
+
+#endif
