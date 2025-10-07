@@ -2285,7 +2285,9 @@ protected:
         if (layers[level].Size() == 1) {
             FatalAssert(layers[level][0].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
             SearchVertex(layers[level][0].id, layers[level][0].version, query, span, layers[level - 1], seen);
+            return;
         }
+
         std::vector<SearchTask> tasks;
         tasks.reserve(layers[level].Size());
         for (auto it : layers[level]) {
