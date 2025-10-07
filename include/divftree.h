@@ -59,22 +59,33 @@ struct CompactionTask {
 };
 
 struct SearchTask {
-    const DIVFThreadID master;
-    const uint64_t taskId;
-    const VectorID target;
-    const Version version;
+    DIVFThreadID master;
+    uint64_t taskId;
+    VectorID target;
+    Version version;
     const VTYPE* query;
-    const size_t k;
+    size_t k;
 
     std::atomic<bool> taken;
     std::atomic<bool> done;
     bool done_waiting;
     SortedList<ANNVectorInfo, SimilarityComparator>* neighbours;
 
+    SearchTask() = default;
     SearchTask(VectorID id, Version ver, const VTYPE* q, size_t span) :
         master(threadSelf->ID()), taskId(threadSelf->GetNextTaskID()),
         target(id), version(ver), query(q), k(span),
         taken(false), done(false), done_waiting(false), neighbours(nullptr) {}
+
+    inline void CopyFrom(const SearchTask& other) {
+        master = other.master;
+        taskId = other.taskId;
+        target = other.target;
+        version = other.version;
+        query = other.query;
+        k = other.k;
+        neighbours = other.neighbours;
+    }
 };
 
 struct MigrationInfo {
@@ -2445,7 +2456,44 @@ protected:
         return RetStatus::Success();
     }
 
+    inline void AsyncSearch(Thread* self) {
+        CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
+        self->InitDIVFThread();
 
+        BufferManager* bufferMgr = BufferManager::GetInstance();
+        CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
+
+        std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
+        seen.reserve(std::max(attr.internal_max_size, attr.leaf_max_size));
+        SearchTask oldTask;
+        oldTask.target = INVALID_VECTOR_ID;
+
+        while (!end_signal.load(std::memory_order_acquire) && !search_tasks.Empty()) {
+            SearchTask nextTask;
+            if (search_tasks.PopHead(nextTask)) {
+                bool exp = false;
+                if (!nextTask.taken.compare_exchange_strong(exp, true)) {
+                    continue;
+                }
+                CHECK_VECTORID_IS_VALID(nextTask.target, LOG_TAG_DIVFTREE);
+
+                if ((nextTask.master != oldTask.master) || (nextTask.taskId != oldTask.taskId) ||
+                    (oldTask.target == INVALID_VECTOR_ID)) {
+                    nextTask.neighbours =
+                        new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator, nextTask.k);
+                    seen.clear();
+                } else {
+                    CHECK_NOT_NULLPTR(oldTask.neighbours, LOG_TAG_DIVFTREE);
+                    nextTask.neighbours = oldTask.neighbours;
+                }
+                oldTask.CopyFrom(nextTask);
+
+                SearchVertex(nextTask.target, nextTask.version, nextTask.query, nextTask.k, *nextTask.neighbours, seen);
+                nextTask.done.store(true, std::memory_order_release);
+            }
+        }
+        self->DestroyDIVFThread();
+    }
 
     inline void BGMigration(Thread* self) {
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
@@ -2503,6 +2551,12 @@ protected:
     }
 
     inline void StartBGThreads() {
+        searchers.reserve(attr.num_searchers);
+        for (size_t i = 0; i < attr.num_searchers; ++i) {
+            searchers.emplace_back(new Thread(attr.random_base_perc));
+            searchers.back()->Start(AsyncSearch, searchers.back());
+        }
+
         bg_migrators.reserve(attr.num_migrators);
         for (size_t i = 0; i < attr.num_migrators; ++i) {
             bg_migrators.emplace_back(new Thread(attr.random_base_perc));
@@ -2535,6 +2589,10 @@ protected:
 
         for (size_t i = 0; i < attr.num_migrators; ++i) {
             delete bg_migrators[i];
+        }
+
+        for (size_t i = 0; i < attr.num_searchers; ++i) {
+            delete searchers[i];
         }
     }
 

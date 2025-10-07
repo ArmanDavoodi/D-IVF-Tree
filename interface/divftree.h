@@ -47,6 +47,7 @@ struct DIVFTreeAttributes {
 
     uint16_t dimension;
 
+    size_t num_searchers;
     size_t num_migrators;
     size_t num_mergers;
     size_t num_compactors;
