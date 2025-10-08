@@ -166,7 +166,7 @@ public:
 
     inline void Unpin() override {
         if (unpinCount.fetch_add(1) == UINT64_MAX) {
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT,
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT,
                  VECTORID_LOG(attr.centroid_id));
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
             this->~DIVFTreeVertex();
@@ -174,7 +174,7 @@ public:
             return;
         }
         else {
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin vertex " VECTORID_LOG_FMT,
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin vertex " VECTORID_LOG_FMT,
                  VECTORID_LOG(attr.centroid_id));
         }
     }
@@ -184,10 +184,10 @@ public:
                     "The cluster was unpinned more times than it was pinned. pinCount=%lu, unpinCount=%lu",
                     pinCount, unpinCount.load());
         uint64_t newPin = unpinCount.fetch_sub(pinCount) - pinCount;
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Mark vertex " VECTORID_LOG_FMT
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Mark vertex " VECTORID_LOG_FMT
             " for recycle with pin count %lu", VECTORID_LOG(attr.centroid_id), pinCount);
         if (newPin == 0) {
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT,
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT,
                  VECTORID_LOG(attr.centroid_id));
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
             this->~DIVFTreeVertex();
@@ -523,7 +523,9 @@ public:
     DIVFTree(DIVFTreeAttributes attributes) : attr(attributes), real_size(0), end_signal(false) {
         Thread* _self = new Thread(attr.random_base_perc);
         _self->InitDIVFThread();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
+        attr.similarityComparator = GetDistancePairSimilarityComparator(attr.distanceAlg, false);
+        attr.reverseSimilarityComparator = GetDistancePairSimilarityComparator(attr.distanceAlg, true);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
         VectorID root_id;
         BufferVertexEntry* root_entry =
             BufferManager::Init(sizeof(DIVFTreeVertex) - sizeof(ClusterHeader),
@@ -534,17 +536,17 @@ public:
             ReleaseBufferEntryIfNotNull(root_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
 
         StartBGThreads();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index End");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index End");
     }
 
     ~DIVFTree() override {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index Start");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index Start");
         end_signal.store(true, std::memory_order_release);
 
         DestroyBGThreads();
 
         BufferManager::GetInstance()->Shutdown();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End");
 
         FatalAssert(threadSelf != nullptr, LOG_TAG_DIVFTREE, "threadself not inited!");
         threadSelf->DestroyDIVFThread();
@@ -561,7 +563,7 @@ public:
         FatalAssert(search_span > 0, LOG_TAG_DIVFTREE, "Number of neighbours cannot be 0.");
         RetStatus rs = RetStatus::Success();
 
-        // CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+        // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
         //      "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
         //      vec.ToString(core_attr.dimension).ToCStr(), _size, _levels);
 
@@ -679,7 +681,7 @@ public:
                     "Number of internal vertex neighbours cannot be 0.");
         FatalAssert(leaf_node_search_span > 0, LOG_TAG_DIVFTREE, "Number of leaf neighbours cannot be 0.");
 
-        // CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
+        // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
         //      "ApproximateKNearestNeighbours BEGIN: query=%s, k=%lu, _internal_k=%hu, _leaf_k=%hu, index_size=%lu, "
         //      "num_levels=%hhu", query.ToString(core_attr.dimension).ToCStr(), k, _internal_k,
         //      _leaf_k, _size);
@@ -1126,7 +1128,7 @@ protected:
         case ClusteringType::SimpleDivide:
             SimpleDivideClustering(base, batch, entries, clusters, centroids, marked_for_update);
         default:
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
+            DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
                  "Cluster: Invalid clustering type: %hhu", (uint8_t)(attr.clusteringAlg));
         }
     }
@@ -1289,7 +1291,7 @@ protected:
                     rs = RetStatus{.stat=RetStatus::VERTEX_UPDATED, .message=nullptr};
                     break;
                 default:
-                    CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Invalid entry state!");
+                    DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "Invalid entry state!");
                     rs = RetStatus::Fail("Invalid State!");
                     break;
                 }
@@ -1363,7 +1365,7 @@ protected:
         if (size - num_deleted == 0) {
             /* all vectors in the index are deleted */
             /* todo: delete this node and then create a new root? what if an insertion comes in at this point? */
-            CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "we do not handle this case for now");
+            DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "we do not handle this case for now");
         }
 
         if (((size - num_deleted) > 1)) {
@@ -1474,7 +1476,7 @@ protected:
                     /* recheck if pruning is needed */
                     continue;
                 } else {
-                    CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here! Invalid state");
+                    DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here! Invalid state");
                 }
             }
 
@@ -1523,7 +1525,7 @@ protected:
                 /* recheck if pruning is needed */
                 continue;
             } else {
-                CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here! Invalid state");
+                DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE, "we shouldn't get here! Invalid state");
             }
         }
     }

@@ -38,7 +38,7 @@ public:
         if (IsValid()) {
             memcpy(_data, other._data, dim * sizeof(VTYPE));
         }
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: other=%p, this=%p, address=%p", &other, this, _data);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: other=%p, this=%p, address=%p", &other, this, _data);
     }
 
     Vector(AddressToConst other, uint16_t dim) : _data(other != nullptr ? malloc(dim * sizeof(VTYPE)) : nullptr),
@@ -52,7 +52,7 @@ public:
         if (IsValid()) {
             memcpy(_data, other, dim * sizeof(VTYPE));
         }
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: this=%p, address=%p", &other, this, _data);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "copy constructor: this=%p, address=%p", &other, this, _data);
     }
 
     /* Link Constructors */
@@ -66,7 +66,7 @@ public:
 #ifdef MEMORY_DEBUG
         other.linkCnt = nullptr;
 #endif
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Move vector: other=%p to this=%p, address=%p, delete_on_destroy=%s",
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Move vector: other=%p to this=%p, address=%p, delete_on_destroy=%s",
              &other, this, _data, (_delete_on_destroy ? "T" : "F"));
     }
 
@@ -76,7 +76,7 @@ public:
      * this vector(or other vectors) is linked to it.
      */
     Vector(Address data) : _data(data), _delete_on_destroy(false) {
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "link constructor: this=%p, address=%p",
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "link constructor: this=%p, address=%p",
              this, _data);
     }
 
@@ -88,7 +88,7 @@ public:
         }
 
         if (_delete_on_destroy) {
-            CLOG(LOG_LEVEL_LOG, LOG_TAG_MEMORY, "Destroy vector: this=%p, address=%p", this, _data);
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_MEMORY, "Destroy vector: this=%p, address=%p", this, _data);
 #ifdef MEMORY_DEBUG
             FatalAssert((linkCnt == nullptr) || (linkCnt->load() == 1), LOG_TAG_VECTOR,
                         "Vector is linked to other vectors. Cannot delete it. this=%p, address=%p, linkCnt=%lu",
@@ -100,7 +100,7 @@ public:
 #endif
             free(_data);
         } else {
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Unlink vector: this=%p, address=%p", this, _data);
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Unlink vector: this=%p, address=%p", this, _data);
         }
         _data = nullptr;
         _delete_on_destroy = false;
@@ -108,7 +108,7 @@ public:
 
     Vector& operator=(Vector&& other) {
         FatalAssert(!(IsValid()), LOG_TAG_VECTOR, "Vector is not invalid.");
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Move vector: other=%p to this=%p, address=%p, delete_on_destroy=%s",
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Move vector: other=%p to this=%p, address=%p, delete_on_destroy=%s",
              &other, this, other._data, (other._delete_on_destroy ? "T" : "F"));
         _data = other._data;
         _delete_on_destroy = other._delete_on_destroy;
@@ -134,7 +134,7 @@ public:
 #ifdef MEMORY_DEBUG
         linkCnt = new std::atomic<uint64_t>(1);
 #endif
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimension=%hu", this, _data, dim);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Created vector: this=%p, address=%p, dimension=%hu", this, _data, dim);
     }
 
     /*
@@ -144,7 +144,7 @@ public:
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
         FatalAssert(_delete_on_destroy, LOG_TAG_MEMORY,
                     "Cannot destroy a linked vector. _delete_on_destroy is false. this=%p, address=%p", this, _data);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Destroy vector: this=%p, address=%p", this, _data);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Destroy vector: this=%p, address=%p", this, _data);
 #ifdef MEMORY_DEBUG
         FatalAssert((linkCnt == nullptr) || (linkCnt->load() == 1), LOG_TAG_VECTOR,
                     "Vector is linked to other vectors. Cannot delete it. this=%p, address=%p, linkCnt=%lu",
@@ -173,7 +173,7 @@ public:
             (void)linkCnt->fetch_add(1);
         }
 #endif
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Link vector: this=%p, address=%p", this, _data);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Link vector: this=%p, address=%p", this, _data);
     }
 
     /*
@@ -184,14 +184,14 @@ public:
         FatalAssert(!(IsValid()), LOG_TAG_VECTOR, "Vector is valid");
         _data = src;
         _delete_on_destroy = false;
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Link vector: this=%p, address=%p", this, _data);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Link vector: this=%p, address=%p", this, _data);
     }
 
     inline void Unlink() {
         FatalAssert(IsValid(), LOG_TAG_VECTOR, "Vector is invalid.");
         FatalAssert(!_delete_on_destroy, LOG_TAG_MEMORY,
                     "Not a linked vector. _delete_on_destroy is true. this=%p, address=%p", this, _data);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Unlink vector: this=%p, address=%p", this, _data);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Unlink vector: this=%p, address=%p", this, _data);
         _data = nullptr;
         _delete_on_destroy = false;
 #ifdef MEMORY_DEBUG

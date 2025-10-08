@@ -95,7 +95,7 @@ public:
         }
 
         std::free(_data);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Memory pool destroyed, all chunks freed.");
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_MEMORY, "Memory pool destroyed, all chunks freed.");
     }
 
     inline T* Malloc() {

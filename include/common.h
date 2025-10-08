@@ -258,8 +258,8 @@ class BufferManagerInterface;
 // class BufferManager;
 // class Cluster;
 
-enum ClusteringType : int8_t {
-    InvalidC,
+enum class ClusteringType : int8_t {
+    Invalid,
     SimpleDivide,
     PCA1,
     GradientDescentLinearRegression, // GDLR
@@ -268,25 +268,46 @@ enum ClusteringType : int8_t {
     KMeansWithFallBackGDLR,
     OutLierDetectionThenKMeansWithFallBackPCA1,
     OutLierDetectionThenKMeansWithFallBackGDLR,
-    NumTypesC
+    NumTypes
 };
-inline constexpr char* CLUSTERING_TYPE_NAME[ClusteringType::NumTypesC + 1] =
-    {"Invalid", "SimpleDivide", "TwoMeansWithFallbackToProjection", "NumTypes"};
+inline constexpr char* CLUSTERING_TYPE_NAME[(int8_t)(ClusteringType::NumTypes) + 1] =
+    {"Invalid", "SimpleDivide", "PCA1", "GradientDescentLinearRegression", "KMeansWithFallBackPCA1",
+     "KMeansWithFallBackGDLR", "OutLierDetectionThenKMeansWithFallBackPCA1",
+     "OutLierDetectionThenKMeansWithFallBackGDLR", "NumTypes"};
 inline constexpr bool IsValid(ClusteringType type) {
-    return ((type != ClusteringType::InvalidC) && (type != ClusteringType::NumTypesC));
+    return ((type > ClusteringType::Invalid) && (type < ClusteringType::NumTypes));
+}
+inline constexpr ClusteringType CLUSTERING_NAME_TO_ENUM(const char * const name) {
+    if (!strcmp(name, "SimpleDivide")) {
+        return ClusteringType::SimpleDivide;
+    } else if (!strcmp(name, "PCA1")) {
+        return ClusteringType::PCA1;
+    } else if (!strcmp(name, "GradientDescentLinearRegression")) {
+        return ClusteringType::GradientDescentLinearRegression;
+    } else if (!strcmp(name, "KMeansWithFallBackPCA1")) {
+        return ClusteringType::KMeansWithFallBackPCA1;
+    } else if (!strcmp(name, "KMeansWithFallBackGDLR")) {
+        return ClusteringType::KMeansWithFallBackGDLR;
+    } else if (!strcmp(name, "OutLierDetectionThenKMeansWithFallBackPCA1")) {
+        return ClusteringType::OutLierDetectionThenKMeansWithFallBackPCA1;
+    } else if (!strcmp(name, "OutLierDetectionThenKMeansWithFallBackGDLR")) {
+        return ClusteringType::OutLierDetectionThenKMeansWithFallBackGDLR;
+    } else {
+        return ClusteringType::Invalid;
+    }
 }
 
-enum DistanceType : int8_t {
-    InvalidD,
-    L2Distance,
-    NumTypesD
+enum class DistanceType : int8_t {
+    Invalid,
+    L2,
+    NumTypes
 };
-inline constexpr char* DISTANCE_TYPE_NAME[DistanceType::NumTypesD + 1] = {"Invalid", "L2", "NumTypes"};
+inline constexpr char* DISTANCE_TYPE_NAME[int8_t(DistanceType::NumTypes) + 1] = {"Invalid", "L2", "NumTypes"};
 inline constexpr bool IsValid(DistanceType type) {
-    return ((type != DistanceType::InvalidD) && (type != DistanceType::NumTypesD));
+    return ((type > DistanceType::Invalid) && (type < DistanceType::NumTypes));
 }
 
-enum SortType : int8_t {
+enum class SortType : int8_t {
     Unsorted,
     IncreasingSimilarity,
     DecreasingSimilarity
@@ -348,197 +369,197 @@ enum SortType : int8_t {
         12) unpin vertex
 
 */
-enum VertexUpdateType : int8_t {
-    /* Main operations */
-    VERTEX_INSERT,
-    VERTEX_DELETE,
-    VERTEX_MOVE,
-    VERTEX_INPLACE_UPDATE,
+// enum VertexUpdateType : int8_t {
+//     /* Main operations */
+//     VERTEX_INSERT,
+//     VERTEX_DELETE,
+//     VERTEX_MOVE,
+//     VERTEX_INPLACE_UPDATE,
 
-    /* Insertion subtypes */
-    VERTEX_MIGRATION_INSERT,
-    VERTEX_UPDATE_INSERT,
+//     /* Insertion subtypes */
+//     VERTEX_MIGRATION_INSERT,
+//     VERTEX_UPDATE_INSERT,
 
-    /* Deletion subtypes */
-    VERTEX_MIGRATION_DELETE,
-    VERTEX_UPDATE_DELETE,
+//     /* Deletion subtypes */
+//     VERTEX_MIGRATION_DELETE,
+//     VERTEX_UPDATE_DELETE,
 
-    NUM_VERTEX_UPDATE_TYPES
-};
+//     NUM_VERTEX_UPDATE_TYPES
+// };
 
-struct BatchVertexUpdateEntry {
-    VertexUpdateType type;
-    bool is_urgent;
-    VectorID vector_id;
-    RetStatus *result;
+// struct BatchVertexUpdateEntry {
+//     VertexUpdateType type;
+//     bool is_urgent;
+//     VectorID vector_id;
+//     RetStatus *result;
 
-    union {
-        struct {
-            AddressToConst vector_data; // for VERTEX_INSERT
-            Address *cluster_entry_addr; // if successful, this will set to the address of final cluster entry where vector is inserted
-        } insert_args;
+//     union {
+//         struct {
+//             AddressToConst vector_data; // for VERTEX_INSERT
+//             Address *cluster_entry_addr; // if successful, this will set to the address of final cluster entry where vector is inserted
+//         } insert_args;
 
-        struct {
-            AddressToConst vector_data; // for VERTEX_INPLACE_UPDATE
-        } inplace_update_args;
-    };
-};
+//         struct {
+//             AddressToConst vector_data; // for VERTEX_INPLACE_UPDATE
+//         } inplace_update_args;
+//     };
+// };
 
 /* todo need to think more about the cases for inserting a new operation as it
 might cause deadlock or unnecessary errors*/
-struct BatchVertexUpdate {
-    std::map<VectorID, BatchVertexUpdateEntry> updates[NUM_VERTEX_UPDATE_TYPES];
-    VectorID target_cluster;
-    bool urgent = false;
+// struct BatchVertexUpdate {
+//     std::map<VectorID, BatchVertexUpdateEntry> updates[NUM_VERTEX_UPDATE_TYPES];
+//     VectorID target_cluster;
+//     bool urgent = false;
 
-    inline RetStatus AddInsert(const VectorID& vector_id, AddressToConst vector_data,
-                               RetStatus *result = nullptr, bool is_urgent = false) {
-        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
-        FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
-        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
-        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
-        FatalAssert(target_cluster._level == vector_id._level + 1,
-                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
-                    target_cluster._level, vector_id._level + 1);
-        RetStatus rs = RetStatus::Success();
-        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
-            updates[VERTEX_MIGRATION_DELETE].find(vector_id) != updates[VERTEX_MIGRATION_DELETE].end() ||
-            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                 VECTORID_LOG(vector_id));
-            rs = RetStatus{
-                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-            };
-            if (result != nullptr) {
-                *result = rs;
-            }
-            return rs;
-        }
-        else if (updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end()) {
-            /* delete should override insertion as it was either caused by user  */
-            CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
-                 "VectorID " VECTORID_LOG_FMT
-                 " already exists in the batch with a delete operation. Overwriting it with INPLACE_UPDATE_OPT.",
-                 VECTORID_LOG(vector_id));
-            it->second.type = VERTEX_INPLACE_UPDATE;
-            it->second.is_urgent ||= is_urgent;
-            it->second.vector_id = vector_id;
-            urgent ||= is_urgent;
-            return rs;
-        }
+//     inline RetStatus AddInsert(const VectorID& vector_id, AddressToConst vector_data,
+//                                RetStatus *result = nullptr, bool is_urgent = false) {
+//         FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+//         FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
+//         FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+//         FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+//         FatalAssert(target_cluster._level == vector_id._level + 1,
+//                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+//                     target_cluster._level, vector_id._level + 1);
+//         RetStatus rs = RetStatus::Success();
+//         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+//             updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
+//             updates[VERTEX_MIGRATION_DELETE].find(vector_id) != updates[VERTEX_MIGRATION_DELETE].end() ||
+//             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+//             DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+//                  "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+//                  VECTORID_LOG(vector_id));
+//             rs = RetStatus{
+//                 .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+//             };
+//             if (result != nullptr) {
+//                 *result = rs;
+//             }
+//             return rs;
+//         }
+//         else if (updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end()) {
+//             /* delete should override insertion as it was either caused by user  */
+//             DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE,
+//                  "VectorID " VECTORID_LOG_FMT
+//                  " already exists in the batch with a delete operation. Overwriting it with INPLACE_UPDATE_OPT.",
+//                  VECTORID_LOG(vector_id));
+//             it->second.type = VERTEX_INPLACE_UPDATE;
+//             it->second.is_urgent ||= is_urgent;
+//             it->second.vector_id = vector_id;
+//             urgent ||= is_urgent;
+//             return rs;
+//         }
 
-        updates[vector_id] = {.type = VERTEX_INSERT,
-                              .is_urgent = is_urgent,
-                              .vector_id = vector_id,
-                              .result = result,
-                              .insert_args.vector_data = vector_data};
-        urgent ||= is_urgent;
-        return RetStatus::Success();
-    }
+//         updates[vector_id] = {.type = VERTEX_INSERT,
+//                               .is_urgent = is_urgent,
+//                               .vector_id = vector_id,
+//                               .result = result,
+//                               .insert_args.vector_data = vector_data};
+//         urgent ||= is_urgent;
+//         return RetStatus::Success();
+//     }
 
-    inline RetStatus AddInplaceUpdate(const VectorID& vector_id, AddressToConst vector_data,
-                                      RetStatus *result = nullptr, bool is_urgent = false) {
-        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
-        FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
-        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
-        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
-        FatalAssert(target_cluster._level == vector_id._level + 1,
-                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
-                    target_cluster._level, vector_id._level + 1);
-        RetStatus rs = RetStatus::Success();
-        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
-            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
-            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                 VECTORID_LOG(vector_id));
-            rs = RetStatus{
-                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-            };
-            if (result != nullptr) {
-                *result = rs;
-            }
-            return rs;
-        }
+//     inline RetStatus AddInplaceUpdate(const VectorID& vector_id, AddressToConst vector_data,
+//                                       RetStatus *result = nullptr, bool is_urgent = false) {
+//         FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+//         FatalAssert(vector_data != nullptr, LOG_TAG_DIVFTREE, "Vector data cannot be null.");
+//         FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+//         FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+//         FatalAssert(target_cluster._level == vector_id._level + 1,
+//                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+//                     target_cluster._level, vector_id._level + 1);
+//         RetStatus rs = RetStatus::Success();
+//         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+//             updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
+//             updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+//             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+//             DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+//                  "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+//                  VECTORID_LOG(vector_id));
+//             rs = RetStatus{
+//                 .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+//             };
+//             if (result != nullptr) {
+//                 *result = rs;
+//             }
+//             return rs;
+//         }
 
-        updates[vector_id] = {.type = VERTEX_INPLACE_UPDATE,
-                              .is_urgent = is_urgent,
-                              .vector_id = vector_id,
-                              .result = result,
-                              .inplace_update_args.vector_data = vector_data};
-        urgent ||= is_urgent;
-        return RetStatus::Success();
-    }
+//         updates[vector_id] = {.type = VERTEX_INPLACE_UPDATE,
+//                               .is_urgent = is_urgent,
+//                               .vector_id = vector_id,
+//                               .result = result,
+//                               .inplace_update_args.vector_data = vector_data};
+//         urgent ||= is_urgent;
+//         return RetStatus::Success();
+//     }
 
-    inline RetStatus AddMigrate(const VectorID& vector_id, RetStatus *result = nullptr,
-                                bool is_urgent = false) {
-        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
-        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
-        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
-        FatalAssert(target_cluster._level == vector_id._level + 1,
-                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
-                    target_cluster._level, vector_id._level + 1);
-        RetStatus rs = RetStatus::Success();
-        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
-            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
-            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                 VECTORID_LOG(vector_id));
-            rs = RetStatus{
-                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-            };
-            if (result != nullptr) {
-                *result = rs;
-            }
-            return rs;
-        }
+//     inline RetStatus AddMigrate(const VectorID& vector_id, RetStatus *result = nullptr,
+//                                 bool is_urgent = false) {
+//         FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+//         FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+//         FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+//         FatalAssert(target_cluster._level == vector_id._level + 1,
+//                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+//                     target_cluster._level, vector_id._level + 1);
+//         RetStatus rs = RetStatus::Success();
+//         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+//             updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
+//             updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+//             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+//             DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+//                  "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+//                  VECTORID_LOG(vector_id));
+//             rs = RetStatus{
+//                 .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+//             };
+//             if (result != nullptr) {
+//                 *result = rs;
+//             }
+//             return rs;
+//         }
 
-        updates[vector_id] = {.type = VERTEX_MIGRATION_MOVE,
-                              .is_urgent = is_urgent,
-                              .vector_id = vector_id,
-                              .result = result};
-        urgent ||= is_urgent;
-        return RetStatus::Success();
-    }
+//         updates[vector_id] = {.type = VERTEX_MIGRATION_MOVE,
+//                               .is_urgent = is_urgent,
+//                               .vector_id = vector_id,
+//                               .result = result};
+//         urgent ||= is_urgent;
+//         return RetStatus::Success();
+//     }
 
-    inline RetStatus AddDelete(const VectorID& vector_id, RetStatus *result = nullptr,
-                                bool is_urgent = false) {
-        FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
-        FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
-        FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
-        FatalAssert(target_cluster._level == vector_id._level + 1,
-                    LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
-                    target_cluster._level, vector_id._level + 1);
-        RetStatus rs = RetStatus::Success();
-        if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
-            updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
-            updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
-            updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
-            CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
-                 "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
-                 VECTORID_LOG(vector_id));
-            rs = RetStatus{
-                .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
-            };
-            if (result != nullptr) {
-                *result = rs;
-            }
-            return rs;
-        }
+//     inline RetStatus AddDelete(const VectorID& vector_id, RetStatus *result = nullptr,
+//                                 bool is_urgent = false) {
+//         FatalAssert(vector_id.IsValid(), LOG_TAG_DIVFTREE, "Invalid VectorID: " VECTORID_LOG_FMT, VECTORID_LOG(vector_id));
+//         FatalAssert(target_cluster.IsValid(), LOG_TAG_DIVFTREE, "Target cluster is not set.");
+//         FatalAssert(target_cluster.IsCentroid(), LOG_TAG_DIVFTREE, "Target cluster is not a centroid.");
+//         FatalAssert(target_cluster._level == vector_id._level + 1,
+//                     LOG_TAG_DIVFTREE, "Target cluster level (%hhu) does not match vector ID level (%hhu).",
+//                     target_cluster._level, vector_id._level + 1);
+//         RetStatus rs = RetStatus::Success();
+//         if (updates[VERTEX_INSERT].find(vector_id) != updates[VERTEX_INSERT].end() ||
+//             updates[VERTEX_MIGRATION_MOVE].find(vector_id) != updates[VERTEX_MIGRATION_MOVE].end() ||
+//             updates[VERTEX_DELETE].find(vector_id) != updates[VERTEX_DELETE].end() ||
+//             updates[VERTEX_INPLACE_UPDATE].find(vector_id) != updates[VERTEX_INPLACE_UPDATE].end()) {
+//             DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE,
+//                  "VectorID " VECTORID_LOG_FMT " already exists in the batch with conflicting operations.",
+//                  VECTORID_LOG(vector_id));
+//             rs = RetStatus{
+//                 .stat = RetStatus::BATCH_CONFLICTING_OPERATIONS
+//             };
+//             if (result != nullptr) {
+//                 *result = rs;
+//             }
+//             return rs;
+//         }
 
-        updates[vector_id] = {.type = VECTOR_DELETE,
-                              .is_urgent = is_urgent,
-                              .vector_id = vector_id,
-                              .result = result};
-        urgent ||= is_urgent;
-        return RetStatus::Success();
-    }
-};
+//         updates[vector_id] = {.type = VECTOR_DELETE,
+//                               .is_urgent = is_urgent,
+//                               .vector_id = vector_id,
+//                               .result = result};
+//         urgent ||= is_urgent;
+//         return RetStatus::Success();
+//     }
+// };
 
 struct ANNVectorInfo {
     DTYPE distance_to_query;
@@ -730,7 +751,7 @@ typedef DISTANCE_TYPE DTYPE;
             str += divftree::String("<" VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "> ", \
                                   VECTORID_LOG(pair.first), pair.second); \
         } \
-        CLOG(LOG_LEVEL_DEBUG, (tag), "%s", str.ToCStr()); \
+        DIVFLOG(LOG_LEVEL_DEBUG, (tag), "%s", str.ToCStr()); \
     } while (0)
 
 };

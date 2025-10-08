@@ -89,10 +89,6 @@ enum LOG_TAG_BITS : uint64_t {
 #define LOG_TAG (LOG_TAG_ANY)
 #endif
 
-#ifndef OUT
-#define OUT (stdout)
-#endif
-
 #ifndef PRINT_CALLSTACK_LEVEL
 #define PRINT_CALLSTACK_LEVEL (LOG_LEVEL_ZERO)
 #endif
@@ -267,7 +263,8 @@ namespace divftree {
 
 using thread_id = unsigned long;
 #define THREAD_ID ((divftree::thread_id)(OS_THREAD_ID))
-#define DIVF_THREAD_ID ((threadSelf != nullptr ? threadSelf->ID() : INVALID_DIVF_THREAD_ID))
+#define DIVF_THREAD_ID ((divftree::threadSelf != nullptr ? divftree::threadSelf->ID() :\
+                                                           divftree::INVALID_DIVF_THREAD_ID))
 
 #define TYPE_ALIGNED(ptr, alignment) \
     ((((uintptr_t)(ptr)) % (alignment)) == 0)
@@ -420,6 +417,7 @@ inline bool Pass_CallStack_Level(LOG_LEVELS level) {
 /* todo: Make it threadlocal */
 namespace debug {
 inline bool * fault_checking = nullptr;
+inline FILE * output_log = stdout;
 
 class FaultCheckingExc : public std::exception  {};
 };
@@ -434,18 +432,18 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     if (debug::fault_checking != nullptr) {
 #ifdef ENABLE_FAULT_LOGGING
 #ifdef LOG_FUNCTION_NAME
-        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level, true), tagtostr(tag), time_str,
             divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #else
-        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level, true), tagtostr(tag), time_str,
             divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #endif
-        fflush(OUT);
+        fflush(debug::output_log);
 #endif
         if (level == LOG_LEVEL_PANIC) {
             *(debug::fault_checking) = true;
@@ -458,13 +456,13 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     if (Pass_CallStack_Level(level)) {
         std::string callstack = print_callstack();
 #ifdef LOG_FUNCTION_NAME
-        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
+        fprintf(debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
             divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, callstack.c_str(), msg._msg);
 #else
-        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
+        fprintf(debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
             divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, callstack.c_str(), msg._msg);
@@ -472,20 +470,20 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     }
     else {
 #ifdef LOG_FUNCTION_NAME
-        fprintf(OUT, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
             divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #else
-        fprintf(OUT, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
             divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #endif
 
     }
-    fflush(OUT);
+    fflush(debug::output_log);
     if (level == LOG_LEVEL_PANIC) {
         divftree::sleep(1); // wait to make sure everything is flushed
         abort();
@@ -496,13 +494,13 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
 
 #ifdef ENABLE_TEST_LOGGING
 
-#define CLOG_ELINE() \
+#define DIVFLOG_ELINE() \
     do {\
-        fprintf(OUT, "\n");\
-        fflush(OUT);\
+        fprintf(debug::output_log, "\n");\
+        fflush(debug::output_log);\
     } while(0)
 
-#define CLOG(level, tag, msg, ...) \
+#define DIVFLOG(level, tag, msg, ...) \
     do {\
         if (divftree::Pass_Min_Level((level)) || divftree::Pass_Tag((tag))) {\
             if (divftree::Pass_Level((level))){\
@@ -513,21 +511,21 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
         }\
     } while(0)
 
-#define CLOG_IF_TRUE(cond, level, tag, msg, ...) \
+#define DIVFLOG_IF_TRUE(cond, level, tag, msg, ...) \
     do {\
         if ((cond)){\
             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+19] = "Condition True(" #cond "): ";\
             strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
-            CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+            DIVFLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
     } while(0)
 
-#define CLOG_IF_FALSE(cond, level, tag, msg, ...) \
+#define DIVFLOG_IF_FALSE(cond, level, tag, msg, ...) \
     do {\
         if (!(cond)){\
             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+20] = "Condition False(" #cond "): ";\
             strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
-            CLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+            DIVFLOG((level), (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
         }\
     } while(0)
 
@@ -538,12 +536,12 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     do {\
         if (!(cond)){\
             if (sizeof((msg)) == 0){\
-                CLOG(LOG_LEVEL_PANIC, (tag),  "Assertion \'" #cond "\' Failed.");\
+                DIVFLOG(LOG_LEVEL_PANIC, (tag),  "Assertion \'" #cond "\' Failed.");\
             }\
             else{\
                 char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+22] = "Assertion \'" #cond "\' Failed: ";\
                 strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
-                CLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+                DIVFLOG(LOG_LEVEL_PANIC, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
             }\
         }\
     } while(0)
@@ -555,12 +553,12 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     do {\
         if (!(cond)) {\
             if (sizeof((msg)) == 0){\
-                CLOG(LOG_LEVEL_ERROR, (tag),  "Assertion \'" #cond "\' Failed.");\
+                DIVFLOG(LOG_LEVEL_ERROR, (tag),  "Assertion \'" #cond "\' Failed.");\
             }\
             else{\
                 char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+22] = "Assertion \'" #cond "\' Failed: ";\
                 strcat(_TMP_DEBUG+sizeof((#cond)), (msg));\
-                CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
+                DIVFLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);\
             }\
         }\
     } while(0)
@@ -578,12 +576,12 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
         } \
         catch (const std::exception& e) {\
             _FAULTY = true;\
-            CLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
+            DIVFLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
                  "\' got exception: %s", e.what());\
         }\
         catch (...) {\
             _FAULTY = true;\
-            CLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
+            DIVFLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
                  "\' got unkown exception.");\
         }\
         divftree::debug::fault_checking = nullptr;\
@@ -603,10 +601,10 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
 #endif
 #else
 
-#define CLOG_ELINE()
-#define CLOG(level, tag, msg, ...)
-#define CLOG_IF_TRUE(cond, level, tag, msg, ...)
-#define CLOG_IF_FALSE(cond, level, tag, msg, ...)
+#define DIVFLOG_ELINE()
+#define DIVFLOG(level, tag, msg, ...)
+#define DIVFLOG_IF_TRUE(cond, level, tag, msg, ...)
+#define DIVFLOG_IF_FALSE(cond, level, tag, msg, ...)
 
 #ifdef ENABLE_ASSERTS
 #define FatalAssert(cond, tag, msg, ...) assert((cond))
@@ -633,12 +631,12 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 // #define FAULT_INJECTION_WAIT_UNTIL_ERROR(name, duration, tag, msg, ...)
 //     do {
 //         if (sizeof((msg)) == 0){
-//             CLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );
+//             DIVFLOG(LOG_LEVEL_ERROR, (tag),  "Fault Injection timeout error on \'%s\' after waiting for %lu %s.", );
 //         }
 //         else{
 //             char _TMP_DEBUG[sizeof((#cond))+sizeof((msg))+22] = "Assertion \'" #cond "\' Failed: ";
 //             strcat(_TMP_DEBUG+sizeof((#cond)), (msg));
-//             CLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);
+//             DIVFLOG(LOG_LEVEL_ERROR, (tag),  _TMP_DEBUG __VA_OPT__(,) __VA_ARGS__);
 //         }
 //     } while(0)
 // #define FAULT_INJECTION_WAIT_UNTIL_PANIC(name, duration) FI_MAP[(name)].try_acquire_for((duration))
@@ -648,5 +646,8 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 #define FAULT_INJECTION_WAIT(name)
 #define FAULT_INJECTION_SIGNAL(name)
 #endif
+
+#define DIVF_TEXT_TO_STR(T) #T
+#define DIVF_MACRO_TO_STR(T) DIVF_TEXT_TO_STR(T)
 
 #endif

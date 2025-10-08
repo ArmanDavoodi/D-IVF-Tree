@@ -45,12 +45,12 @@ public:
                 if (it != test.tests.end()) {
                     fprintf(stderr, "Test found.\n");
                     if ((test.*(it->second))()) {
-                        CLOG_ELINE();
+                        DIVFLOG_ELINE();
                         fprintf(stderr, _COLORF_GREEN "Test " _COLORF_RESET _COLORF_CYAN "%s" _COLORF_RESET _COLORF_GREEN
                                 " ran successfully!" _COLORF_RESET "\n\n", test_name.c_str());
                     }
                     else {
-                        CLOG_ELINE();
+                        DIVFLOG_ELINE();
                         fprintf(stderr, _COLORF_RED "Test " _COLORF_RESET _COLORF_CYAN " %s " _COLORF_RESET _COLORF_RED
                                 " failed!" _COLORF_RESET "\n\n", test_name.c_str());
                         round_run_successful = false;

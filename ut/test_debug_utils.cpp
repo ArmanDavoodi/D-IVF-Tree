@@ -70,339 +70,339 @@ public:
     }
 
     bool level_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_test for %luth time...", try_count);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_ANY, "Hello World! This is a DEBUG."
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_ANY, "Hello World! This is a DEBUG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_ANY, "Hello World! This is a LOG."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_ANY, "Hello World! This is a LOG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_WARNING, LOG_TAG_ANY, "Hello World! This is a WARNING."
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_ANY, "Hello World! This is a WARNING."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_ERROR, LOG_TAG_ANY, "Hello World! This is a ERROR."
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_ANY, "Hello World! This is a ERROR."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_test.");
 
         return true;
     }
 
     bool tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::tag_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::tag_test for %luth time...", try_count);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a basic tag."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a divftree tag."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a not implemented tag."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Hello World! This is a test tag."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Hello World! This is a test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::tag_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::tag_test.");
 
         return true;
     }
 
     bool level_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_tag_comb_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::level_tag_comb_test for %luth time...", try_count);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Hello World! This is a DEBUG with basic tag."
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "Hello World! This is a DEBUG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a LOG with basic tag."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_BASIC, "Hello World! This is a LOG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Hello World! This is a WARNING with basic tag."
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BASIC, "Hello World! This is a WARNING with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_ERROR, LOG_TAG_BASIC, "Hello World! This is a ERROR with basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a DEBUG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a LOG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a WARNING with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a ERROR with divftree tag."
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_BASIC, "Hello World! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a DEBUG with not implemented tag."
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a DEBUG with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a LOG with not implemented tag."
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a LOG with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a WARNING with not implemented tag."
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a WARNING with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a ERROR with not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Hello World! This is a DEBUG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Hello World! This is a LOG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_WARNING, LOG_TAG_TEST, "Hello World! This is a WARNING with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_ERROR, LOG_TAG_TEST, "Hello World! This is a ERROR with test tag."
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a ERROR with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_tag_comb_test.");
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a DEBUG with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a LOG with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a WARNING with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a ERROR with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Hello World! This is a DEBUG with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Hello World! This is a LOG with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_TEST, "Hello World! This is a WARNING with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_TEST, "Hello World! This is a ERROR with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::level_tag_comb_test.");
 
         return true;
     }
 
     bool conditional_level_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_level_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_level_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if true(true)! This is a DEBUG."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if true(true)! This is a DEBUG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if true(true)! This is a LOG."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if true(true)! This is a LOG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if true(true)! This is a WARNING."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if true(true)! This is a WARNING."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if true(true)! This is a ERROR."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if true(false)! This is a DEBUG."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if true(false)! This is a LOG."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if true(false)! This is a WARNING."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if true(false)! This is a ERROR."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if true(true)! This is a ERROR."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if false(true)! This is a DEBUG."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if true(false)! This is a DEBUG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if false(true)! This is a LOG."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if true(false)! This is a LOG."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if false(true)! This is a WARNING."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if true(false)! This is a WARNING."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if false(true)! This is a ERROR."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if false(false)! This is a DEBUG."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if false(false)! This is a LOG."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if false(false)! This is a WARNING."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if false(false)! This is a ERROR."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if true(false)! This is a ERROR."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_level_test.");
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if false(true)! This is a DEBUG."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if false(true)! This is a LOG."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if false(true)! This is a WARNING."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if false(true)! This is a ERROR."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_ANY, "logged if false(false)! This is a DEBUG."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_ANY, "logged if false(false)! This is a LOG."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_ANY, "logged if false(false)! This is a WARNING."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_ANY, "logged if false(false)! This is a ERROR."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_level_test.");
 
         return true;
     }
 
     bool conditional_tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_tag_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_tag_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(true)! This is a basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(true)! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a divftree tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(true)! This is a test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(false)! This is a basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(false)! This is a test tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(true)! This is a test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(true)! This is a basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(false)! This is a basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a divftree tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(true)! This is a test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(false)! This is a basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(false)! This is a test tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(false)! This is a test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_tag_test.");
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(true)! This is a basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(true)! This is a test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(false)! This is a basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(false)! This is a test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_tag_test.");
 
         return true;
     }
 
     bool conditional_level_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_level_tag_comb_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_level_tag_comb_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if true(true)! This is a DEBUG with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if true(true)! This is a DEBUG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(true)! This is a LOG with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(true)! This is a LOG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if true(true)! This is a WARNING with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if true(true)! This is a WARNING with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if true(true)! This is a ERROR with basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a DEBUG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a LOG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a WARNING with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a ERROR with divftree tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if true(true)! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a DEBUG with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a DEBUG with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a LOG with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a LOG with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a WARNING with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a WARNING with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a ERROR with not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if true(true)! This is a DEBUG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(true)! This is a LOG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if true(true)! This is a WARNING with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if true(true)! This is a ERROR with test tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a ERROR with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if true(false)! This is a DEBUG with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a DEBUG with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(false)! This is a LOG with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a LOG with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if true(false)! This is a WARNING with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a WARNING with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if true(false)! This is a ERROR with basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a DEBUG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a LOG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a WARNING with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a ERROR with divftree tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a ERROR with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a DEBUG with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if true(true)! This is a DEBUG with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a LOG with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(true)! This is a LOG with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a WARNING with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if true(true)! This is a WARNING with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a ERROR with not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if true(false)! This is a DEBUG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(false)! This is a LOG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if true(false)! This is a WARNING with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if true(false)! This is a ERROR with test tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if true(true)! This is a ERROR with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-
-        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if false(true)! This is a DEBUG with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if true(false)! This is a DEBUG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(true)! This is a LOG with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if true(false)! This is a LOG with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if false(true)! This is a WARNING with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if true(false)! This is a WARNING with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if false(true)! This is a ERROR with basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a DEBUG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a LOG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a WARNING with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a ERROR with divftree tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if true(false)! This is a ERROR with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a DEBUG with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a DEBUG with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a LOG with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a LOG with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a WARNING with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a WARNING with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a ERROR with not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if false(true)! This is a DEBUG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(true)! This is a LOG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if false(true)! This is a WARNING with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if false(true)! This is a ERROR with test tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a ERROR with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if false(false)! This is a DEBUG with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a DEBUG with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(false)! This is a LOG with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a LOG with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if false(false)! This is a WARNING with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a WARNING with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if false(false)! This is a ERROR with basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a DEBUG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a LOG with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a WARNING with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a ERROR with divftree tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a ERROR with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a DEBUG with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if true(false)! This is a DEBUG with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a LOG with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if true(false)! This is a LOG with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a WARNING with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if true(false)! This is a WARNING with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a ERROR with not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if false(false)! This is a DEBUG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(false)! This is a LOG with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if false(false)! This is a WARNING with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if false(false)! This is a ERROR with test tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if true(false)! This is a ERROR with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_level_tag_comb_test.");
+
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if false(true)! This is a DEBUG with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(true)! This is a LOG with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if false(true)! This is a WARNING with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if false(true)! This is a ERROR with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a DEBUG with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a LOG with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a WARNING with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a ERROR with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a DEBUG with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a LOG with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a WARNING with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a ERROR with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if false(true)! This is a DEBUG with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(true)! This is a LOG with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if false(true)! This is a WARNING with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if false(true)! This is a ERROR with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_BASIC, "logged if false(false)! This is a DEBUG with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_BASIC, "logged if false(false)! This is a LOG with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_BASIC, "logged if false(false)! This is a WARNING with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_BASIC, "logged if false(false)! This is a ERROR with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a DEBUG with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a LOG with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a WARNING with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a ERROR with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a DEBUG with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a LOG with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a WARNING with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a ERROR with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_DEBUG, LOG_TAG_TEST, "logged if false(false)! This is a DEBUG with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_LOG, LOG_TAG_TEST, "logged if false(false)! This is a LOG with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_WARNING, LOG_TAG_TEST, "logged if false(false)! This is a WARNING with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_ERROR, LOG_TAG_TEST, "logged if false(false)! This is a ERROR with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_level_tag_comb_test.");
 
         return true;
     }
 
     bool error_assert_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_test for %luth time...", try_count);
 
         ErrorAssert(true, LOG_TAG_ANY, "This is a true assert error."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         ErrorAssert(false, LOG_TAG_ANY, "This is a false assert error."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_test.");
 
         return true;
     }
 
     bool error_assert_tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_tag_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::error_assert_tag_test for %luth time...", try_count);
 
         ErrorAssert(true, LOG_TAG_BASIC, "This is a true assert error with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -422,13 +422,13 @@ public:
         ErrorAssert(false, LOG_TAG_TEST, "This is a false assert error with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_tag_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::error_assert_tag_test.");
 
         return true;
     }
 
     bool fatal_assert_tag_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_tag_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_tag_test for %luth time...", try_count);
 
         FatalAssert(true, LOG_TAG_BASIC, "This is a true fatal assert with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
@@ -448,143 +448,143 @@ public:
         FatalAssert(false, LOG_TAG_TEST, "This is a false fatal assert with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_tag_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_tag_test.");
 
         return true;
     }
 
     bool fatal_assert_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::fatal_assert_test for %luth time...", try_count);
 
         FatalAssert(true, LOG_TAG_ANY, "This is a true fatal assert."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
         FatalAssert(false, LOG_TAG_ANY, "This is a false fatal assert."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::fatal_assert_test.");
 
         return true;
     }
 
     bool conditional_false_panic_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_panic_tag_comb_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_panic_tag_comb_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if true(false)! This is a PANIC with basic tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if true(false)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a PANIC with divftree tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if true(false)! This is a PANIC with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a PANIC with not implemented tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if true(false)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if true(false)! This is a PANIC with test tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-
-        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if false(true)! This is a PANIC with basic tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a PANIC with divftree tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a PANIC with not implemented tag."
-            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if false(true)! This is a PANIC with test tag."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if true(false)! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_panic_tag_comb_test.");
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if false(true)! This is a PANIC with basic tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if false(true)! This is a PANIC with divftree tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if false(true)! This is a PANIC with not implemented tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if false(true)! This is a PANIC with test tag."
+            " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
+
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_panic_tag_comb_test.");
 
         return true;
     }
 
     bool conditional_true_true_panic_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_true_true_panic_tag_comb_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_true_true_panic_tag_comb_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if true(true)! This is a PANIC with basic tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if true(true)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a PANIC with divftree tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if true(true)! This is a PANIC with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a PANIC with not implemented tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if true(true)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if true(true)! This is a PANIC with test tag."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if true(true)! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_true_true_panic_tag_comb_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_true_true_panic_tag_comb_test.");
 
         return true;
     }
 
     bool conditional_false_false_panic_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_false_panic_tag_comb_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_false_panic_tag_comb_test for %luth time...", try_count);
 
-        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if false(false)! This is a PANIC with basic tag."
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_BASIC, "logged if false(false)! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a PANIC with divftree tag."
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "logged if false(false)! This is a PANIC with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a PANIC with not implemented tag."
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "logged if false(false)! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if false(false)! This is a PANIC with test tag."
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_TEST, "logged if false(false)! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_false_panic_tag_comb_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_false_panic_tag_comb_test.");
 
         return true;
     }
 
     bool conditional_false_panic_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_panic_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_panic_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if true(false)! This is a PANIC."
+        DIVFLOG_IF_TRUE(false, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if true(false)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if false(true)! This is a PANIC."
+        DIVFLOG_IF_FALSE(true, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if false(true)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_panic_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_panic_test.");
 
         return true;
     }
 
     bool conditional_true_true_panic_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_true_true_panic_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_true_true_panic_test for %luth time...", try_count);
 
-        CLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if true(true)! This is a PANIC."
+        DIVFLOG_IF_TRUE(true, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if true(true)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_true_true_panic_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_true_true_panic_test.");
 
         return true;
     }
 
     bool conditional_false_false_panic_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_false_panic_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::conditional_false_false_panic_test for %luth time...", try_count);
 
-        CLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if false(false)! This is a PANIC."
+        DIVFLOG_IF_FALSE(false, LOG_LEVEL_PANIC, LOG_TAG_ANY, "logged if false(false)! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_false_panic_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::conditional_false_false_panic_test.");
 
         return true;
     }
 
     bool panic_tag_comb_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_tag_comb_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_tag_comb_test for %luth time...", try_count);
 
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC, "Hello World! This is a PANIC with basic tag."
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC, "Hello World! This is a PANIC with basic tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a PANIC with divftree tag."
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "Hello World! This is a PANIC with divftree tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a PANIC with not implemented tag."
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED, "Hello World! This is a PANIC with not implemented tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_TEST, "Hello World! This is a PANIC with test tag."
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_TEST, "Hello World! This is a PANIC with test tag."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_tag_comb_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_tag_comb_test.");
 
         return true;
     }
 
     bool panic_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_debug_util::panic_test for %luth time...", try_count);
 
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC."
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_ANY, "Hello World! This is a PANIC."
             " str:%s, int:%d, uint8%hhu, uint64:%lu.", "test", -5, (uint8_t)12, 12655486lu);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_debug_util::panic_test.");
 
         return true;
     }

@@ -78,12 +78,12 @@ inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
     /* todo: use AVX for this operation? */
     for (uint16_t offset = 0; offset < cluster_size; ++offset) {
         if (is_leaf) {
-            VectorMetaData* vmt = static_cast<VectorMetaData*>(meta);
+            const VectorMetaData* vmt = static_cast<const VectorMetaData*>(meta);
             if (vmt[offset].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID) {
                 continue;
             }
         } else {
-            CentroidMetaData* vmt = static_cast<CentroidMetaData*>(meta);
+            const CentroidMetaData* vmt = static_cast<const CentroidMetaData*>(meta);
             if (vmt[offset].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID) {
                 continue;
             }
@@ -128,11 +128,11 @@ inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
 inline bool ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* vectors2, size_t size2,
                               uint16_t dim, DistanceType distanceAlg, VTYPE* centroid) {
     switch (distanceAlg) {
-    case DistanceType::L2Distance:
-        return L2::ComputeCentroid(vectors1, size1, vectors2, size2, dim);
+    case DistanceType::L2:
+        return L2::ComputeCentroid(vectors1, size1, vectors2, size2, dim, centroid);
     default:
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
-             "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[(int8_t)distanceAlg]);
     }
     return false; // Return an empty vector if the distance type is invalid
 }
@@ -142,45 +142,45 @@ inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
                             const VTYPE* vectors, size_t size, uint16_t dim,
                             DistanceType distanceAlg, VTYPE* centroid) {
     switch (distanceAlg) {
-    case DistanceType::L2Distance:
+    case DistanceType::L2:
         return L2::ComputeCentroid(cluster, block_size, cluster_cap, is_leaf, vectors, size, dim,
                                    distanceAlg, centroid);
     default:
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
-             "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[(int8_t)distanceAlg]);
     }
     return false; // Return an empty vector if the distance type is invalid
 }
 
 inline constexpr DTYPE Distance(const VTYPE* a, const VTYPE* b, uint16_t dim, DistanceType distanceAlg) {
     switch (distanceAlg) {
-    case DistanceType::L2Distance:
+    case DistanceType::L2:
         return L2::Distance(a, b, dim);
     default:
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
-             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "Distance: Invalid distance type: %s", DISTANCE_TYPE_NAME[(int8_t)distanceAlg]);
     }
     return 0; // Return 0 if the distance type is invalid
 }
 
 inline constexpr bool MoreSimilar(const DTYPE& a, const DTYPE& b, DistanceType distanceAlg) {
     switch (distanceAlg) {
-    case DistanceType::L2Distance:
+    case DistanceType::L2:
         return L2::MoreSimilar(a, b);
     default:
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
-             "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+             "MoreSimilar: Invalid distance type: %s", DISTANCE_TYPE_NAME[(int8_t)distanceAlg]);
     }
     return false; // Return false if the distance type is invalid
 }
 
 inline constexpr SimilarityComparator GetDistancePairSimilarityComparator(DistanceType distanceAlg, bool reverse) {
     switch (distanceAlg) {
-    case DistanceType::L2Distance:
+    case DistanceType::L2:
         return (reverse ? L2::MoreSimilarCmp : L2::LessSimilarCmp);
     default:
-        CLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
-             "MoreSimilarVPair: Invalid distance type: %s", DISTANCE_TYPE_NAME[distanceAlg]);
+        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
+                "MoreSimilarVPair: Invalid distance type: %s", DISTANCE_TYPE_NAME[(int8_t)distanceAlg]);
     }
     return nullptr; // Return nullptr if the distance type is invalid
 }

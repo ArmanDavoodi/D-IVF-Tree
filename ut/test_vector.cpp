@@ -29,21 +29,21 @@ public:
             malloc(sizeof(divftree::Cluster) + divftree::Cluster::DataBytes(dim, capacity)));
         FatalAssert(cluster != nullptr, LOG_TAG_TEST, "Failed to allocate memory for Cluster.");
         new (cluster) divftree::Cluster(dim, capacity);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Cluster: this=%p, dim=%hu, capacity=%hu",
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Created Cluster: this=%p, dim=%hu, capacity=%hu",
              cluster, dim, capacity);
         return cluster;
     }
 
     void DestroyCluster(divftree::Cluster*& cluster) {
         FatalAssert(cluster != nullptr, LOG_TAG_TEST, "Cannot destroy a null Cluster.");
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Destroying Cluster: this=%p", cluster);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_TEST, "Destroying Cluster: this=%p", cluster);
         cluster->~Cluster();
         free(cluster);
         cluster = nullptr;
     }
 
     bool vector_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vector_test for %luth time...", try_count);
         bool status = true;
         {
             bool pre_delete_on_destroy;
@@ -226,19 +226,19 @@ public:
             status = status && !vec1._delete_on_destroy;
             ErrorAssert(!vec1._delete_on_destroy, LOG_TAG_TEST, "Vector should not be deleted after Destroy.");
 
-            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector1=%s", vec1.ToString(dim).ToCStr());
-            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector2=%s", vec2.ToString(dim).ToCStr());
-            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector3=%s", vec3.ToString(dim).ToCStr());
-            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector4=%s", vec4.ToString(dim).ToCStr());
-            CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector5=%s", vec5.ToString(dim).ToCStr());
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector1=%s", vec1.ToString(dim).ToCStr());
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector2=%s", vec2.ToString(dim).ToCStr());
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector3=%s", vec3.ToString(dim).ToCStr());
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector4=%s", vec4.ToString(dim).ToCStr());
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vector5=%s", vec5.ToString(dim).ToCStr());
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vector_test.");
         return status;
     }
 
     bool vertex_cluster() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vertex_cluster for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_vector::vertex_cluster for %luth time...", try_count);
         bool status = true;
 
         divftree::Cluster* set1p = CreateCluster(dim, size);
@@ -325,8 +325,8 @@ public:
                         vec1.ToString(dim).ToCStr(), set1.GetVectorByID(id).ToString(dim).ToCStr());
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster1: %s", set1.ToString().ToCStr());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster2: %s", set2.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster1: %s", set1.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster2: %s", set2.ToString().ToCStr());
 
         set1.DeleteLast();
         status = status && (set1.Size() == size - 1);
@@ -337,12 +337,12 @@ public:
         ErrorAssert(!(set1.Contains(_ids[size - 1])), LOG_TAG_TEST,
                     "uint16 vector set should not contain vector id %lu", _ids[size - 1]);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster1 after deletion: %s", set1.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Cluster1 after deletion: %s", set1.ToString().ToCStr());
 
         DestroyCluster(set1p);
         DestroyCluster(set2p);
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vertex_cluster.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_vector::vertex_cluster.");
         return status;
     }
 

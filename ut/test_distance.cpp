@@ -22,7 +22,7 @@ public:
     ~Test() {}
 
     bool distance_L2() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_distance::distance_L2 for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_distance::distance_L2 for %luth time...", try_count);
         bool status = true;
         std::string data0 = "{", data1 = "{", data2 = "{";
         for (uint16_t i = 0; i < dim; ++i) {
@@ -40,9 +40,9 @@ public:
                 data2 += "}";
             }
         }
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data1=%s", data0.c_str());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data2=%s", data1.c_str());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data3=%s", data2.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data1=%s", data0.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data2=%s", data1.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Data3=%s", data2.c_str());
 
         divftree::DTYPE dist[size][size], base_dist[size][size];
 
@@ -74,12 +74,12 @@ public:
                 }
             }
         }
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "dist: %s", dist_str.c_str());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_dist: %s", base_dist_str.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "dist: %s", dist_str.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_dist: %s", base_dist_str.c_str());
 
         const divftree::VTYPE query[dim] = {0.15f, 20.4f, -9.0f, 1.1f, 10.0f, 6.0f, 5.1f, 9.55f};
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query: %s", divftree::Vector(query, dim).ToString(dim).ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query: %s", divftree::Vector(query, dim).ToString(dim).ToCStr());
 
         divftree::DTYPE query_dist[size], base_query_dist[size];
         std::string query_dist_str = "";
@@ -105,8 +105,8 @@ public:
             }
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query_dist_str: %s", query_dist_str.c_str());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_query_dist_str: %s", base_query_dist_str.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query_dist_str: %s", query_dist_str.c_str());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_query_dist_str: %s", base_query_dist_str.c_str());
 
         /* The most similar vector to query should be first -> for L2 that is the minimum distance */
         std::sort(query_dist, query_dist + size, divftree::L2::MoreSimilar);
@@ -116,7 +116,7 @@ public:
                         "uint16 l2 similarity err: " DTYPE_FMT " should be less than " DTYPE_FMT,
                         query_dist[i], query_dist[i + 1]);
         }
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query_dist_sorted: %s", divftree::Vector(query_dist, size).
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "query_dist_sorted: %s", divftree::Vector(query_dist, size).
             ToString(size).ToCStr());
 
         divftree::Vector cent = divftree::L2::ComputeCentroid((const divftree::VTYPE*)_data, size, dim);
@@ -136,15 +136,15 @@ public:
                     "Centroid calculation err: calc=%s, ground_truth=%s", cent.ToString(dim).ToCStr(),
                     base_cent.ToString(dim).ToCStr());
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "cent: %s", cent.ToString(dim).ToCStr());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_cent: %s", base_cent.ToString(dim).ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "cent: %s", cent.ToString(dim).ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "base_cent: %s", base_cent.ToString(dim).ToCStr());
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_distance::distance_L2.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_distance::distance_L2.");
         return status;
     }
 
     // bool clustering() {
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_distance::clustering for %luth time...", try_count);
+    //     DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_distance::clustering for %luth time...", try_count);
     //     bool status = true;
     //     constexpr uint16_t DIM = 3;
     //     constexpr uint16_t MIN_SIZE = 2;
@@ -215,10 +215,10 @@ public:
     //     ErrorAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Clustering failed with error: %s", rs.Msg());
 
     //     for (uint16_t i = 0; i < centroids.size(); ++i) {
-    //         CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Centroid %u: %s", i, centroids[i].to_string().c_str());
+    //         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Centroid %u: %s", i, centroids[i].to_string().c_str());
     //     }
 
-    //     CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_distance::clustering.");
+    //     DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_distance::clustering.");
     //     return status;
     // }
 

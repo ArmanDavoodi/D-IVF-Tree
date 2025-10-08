@@ -22,14 +22,14 @@ public:
     ~Test() {}
 
     bool insert_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_buffer::insert_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_buffer::insert_test for %luth time...", try_count);
         bool status = true;
         constexpr uint16_t KI_MAX = 4, KI_MIN = 2;
         constexpr uint16_t KL_MAX = 8, KL_MIN = 1;
         divftree::BufferManager _BufferManager;
         divftree::DIVFTreeAttributes attr;
         attr.core.dimension = dim;
-        attr.core.distanceAlg = divftree::DistanceType::L2Distance;
+        attr.core.distanceAlg = divftree::DistanceType::L2;
         attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;
         attr.internal_min_size = KI_MIN;
@@ -121,14 +121,14 @@ public:
             }
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Buffer Manager:%s", _BufferManager.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Buffer Manager:%s", _BufferManager.ToString().ToCStr());
 
         rs = _BufferManager.Shutdown();
         status = status && (rs.IsOK());
         ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "Buffer manager shutdown failed with status %s.", rs.Msg());
         FaultAssert(_BufferManager.Shutdown(), status, LOG_TAG_TEST,
                     "Buffer manager should not allow to shutdown twice.");
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_buffer::insert_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_buffer::insert_test.");
         return status;
     }
 

@@ -1,0 +1,63 @@
+ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )/..
+CURDIR=$(pwd)
+cd $ROOT
+
+CONF_FILE="bench/run.conf"
+
+MAX_DIM=256
+MAX_VTYPE_BYTES=64
+
+VAR_LOG_OUTPUT_PATH=$ROOT/bench/out/logs/
+
+VAR_CLUSTERING="SimpleDivide"
+VAR_LEAF_SIZE=(128 1024)
+VAR_INTERNAL_SIZE=(128 1024)
+VAR_LEAF_SPLIT=2
+VAR_INTERNAL_SPLIT=2
+# set block size to max to make sure each cluster is only one block!
+VAR_LEAF_BLOCK_BYTES=$((${VAR_LEAF_SIZE[1]} * $MAX_DIM * $MAX_VTYPE_BYTES))
+VAR_INTERNAL_BLOCK_BYTES=$((${VAR_INTERNAL_SIZE[1]} * $MAX_DIM * $MAX_VTYPE_BYTES))
+
+VAR_DEF_LEAF_SEARCH_SPAN=10
+VAR_DEF_INTERNAL_SEARCH_SPAN=10
+
+VAR_MIGRATION_CHECK_TRIGGER_RATE=18
+VAR_MIGRATION_CHECK_TRIGGER_SINGLE_RATE=8
+VAR_RANDOM_BASE=80
+
+VAR_NUM_QUERY_THREADS=40
+VAR_NUM_SEARCHER_THREADS=80
+VAR_NUM_BG_MIGRATOR_THREADS=18
+VAR_NUM_BG_MERGER_THREADS=4
+VAR_NUM_BG_COMPACTOR_THREADS=18
+#todo: add numa ctl and bind threads
+
+#create the config file if it does not exists and clean it if it does
+echo > $CONF_FILE
+
+echo "log-path:$VAR_LOG_OUTPUT_PATH" >> $CONF_FILE
+
+echo "clustering:$VAR_CLUSTERING" >> $CONF_FILE
+echo "leaf-size:[${VAR_LEAF_SIZE[0]},${VAR_LEAF_SIZE[1]}]" >> $CONF_FILE
+echo "internal-size:[${VAR_INTERNAL_SIZE[0]},${VAR_INTERNAL_SIZE[1]}]" >> $CONF_FILE
+echo "leaf-split:$VAR_LEAF_SPLIT" >> $CONF_FILE
+echo "internal-split:$VAR_INTERNAL_SPLIT" >> $CONF_FILE
+echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
+echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE
+echo "default-leaf-search-span:$VAR_DEF_LEAF_SEARCH_SPAN" >> $CONF_FILE
+echo "default-internal-search-span:$VAR_DEF_INTERNAL_SEARCH_SPAN" >> $CONF_FILE
+
+
+echo "migration-check-trigger-rate:$VAR_MIGRATION_CHECK_TRIGGER_RATE" >> $CONF_FILE
+echo "migration-check-trigger-single-rate:$VAR_MIGRATION_CHECK_TRIGGER_SINGLE_RATE" >> $CONF_FILE
+echo "random-rate-base:$VAR_RANDOM_BASE" >> $CONF_FILE
+
+
+echo "num-client-threads:$VAR_NUM_QUERY_THREADS" >> $CONF_FILE
+
+echo "num-searcher-threads:$VAR_NUM_SEARCHER_THREADS" >> $CONF_FILE
+echo "num-bg-migrator-threads:$VAR_NUM_BG_MIGRATOR_THREADS" >> $CONF_FILE
+echo "num-bg-merger-threads:$VAR_NUM_BG_MERGER_THREADS" >> $CONF_FILE
+echo "num-bg-compactor-threads:$VAR_NUM_BG_COMPACTOR_THREADS" >> $CONF_FILE
+
+cd $CURDIR

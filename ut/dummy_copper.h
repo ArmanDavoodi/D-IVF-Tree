@@ -149,7 +149,7 @@ public:
         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Failed to update cluster address for root: "
                     VECTORID_LOG_FMT, VECTORID_LOG(_root));
         _levels = 2;
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE,
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE,
              "Init DIVFTree Index End: rootID= " VECTORID_LOG_FMT ", _levels = %hhu, attr=%s",
              VECTORID_LOG(_root), _levels, attr.ToString().ToCStr());
     }
@@ -157,7 +157,7 @@ public:
     ~DIVFTree() override {
         RetStatus rs = RetStatus::Success();
         rs = _bufmgr.Shutdown();
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End: rs=%s", rs.Msg());
     }
 
     RetStatus Insert(const Vector& vec, VectorID& vec_id, uint16_t vertex_per_layer) override {

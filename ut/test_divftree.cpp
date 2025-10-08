@@ -28,7 +28,7 @@ public:
     ~Test() {}
 
     bool divftree_vertex_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_divftree_index::divftree_vertex_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_divftree_index::divftree_vertex_test for %luth time...", try_count);
         bool status = true;
         divftree::RetStatus rs = divftree::RetStatus::Success();
         divftree::VectorID vec_id = divftree::INVALID_VECTOR_ID;
@@ -39,7 +39,7 @@ public:
                                        4ul, 5ul, 6ul, 7ul};
         divftree::DIVFTreeAttributes attr;
         attr.core.dimension = dim;
-        attr.core.distanceAlg = divftree::DistanceType::L2Distance;
+        attr.core.distanceAlg = divftree::DistanceType::L2;
         attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;
         attr.internal_min_size = KI_MIN;
@@ -88,8 +88,8 @@ public:
                         back_vec.ToString(dim).ToCStr(), vec.ToString(dim).ToCStr());
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex:" VERTEX_LOG_FMT, VERTEX_PTR_LOG(vertex));
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex Bucket: %s", vertex->_cluster.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex:" VERTEX_LOG_FMT, VERTEX_PTR_LOG(vertex));
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex Bucket: %s", vertex->_cluster.ToString().ToCStr());
 
         vec_id._val += 1;
         divftree::DIVFTreeVertex *other_vertex = (divftree::DIVFTreeVertex *)_tree.CreateNewVertex(vec_id);
@@ -107,10 +107,10 @@ public:
         status = status && (vertex->Size() == size - 1);
         ErrorAssert(vertex->Size() == size - 1, LOG_TAG_TEST,
                     "Vertex size mismatch. Expected=%hu, Actual=%hu", size - 1, vertex->Size());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex:" VERTEX_LOG_FMT, VERTEX_PTR_LOG(vertex));
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex Bucket: %s", vertex->_cluster.ToString().ToCStr());
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Vertex:" VERTEX_LOG_FMT, VERTEX_PTR_LOG(other_vertex));
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Vertex Bucket: %s", other_vertex->_cluster.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex:" VERTEX_LOG_FMT, VERTEX_PTR_LOG(vertex));
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Vertex Bucket: %s", vertex->_cluster.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Vertex:" VERTEX_LOG_FMT, VERTEX_PTR_LOG(other_vertex));
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Other Vertex Bucket: %s", other_vertex->_cluster.ToString().ToCStr());
 
         std::vector<std::pair<divftree::VectorID, divftree::DTYPE>> neighbours;
         divftree::Vector query(_data[3], dim);
@@ -143,18 +143,18 @@ public:
 
         neighbours.clear();
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_divftree_index::divftree_vertex_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_divftree_index::divftree_vertex_test.");
         return status;
     }
 
     bool divftree_index_simple_test() {
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_divftree_index::divftree_index_simple_test for %luth time...", try_count);
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Running test_divftree_index::divftree_index_simple_test for %luth time...", try_count);
         bool status = true;
         divftree::RetStatus rs = divftree::RetStatus::Success();
 
         divftree::DIVFTreeAttributes attr;
         attr.core.dimension = dim;
-        attr.core.distanceAlg = divftree::DistanceType::L2Distance;
+        attr.core.distanceAlg = divftree::DistanceType::L2;
         attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
         attr.internal_max_size = KI_MAX;
         attr.internal_min_size = KI_MIN;
@@ -178,12 +178,12 @@ public:
                             VECTORID_LOG_FMT, VECTORID_LOG(vec_id));
 
                 vectors.emplace_back(vec_id, divftree::Vector(_data[j], dim));
-                CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Inserted vector %lu: " VECTORID_LOG_FMT ", data=%s",
+                DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Inserted vector %lu: " VECTORID_LOG_FMT ", data=%s",
                      j, VECTORID_LOG(vec_id), vectors.back().second.ToString(dim).ToCStr());
             }
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Index:%s", _tree.ToString().ToCStr());
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "Index:%s", _tree.ToString().ToCStr());
 
         divftree::Vector target;
         target.Create(dim);
@@ -205,7 +205,7 @@ public:
                                 "ApproximateKNearestNeighbours: Batch After sort ");
 
         rs = divftree::DIVFTreeInterface::KNearestNeighbours(target, k, dim, vectors, knn,
-                                                              divftree::DistanceType::L2Distance, true, true);
+                                                              divftree::DistanceType::L2, true, true);
         status = status && rs.IsOK();
         ErrorAssert(rs.IsOK(), LOG_TAG_TEST, "KNearestNeighbours failed with status %s.", rs.Msg());
         status = status && (knn.size() == k);
@@ -228,7 +228,7 @@ public:
                         ann[i].second, i, knn[i].second);
         }
 
-        CLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_divftree_index::divftree_index_simple_test.");
+        DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_TEST, "End of test_divftree_index::divftree_index_simple_test.");
         return status;
     }
 

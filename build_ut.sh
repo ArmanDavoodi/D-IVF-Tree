@@ -2,7 +2,7 @@
 ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 CURDIR=$(pwd)
 cd $ROOT
-source build_configs.sh
+source build_hw_configs.sh
 make clean -C ut
 rm -r ut/out
 make -C ut DEFINES="-DTESTING $*"

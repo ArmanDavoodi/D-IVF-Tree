@@ -89,7 +89,7 @@ public:
         FatalAssert(_thrd->get_id() == std::this_thread::get_id(), LOG_TAG_THREAD,
                     "the thread itself should call this function");
         FatalAssert(_done.load(std::memory_order_relaxed), LOG_TAG_THREAD, "thread should be in the initial state");
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Initing thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Initing thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         threadSelf = this;
         _done.store(false, std::memory_order_release);
     }
@@ -102,7 +102,7 @@ public:
         FatalAssert(_thrd != nullptr, LOG_TAG_THREAD, "thread should have started!");
         FatalAssert(_thrd->get_id() == std::this_thread::get_id(), LOG_TAG_THREAD,
                     "the thread itself should call this function");
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Destroying thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Destroying thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         threadSelf = nullptr;
         _safty_net.store(true, std::memory_order_release);
         _done.store(true, std::memory_order_release);
@@ -115,7 +115,7 @@ public:
         FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller should be a valid thread!");
         FatalAssert(threadSelf->ID() == _parent_id, LOG_TAG_THREAD, "caller should be parent");
         FatalAssert(_thrd == nullptr, LOG_TAG_THREAD, "thread should be null");
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         _thrd = new std::thread(std::forward<_Callable>(func), this, (std::forward<Args>(args))...)
     }
 
@@ -133,7 +133,7 @@ public:
 #ifdef LOCK_DEBUG
         FatalAssert(waitingFor == INVALID_DIVF_THREAD_ID, LOG_TAG_THREAD, "we cannot be waiting on two threads!");
         waitingFor = _id;
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Waiting for thread %p - ID:%lu", this, _id);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Waiting for thread %p - ID:%lu", this, _id);
 #endif
         if (!_done.load(std::memory_order_acquire)) {
             _done.wait(false, std::memory_order_acquire);
@@ -145,7 +145,7 @@ public:
         }
         FatalAssert(!_safty_net.load(std::memory_order_acquire), LOG_TAG_THREAD, "safty net should be disabled");
 #ifdef LOCK_DEBUG
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "done Waiting for thread %p - ID:%lu", this, _id);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "done Waiting for thread %p - ID:%lu", this, _id);
         waitingFor = INVALID_DIVF_THREAD_ID;
 #endif
     }
@@ -176,10 +176,10 @@ public:
         SanityCheckLockNotHeldByMe(lockAddr);
         if (mode == SX_EXCLUSIVE) {
             heldExclusive.insert(lockAddr);
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Acquired EXCLUSIVE lock %p", _id, lockAddr);
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Acquired EXCLUSIVE lock %p", _id, lockAddr);
         } else {
             heldShared.insert(lockAddr);
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Acquired SHARED lock %p", _id, lockAddr);
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Acquired SHARED lock %p", _id, lockAddr);
         }
 #endif
     }
@@ -191,7 +191,7 @@ public:
         SanityCheckLockHeldInModeByMe(lockAddr, SX_EXCLUSIVE);
         heldExclusive.erase(lockAddr);
         heldShared.insert(lockAddr);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Downgraded EXCLUSIVE to SHARED lock %p", _id, lockAddr);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Downgraded EXCLUSIVE to SHARED lock %p", _id, lockAddr);
 #endif
     }
 
@@ -202,7 +202,7 @@ public:
         SanityCheckLockHeldInModeByMe(lockAddr, SX_SHARED);
         heldShared.erase(lockAddr);
         heldExclusive.insert(lockAddr);
-        CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Upgraded SHARED to EXCLUSIVE lock %p", _id, lockAddr);
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Upgraded SHARED to EXCLUSIVE lock %p", _id, lockAddr);
 #endif
     }
 
@@ -214,10 +214,10 @@ public:
         SanityCheckLockHeldInModeByMe(lockAddr, mode);
         if (mode == SX_EXCLUSIVE) {
             heldExclusive.erase(lockAddr);
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Released EXCLUSIVE lock %p", _id, lockAddr);
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Released EXCLUSIVE lock %p", _id, lockAddr);
         } else {
             heldShared.erase(lockAddr);
-            CLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Released SHARED lock %p", _id, lockAddr);
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_LOCK, "Released SHARED lock %p", _id, lockAddr);
         }
 #endif
     }

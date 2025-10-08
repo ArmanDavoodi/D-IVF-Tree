@@ -32,10 +32,16 @@
 *.app
 
 #build folder
-*/build/*
-*/out/*
-*/bin/*
+**/build/*
+**/out/*
+**/bin/*
+
+#data
+**/raw_data/*
+
+#configurations
+*.conf
 
 .vscode/
 
-*/third_party/*
+**/third_party/*
