@@ -1,5 +1,8 @@
 ROOT=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
+rm -r $ROOT/configs/utils/bin
+mkdir -p $ROOT/configs/utils/bin
+
 g++ $ROOT/configs/utils/cpuid.cpp -o $ROOT/configs/utils/bin/cpuid
 
 echo "#ifndef SUPPORT_H_" > $ROOT/configs/support.h

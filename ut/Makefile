@@ -53,5 +53,3 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 .PHONY: all clean
-
-# I am writing a c++ project and I am using Makefile for building the project. In the project I am using some defined macros and I want to add them to the program each time I am building it using the makefile. For example I want to do something like make -DFLAG -DVAR=5 and pass it as defined macro to my code. How can I do this?
