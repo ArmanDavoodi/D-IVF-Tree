@@ -12,6 +12,7 @@ inline uint8_t default_leaf_search_span;
 inline uint8_t default_internal_search_span;
 inline size_t num_threads;
 inline uint32_t write_ratio;
+inline uint32_t delete_ratio;
 inline uint32_t build_time;
 inline uint32_t warmup_time;
 inline uint32_t run_time;

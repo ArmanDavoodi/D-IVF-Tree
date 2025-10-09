@@ -301,6 +301,15 @@ void ParseConfigs() {
         throw std::runtime_error("Write ratio not provided!");
     }
 
+    vit = var_configs.find("delete-ratio");
+    if (vit != var_configs.end()) {
+        if (!parseUnsignedInt(vit->second, delete_ratio) || (delete_ratio > 100)) {
+            throw std::runtime_error("Invalid delete ratio!");
+        }
+    } else {
+        throw std::runtime_error("Delete ratio not provided!");
+    }
+
     vit = var_configs.find("build-time");
     if (vit != var_configs.end()) {
         if (!parseUnsignedInt(vit->second, build_time)) {

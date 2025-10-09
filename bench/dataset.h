@@ -3,47 +3,55 @@
 
 #include "benchmark.h"
 
-inline FILE * vector_input_file = nullptr;
-
 inline uint32_t total_num_vectors = 0;
-inline uint32_t num_dimensions = 0;
-inline uint32_t num_read = 0;
+inline std::atomic<uint32_t> next_offset = 0;
 
 /* todo: for every 10 writes, use the next vector for search ->
    not the best benchmark as it does not take the search skew in account */
-inline constexpr uint32_t BATCH_SIZE = 1024 * 128;
-inline std::atomic<uint32_t> current_batch_size = 0;
-inline divftree::VTYPE vector_buffer[BATCH_SIZE * DIMENSION]; /* each time we read 128K vectors */
+inline constexpr uint32_t BATCH_SIZE = 1024 * 16;
 
-void OpenDataFile() {
-    if (vector_input_file != nullptr) {
-        fclose(vector_input_file);
-        vector_input_file = nullptr;
+void OpenDataFile(FILE* input_file_ptr, bool read_header = false) {
+    if (input_file_ptr != nullptr) {
+        fclose(input_file_ptr);
+        input_file_ptr = nullptr;
     }
-    vector_input_file = fopen(DATA_PATH, "rb");
-    if (vector_input_file == nullptr) {
+    input_file_ptr = fopen(DATA_PATH, "rb");
+    if (input_file_ptr == nullptr) {
         throw std::runtime_error(
                 divftree::String("Could not open the output data file! errno %d, errno msg: %s",
                                     errno, strerror(errno)).ToCStr());
     }
 
-    size_t ret_code = fread(&total_num_vectors, sizeof(uint32_t), 1, vector_input_file);
+    uint32_t dummy_num_v = 0;
+    uint32_t* num_vec = nullptr;
+    if (read_header) {
+        num_vec = &dummy_num_v;
+    } else {
+        num_vec = &total_num_vectors;
+    }
+
+    size_t ret_code = fread(num_vec, sizeof(uint32_t), 1, input_file_ptr);
     if (ret_code != 1) {
-        if (feof(vector_input_file))
+        if (feof(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected end of file!");
-        else if (ferror(vector_input_file))
+        else if (ferror(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected error!");
     }
 
-    if (total_num_vectors == 0) {
+    if (*num_vec == 0) {
         throw std::runtime_error("Error: num vectors cannot be 0!");
     }
 
-    size_t ret_code = fread(&num_dimensions, sizeof(uint32_t), 1, vector_input_file);
+    if (!read_header && (total_num_vectors != dummy_num_v)) {
+        throw std::runtime_error("Error: total num vectors mismatch!");
+    }
+
+    uint32_t num_dimensions = 0;
+    size_t ret_code = fread(&num_dimensions, sizeof(uint32_t), 1, input_file_ptr);
     if (ret_code != 1) {
-        if (feof(vector_input_file))
+        if (feof(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected end of file!");
-        else if (ferror(vector_input_file))
+        else if (ferror(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected error!");
     }
 
@@ -52,34 +60,41 @@ void OpenDataFile() {
     }
 }
 
-/* todo: if num total vectors is not divisible by batch size, then the last batch will have duplicate elements */
-bool ReadNextBatch() {
-    if (vector_input_file == nullptr) {
+size_t ReadNextBatch(FILE* input_file_ptr, divftree::VTYPE* buffer) {
+    if (input_file_ptr == nullptr) {
         throw std::runtime_error("Error: file is not open!");
     }
 
-    if (num_read >= total_num_vectors) {
-        current_batch_size.store(0, std::memory_order_release);
-        return false;
+    if (buffer == nullptr) {
+        throw std::runtime_error("Error: buffer is null!");
     }
 
-    num_read = std::max(num_read + BATCH_SIZE, total_num_vectors);
-    size_t ret_code = fread(vector_buffer, sizeof(divftree::VTYPE) * DIMENSION, BATCH_SIZE, vector_input_file);
-    if (ret_code < BATCH_SIZE && num_read < total_num_vectors) {
-        if (feof(vector_input_file))
+    uint32_t offset = next_offset.fetch_add(BATCH_SIZE * DIMENSION * sizeof(divftree::VTYPE));
+
+    if (offset >= total_num_vectors) {
+        return 0;
+    }
+
+    size_t ret_code = fseek(input_file_ptr, sizeof(uint32_t) * 2 + offset, SEEK_SET);
+    if (ret_code != 0) {
+        throw std::runtime_error("Error seeking data file!");
+    }
+
+    ret_code = fread(buffer, sizeof(divftree::VTYPE) * DIMENSION, BATCH_SIZE, input_file_ptr);
+    if (ret_code < BATCH_SIZE && offset < total_num_vectors) {
+        if (feof(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected end of file!");
-        else if (ferror(vector_input_file))
+        else if (ferror(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected error!");
     }
 
-    current_batch_size.store(ret_code, std::memory_order_release);
-    return true;
+    return ret_code;
 }
 
-void CloseDataFile() {
-    if (vector_input_file != nullptr) {
-        fclose(vector_input_file);
-        vector_input_file = nullptr;
+void CloseDataFile(FILE* input_file_ptr) {
+    if (input_file_ptr != nullptr) {
+        fclose(input_file_ptr);
+        input_file_ptr = nullptr;
     }
 }
 
