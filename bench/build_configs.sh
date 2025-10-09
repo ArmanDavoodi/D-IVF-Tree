@@ -32,6 +32,13 @@ VAR_NUM_BG_MERGER_THREADS=4
 VAR_NUM_BG_COMPACTOR_THREADS=18
 #todo: add numa ctl and bind threads
 
+VAR_WRITE_RATIO=10 #10% of queries are insertions
+# todo: what about deletions?
+
+VAR_BUILT_TIME_SEC=100 #only insert
+VAR_WARMUP_TIME_SEC=300 #only search
+VAR_RUN_TIME_SEC=300 #real test used for stat collection
+
 #create the config file if it does not exists and clean it if it does
 echo > $CONF_FILE
 
@@ -59,5 +66,12 @@ echo "num-searcher-threads:$VAR_NUM_SEARCHER_THREADS" >> $CONF_FILE
 echo "num-bg-migrator-threads:$VAR_NUM_BG_MIGRATOR_THREADS" >> $CONF_FILE
 echo "num-bg-merger-threads:$VAR_NUM_BG_MERGER_THREADS" >> $CONF_FILE
 echo "num-bg-compactor-threads:$VAR_NUM_BG_COMPACTOR_THREADS" >> $CONF_FILE
+
+
+echo "write-ratio:$VAR_WRITE_RATIO"
+
+echo "build-time:$VAR_BUILT_TIME_SEC"
+echo "warmup-time:$VAR_WARMUP_TIME_SEC"
+echo "run-time:$VAR_RUN_TIME_SEC"
 
 cd $CURDIR
