@@ -135,7 +135,7 @@ public:
         }
 
         while (tmp.size() < limit && j < other.data.size()) {
-            if (!include_duplicates && tmp.size() > 0 && tmp.back() == other.data.[j]) {
+            if (!include_duplicates && tmp.size() > 0 && tmp.back() == other.data[j]) {
                 j++;
                 continue;
             }

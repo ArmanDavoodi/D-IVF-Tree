@@ -88,7 +88,7 @@ public:
     }
 
     inline bool Push(const T& value) {
-        return q.enqueue(value)
+        return q.enqueue(value);
     }
 
     inline bool BatchPush(const T* value, size_t size) {

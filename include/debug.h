@@ -182,7 +182,7 @@ enum LOG_TAG_BITS : uint64_t {
 #include <windows.h> // For GetCurrentThreadId
 using os_thread_id = DWORD;
 
-#define OS_THREAD_ID ((divftree::os_thread_id)(GetCurrentThreadId()))
+#define OS_THREAD_ID ((::divftree::os_thread_id)(GetCurrentThreadId()))
 
 std::string print_callstack() {
     /* Not implemented */
@@ -262,9 +262,9 @@ std::string print_callstack() {
 namespace divftree {
 
 using thread_id = unsigned long;
-#define THREAD_ID ((divftree::thread_id)(OS_THREAD_ID))
-#define DIVF_THREAD_ID ((divftree::threadSelf != nullptr ? divftree::threadSelf->ID() :\
-                                                           divftree::INVALID_DIVF_THREAD_ID))
+#define THREAD_ID ((::divftree::thread_id)(OS_THREAD_ID))
+#define DIVF_THREAD_ID ((::divftree::threadSelf != nullptr ? ::divftree::threadSelf->ID() :\
+                                                           ::divftree::INVALID_DIVF_THREAD_ID))
 
 #define TYPE_ALIGNED(ptr, alignment) \
     ((((uintptr_t)(ptr)) % (alignment)) == 0)
@@ -425,29 +425,29 @@ class FaultCheckingExc : public std::exception  {};
 inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
                 const std::chrono::_V2::system_clock::time_point _time,
                 const char* file_name, const char* func_name, size_t line,
-                thread_id thread_id, divftree::DIVFThreadID divf_thread_id) {
+                thread_id thread_id, uint64_t divf_thread_id) {
     char time_str[100];
     timetostr(_time, time_str); // todo add coloring if needed
     UNUSED_VARIABLE(func_name);
-    if (debug::fault_checking != nullptr) {
+    if (::divftree::debug::fault_checking != nullptr) {
 #ifdef ENABLE_FAULT_LOGGING
 #ifdef LOG_FUNCTION_NAME
-        fprintf(debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(::divftree::debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level, true), tagtostr(tag), time_str,
-            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #else
-        fprintf(debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(::divftree::debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level, true), tagtostr(tag), time_str,
-            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #endif
-        fflush(debug::output_log);
+        fflush(::divftree::debug::output_log);
 #endif
         if (level == LOG_LEVEL_PANIC) {
-            *(debug::fault_checking) = true;
-            throw debug::FaultCheckingExc{};
+            *(::divftree::debug::fault_checking) = true;
+            throw ::divftree::debug::FaultCheckingExc{};
         } else {
             return; // do not log the message again
         }
@@ -456,36 +456,36 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
     if (Pass_CallStack_Level(level)) {
         std::string callstack = print_callstack();
 #ifdef LOG_FUNCTION_NAME
-        fprintf(debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
+        fprintf(::divftree::debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, callstack.c_str(), msg._msg);
 #else
-        fprintf(debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
+        fprintf(::divftree::debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Callstack=%s | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, callstack.c_str(), msg._msg);
 #endif
     }
     else {
 #ifdef LOG_FUNCTION_NAME
-        fprintf(debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(::divftree::debug::output_log, "%s | %s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
-            divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s", func_name).Fit(FUNCTION_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #else
-        fprintf(debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
+        fprintf(::divftree::debug::output_log, "%s | %s | %s | %s | Thread(%lu): %lu | Message: %s\n",
             leveltostr(level), tagtostr(tag), time_str,
-            divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
+            ::divftree::String("%s:%lu", file_name, line).Fit(FILE_NAME_MAX_SIZE).ToCStr(),
             thread_id, divf_thread_id, msg._msg);
 #endif
 
     }
-    fflush(debug::output_log);
+    fflush(::divftree::debug::output_log);
     if (level == LOG_LEVEL_PANIC) {
-        divftree::sleep(1); // wait to make sure everything is flushed
+        ::divftree::sleep(1); // wait to make sure everything is flushed
         abort();
     }
 }
@@ -496,15 +496,15 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
 
 #define DIVFLOG_ELINE() \
     do {\
-        fprintf(debug::output_log, "\n");\
-        fflush(debug::output_log);\
+        fprintf(::divftree::debug::output_log, "\n");\
+        fflush(::divftree::debug::output_log);\
     } while(0)
 
 #define DIVFLOG(level, tag, msg, ...) \
     do {\
-        if (divftree::Pass_Min_Level((level)) || divftree::Pass_Tag((tag))) {\
-            if (divftree::Pass_Level((level))){\
-                divftree::Log((level), (tag), (divftree::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
+        if (::divftree::Pass_Min_Level((level)) || ::divftree::Pass_Tag((tag))) {\
+            if (::divftree::Pass_Level((level))){\
+                ::divftree::Log((level), (tag), (::divftree::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
                             std::chrono::system_clock::now(),\
                             __FILE__, FUNCTION_NAME, __LINE__, THREAD_ID, DIVF_THREAD_ID);\
             }\
@@ -567,11 +567,11 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
 #define FaultAssert(statement, condtion, tag, msg, ...) \
     do {\
         bool _FAULTY = false; \
-        divftree::debug::fault_checking = &_FAULTY;\
+        ::divftree::debug::fault_checking = &_FAULTY;\
         try { \
             (statement);\
         } \
-        catch (const divftree::debug::FaultCheckingExc& e) {\
+        catch (const ::divftree::debug::FaultCheckingExc& e) {\
             _FAULTY = true;\
         } \
         catch (const std::exception& e) {\
@@ -584,7 +584,7 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
             DIVFLOG(LOG_LEVEL_WARNING, (tag),  "Fault Assertion \'" #statement \
                  "\' got unkown exception.");\
         }\
-        divftree::debug::fault_checking = nullptr;\
+        ::divftree::debug::fault_checking = nullptr;\
         if (!(_FAULTY)) {\
             condtion = false;\
             char _ASSERT_TMP_DEBUG[sizeof((#statement))+sizeof((msg))+23] = "\'" #statement "\' No Errors Occured. ";\

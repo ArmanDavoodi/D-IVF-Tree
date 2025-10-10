@@ -9,8 +9,11 @@
 #include <type_traits>
 #include <concepts>
 #include <stdlib.h>
+#include <functional>
 
 #include "utils/string.h"
+#include "utils/thread.h"
+#include "utils/synchronization.h"
 
 #include "debug.h"
 
@@ -58,10 +61,6 @@ struct RetStatus {
     } stat;
 
     const char* message = nullptr;
-
-    static inline RetStatus Success() {
-        return RetStatus{SUCCESS, "OK"};
-    }
 
     static inline RetStatus Success() {
         return RetStatus{SUCCESS, "OK"};
@@ -220,13 +219,13 @@ constexpr inline uint64_t GET_MASK() {
 }
 
 struct VectorIDHash {
-    std::size_t operator()(const std::pair<VectorID, Version>& p) const {
-        return std::hash<uint64_t>(p.first._id);
+    size_t operator()(const VectorID& p) const {
+        return std::hash<uint64_t>()(p._id);
     }
 };
 
 struct VectorIDVersionPairHash {
-    std::size_t operator()(const std::pair<VectorID, Version>& p) const {
+    size_t operator()(const std::pair<VectorID, Version>& p) const {
         if (p.first.IsCentroid()) {
             /*
              * use the first 4 bits of level as level will not exceed 10
@@ -235,12 +234,12 @@ struct VectorIDVersionPairHash {
              * use the first 1 byte of version as it is highly unlikely to have two versions with 256 or more distance
              * in the same function
              */
-            return ((((((p.first._creator_node_id & GET_HALF_MASK<4>) << 4) |
-                    (p.first._level & GET_HALF_MASK<4>) << 48) |
+            return ((((((p.first._creator_node_id & GET_HALF_MASK<4>()) << 4) |
+                    (p.first._level & GET_HALF_MASK<4>()) << 48) |
                     p.first._val) << 8) |
-                    (p.second & GET_MASK<1>));
+                    (p.second & GET_MASK<1>()));
         } else {
-            return std::hash<uint64_t>(p.first._id);
+            return std::hash<uint64_t>()(p.first._id);
         }
     }
 };
@@ -561,24 +560,6 @@ might cause deadlock or unnecessary errors*/
 //     }
 // };
 
-struct ANNVectorInfo {
-    DTYPE distance_to_query;
-    VectorID id;
-    Version version;
-
-    ANNVectorInfo() = default;
-    ANNVectorInfo(DTYPE dist, VectorID vectorId, Version vectorVersion = 0) : distance_to_query(dist), id(vectorId),
-                                                                              version(version) {}
-
-    inline bool operator==(cosnt ANNVectorInfo& other) {
-        return (id == other.id) && (version == other.version);
-    }
-
-    inline bool operator!=(const ANNVectorInfo& other) {
-        return (id != other.id) || (version != other.version);
-    }
-};
-
 #ifndef VECTOR_TYPE
 #define VECTOR_TYPE uint16_t
 #define VTYPE_FMT "%hu"
@@ -588,45 +569,63 @@ struct ANNVectorInfo {
 #define DTYPE_FMT "%lf"
 #endif
 
-#if defined(__cpp_lib_hardware_interference_size) || defined(__GNUC__) || defined(_MSC_VER)
-#include <new>
-constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
-#else
+/* todo: use cpuid to get cahceline size */
+// #if defined(__cpp_lib_hardware_interference_size) || defined(__GNUC__) || defined(_MSC_VER)
+// #include <new>
+// constexpr size_t CACHE_LINE_SIZE = std::hardware_destructive_interference_size;
+// #else
 constexpr size_t CACHE_LINE_SIZE = 64; // Fallback to common cache line size
-#endif
+// #endif
 
-inline constexpr size_t ALLIGNED_SIZE(const size_t size) {
+inline constexpr size_t ALLIGNED_SIZE(size_t size) {
     return (size % CACHE_LINE_SIZE == 0) ? size : (size + (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE)));
 }
 
-inline constexpr size_t ALLIGNEMENT(const size_t size) {
+inline constexpr size_t ALLIGNEMENT(size_t size) {
     return (size % CACHE_LINE_SIZE == 0) ? 0 : (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE));
 }
 
-inline constexpr bool ALLIGNED(const void* ptr) {
-    return (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0);
+inline constexpr bool ALLIGNED(void* ptr) {
+    return (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0);
 }
 
-inline constexpr bool ALLIGNED(const void* ptr, const size_t size) {
-    return (static_cast<uintptr_t>(ptr) % size == 0);
+inline constexpr bool ALLIGNED(void* ptr, size_t size) {
+    return (reinterpret_cast<uintptr_t>(ptr) % size == 0);
 }
 
 inline constexpr void* ALLIGNED_PTR(void* ptr) {
-    return (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ?
-            static_cast<void*>(ptr) :
-            static_cast<void*>((static_cast<uintptr_t>(ptr) +
-                                (CACHE_LINE_SIZE - (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
+    return (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ? ptr :
+            reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(ptr) +
+                                    (CACHE_LINE_SIZE - (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
 }
 
 inline constexpr const void* ALLIGNED_PTR(const void* ptr) {
-    return (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ?
-            static_cast<const void*>(ptr) :
-            static_cast<const void*>((static_cast<uintptr_t>(ptr) +
-                                (CACHE_LINE_SIZE - (static_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
+    return (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) % CACHE_LINE_SIZE == 0) ? ptr :
+            reinterpret_cast<const void*>((reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) +
+                                (CACHE_LINE_SIZE - (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) %
+                                                                           CACHE_LINE_SIZE))));
 }
 
 typedef VECTOR_TYPE VTYPE;
 typedef DISTANCE_TYPE DTYPE;
+
+struct ANNVectorInfo {
+    DTYPE distance_to_query;
+    VectorID id;
+    Version version;
+
+    ANNVectorInfo() = default;
+    ANNVectorInfo(DTYPE dist, VectorID vectorId, Version vectorVersion = 0) : distance_to_query(dist), id(vectorId),
+                                                                              version(vectorVersion) {}
+
+    inline bool operator==(const ANNVectorInfo& other) {
+        return (id == other.id) && (version == other.version);
+    }
+
+    inline bool operator!=(const ANNVectorInfo& other) {
+        return (id != other.id) || (version != other.version);
+    }
+};
 
 // enum DataType : int8_t {
 //     Invalid = -1,
@@ -668,25 +667,6 @@ typedef DISTANCE_TYPE DTYPE;
 #define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
 #define VECTORID_LOG(vid) (!((vid).IsValid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
 
-#define VECTOR_STATE_LOG_FMT "%s"
-#define VECTOR_STATE_LOG(state) ((state).state.load().ToString().ToCStr())
-
-// #define VERTEX_LOG_FMT "(%s<%hu, %hu>, ID:" VECTORID_LOG_FMT ", Size:%hu, ParentID:" VECTORID_LOG_FMT ", bucket:%s)"
-// #define VERTEX_PTR_LOG(vertex)\
-//     (((vertex) == nullptr) ? "NULL" :\
-//         (!((vertex)->CentroidID().IsValid()) ? "INV" : ((vertex)->CentroidID().IsVector() ? "Non-Centroid" : \
-//             ((vertex)->CentroidID().IsLeaf() ? "Leaf" : ((vertex)->CentroidID().IsInternalVertex() ? "Internal" \
-//                 : "UNDEF"))))),\
-//     (((vertex) == nullptr) ? 0 : (vertex)->MinSize()),\
-//     (((vertex) == nullptr) ? 0 : (vertex)->MaxSize()),\
-//     VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->CentroidID())),\
-//     (((vertex) == nullptr) ? 0 : (vertex)->Size()),\
-//     VECTORID_LOG((((vertex) == nullptr) ? divftree::INVALID_VECTOR_ID : (vertex)->ParentID())),\
-//     ((PRINT_BUCKET) ? ((((vertex) == nullptr)) ? "NULL" : ((vertex)->BucketToString()).ToCStr()) : "OMITTED")
-
-#define VECTOR_UPDATE_LOG_FMT "(ID:" VECTORID_LOG_FMT ", Address:%p)"
-#define VECTOR_UPDATE_LOG(update) VECTORID_LOG((update).vector_id), (update).vector_data
-
 #define CHECK_MIN_MAX_SIZE(min_size, max_size, tag) \
     do { \
         FatalAssert((min_size) > 0, (tag), "Min size must be greater than 0."); \
@@ -707,57 +687,7 @@ typedef DISTANCE_TYPE DTYPE;
     FatalAssert((!((vid).IsLeaf()) && ((vid).IsCentroid())), (tag), \
                 "VectorID " VECTORID_LOG_FMT " is not a leaf", VECTORID_LOG((vid)))
 
-#define CHECK_VERTEX_IS_LEAF(vertex, tag) \
-    FatalAssert(((vertex) != nullptr) && (vertex)->IsLeaf(), (tag), \
-                "Vertex is not a leaf: %s", (vertex)->ToString().ToCStr())
-#define CHECK_VERTEX_IS_INTERNAL(vertex, tag) \
-    FatalAssert(((vertex) != nullptr) && !((vertex)->IsLeaf()), (tag), \
-                "Vertex is not an internal vertex: %s", (vertex)->ToString().ToCStr())
-
 #define CHECK_NOT_NULLPTR(ptr, tag) \
     FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
-
-#define CHECK_VERTEX_IS_VALID(vertex, tag, check_min_size) \
-    do {
-        CHECK_NOT_NULLPTR((vertex), (tag)); \
-        CHECK_VECTORID_IS_VALID((vertex)->CentroidID(), (tag)); \
-        CHECK_VECTORID_IS_CENTROID((vertex)->CentroidID(), (tag)); \
-        FatalAssert((vertex)->VectorDimension() > 0, (tag), \
-                    "Vertex has invalid vector dimension: %s", (vertex)->ToString().ToCStr()); \
-        CHECK_MIN_MAX_SIZE((vertex)->MinSize(), (vertex)->MaxSize(), (tag)); \
-        FatalAssert(((!(check_min_size)) || (vertex)->Size() >= (vertex)->MinSize()), (tag), \
-                    "Vertex does not have enough elements: size=%hu, min_size=%hu.", \
-                    (vertex)->Size(), (vertex)->MinSize()); \
-        FatalAssert((vertex)->Size() <= (vertex)->MaxSize(), (tag), \
-                    "Vertex has too many elements: size=%hu, max_size=%hu.", \
-                    (vertex)->Size(), (vertex)->MaxSize()); \
-    } while(0)
-
-#define CHECK_VERTEX_SELF_IS_VALID(tag, check_min_size) \
-    do { \
-        FatalAssert(IsValid(_clusteringAlg), (tag), "Clustering algorithm is invalid."); \
-        FatalAssert(IsValid(_distanceAlg), (tag), "Distance algorithm is invalid."); \
-        CHECK_NOT_NULLPTR(_similarityComparator, (tag)); \
-        CHECK_NOT_NULLPTR(_reverseSimilarityComparator, (tag)); \
-        _cluster.CheckValid((check_min_size)); \
-    } while(0)
-
-#ifdef ENABLE_TEST_LOGGING
-#define PRINT_VECTOR_PAIR_BATCH(vector, tag, msg, ...) \
-    do { \
-        divftree::String str(msg ": Batch Size: %lu, Vector Pair Batch: " __VA_OPT__(,) __VA_ARGS__,\
-                           (vector).size()); \
-        for (const auto& pair : (vector)) { \
-            str += divftree::String("<" VECTORID_LOG_FMT ", Distance:" DTYPE_FMT "> ", \
-                                  VECTORID_LOG(pair.first), pair.second); \
-        } \
-        DIVFLOG(LOG_LEVEL_DEBUG, (tag), "%s", str.ToCStr()); \
-    } while (0)
-
-};
-
-#else
-#define PRINT_VECTOR_PAIR_BATCH(vector)
-#endif
 
 #endif

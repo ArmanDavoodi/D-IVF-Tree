@@ -6,7 +6,7 @@
 #endif
 
 #if DATASET == BIGANN100M
-#include "datasets/bigann/configurations.h"
+#include "bench/datasets/bigann/configurations.h"
 #else
     #error UNDEFINED DATASET!
 #endif

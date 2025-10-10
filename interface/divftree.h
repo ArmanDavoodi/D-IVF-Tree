@@ -27,6 +27,15 @@ struct DIVFTreeVertexAttributes {
                              uint16_t max, uint16_t blck_size, DIVFTreeInterface* idx) :
                                 centroid_id{id}, version{ver}, min_size{min}, cap{max}, block_size{blck_size},
                                 index{idx} {}
+    String ToString() const {
+        return String("{"
+            "centroid_id:" VECTORID_LOG_FMT ", "
+            "version:%u, "
+            "size:[%hu, %hu], "
+            "block-size:%hu, "
+            "index:%p"
+        "}", VECTORID_LOG(centroid_id), version, min_size, cap, block_size, index);
+    }
 };
 
 struct DIVFTreeAttributes {
@@ -40,7 +49,10 @@ struct DIVFTreeAttributes {
     uint16_t internal_min_size;
     uint16_t internal_max_size;
 
+    bool use_block_bytes;
+    size_t leaf_blck_bytes;
     uint16_t leaf_blck_size;
+    size_t internal_blck_bytes;
     uint16_t internal_blck_size;
 
     uint16_t split_internal;
@@ -64,7 +76,10 @@ struct DIVFTreeAttributes {
             "distanceAlg:%s, "
             "leaf_size:[%hu, %hu], "
             "internal_size:[%hu, %hu], "
+            "use_block_bytes:%s, "
+            "leaf_blck_bytes:%lu"
             "leaf_blck_size:%hu, "
+            "internal_blck_bytes:%lu"
             "internal_blck_size:%hu, "
             "split_internal:%hu, "
             "split_leaf:%hu, "
@@ -77,31 +92,12 @@ struct DIVFTreeAttributes {
             "migration_check_triger_single_rate:%u, "
             "random_base_perc:%u"
         "}", CLUSTERING_TYPE_NAME[(int8_t)clusteringAlg], DISTANCE_TYPE_NAME[(int8_t)distanceAlg],
-        leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, leaf_blck_size, internal_blck_size,
-        split_internal, split_leaf, dimension, num_searchers, num_migrators, num_mergers, num_compactors,
-        migration_check_triger_rate, migration_check_triger_single_rate, random_base_perc);
+        leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, (use_block_bytes ? "T" : "F"),
+        leaf_blck_bytes, leaf_blck_size, internal_blck_bytes, internal_blck_size, split_internal, split_leaf,
+        dimension, num_searchers, num_migrators, num_mergers, num_compactors, migration_check_triger_rate,
+        migration_check_triger_single_rate, random_base_perc);
     }
 };
-
-// #define CHECK_CORE_ATTRIBUTES(attr, tag) \
-//     FatalAssert((attr).core.dimension > 0, (tag), "Dimension must be greater than 0."); \
-//     FatalAssert(IsValid((attr).core.clusteringAlg), (tag), "Clustering algorithm is invalid."); \
-//     FatalAssert(IsValid((attr).core.distanceAlg), (tag), "Distance algorithm is invalid.")
-
-// #define CHECK_VERTEX_ATTRIBUTES(attr, tag) \
-//     CHECK_CORE_ATTRIBUTES(attr, tag); \
-//     CHECK_MIN_MAX_SIZE(attr.min_size, attr.max_size, tag); \
-//     CHECK_VECTORID_IS_VALID(attr.centroid_id, tag); \
-//     CHECK_VECTORID_IS_CENTROID(attr.centroid_id, tag); \
-//     FatalAssert(attr.cluster_owner < MAX_COMPUTE_NODE_ID, tag, \
-//                 "Cluster owner is invalid. cluster_owner=%hu", attr.cluster_owner); \
-//     FatalAssert(IsComputeNode(attr.cluster_owner), tag, \
-//                 "Cluster owner is not a compute node. cluster_owner=%hu", attr.cluster_owner);
-
-// #define CHECK_DIVFTREE_ATTRIBUTES(attr, tag) \
-//     CHECK_CORE_ATTRIBUTES(attr.core, tag); \
-//     CHECK_MIN_MAX_SIZE(attr.leaf_min_size, attr.leaf_max_size, tag); \
-//     CHECK_MIN_MAX_SIZE(attr.internal_min_size, attr.internal_max_size, tag)
 
 class DIVFTreeVertexInterface {
 public:
@@ -123,7 +119,7 @@ public:
     virtual void Search(const VTYPE* query, size_t k,
                         SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
                         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) = 0;
-    // virtual String ToString(bool detailed = false) const = 0;
+    virtual String ToString(bool detailed = false) const = 0;
 };
 
 class DIVFTreeInterface {

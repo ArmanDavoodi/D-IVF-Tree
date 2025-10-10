@@ -281,7 +281,8 @@ struct BufferVertexEntry {
     DIVFTreeVertexInterface* ReadLatestVersion(bool pinCluster = true, bool needsHeaderLock = false) {
         if (!needsHeaderLock) {
             FatalAssert(threadSelf->LockHeldByMe(&clusterLock) != LockHeld::UNLOCKED ||
-                        threadSelf->LockHeldByMe(&headerLock) != LockHeld::UNLOCKED);
+                        threadSelf->LockHeldByMe(&headerLock) != LockHeld::UNLOCKED, LOG_TAG_BUFFER,
+                        "No lock is held!");
         } else {
             headerLock.Lock(SX_SHARED);
         }
@@ -448,6 +449,7 @@ struct BufferVertexEntry {
     }
 };
 
+/* todo: add tostring for buffer entries */
 class BufferManager : public BufferManagerInterface {
 // TODO: reuse deleted IDs
 public:
@@ -587,7 +589,7 @@ public:
             oldRootEntry = GetVertexEntry(currentId, false);
             CHECK_NOT_NULLPTR(oldRootEntry, LOG_TAG_BUFFER);
             threadSelf->SanityCheckLockHeldInModeByMe(&oldRootEntry->clusterLock, SX_EXCLUSIVE);
-            FatalAssert(oldRootEntry->centroidMeta.selfId == currentId);
+            FatalAssert(oldRootEntry->centroidMeta.selfId == currentId, LOG_TAG_BUFFER, "id mismatch!");
             newId._level = currentId._level + 1;
         }
         FatalAssert(MAX_TREE_HIGHT > newId._level && newId._level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,

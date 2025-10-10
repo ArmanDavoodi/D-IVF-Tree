@@ -62,7 +62,7 @@ inline thread_local Thread* threadSelf = nullptr;
 class Thread {
 public:
     Thread(uint32_t random_perc) : _parent_id((threadSelf == nullptr) ? INVALID_DIVF_THREAD_ID : threadSelf->ID()),
-                                   _id(nextId.fetch_add(1)), _thrd(nullptr), _done(true), _safty_net(false),
+                                   _id(nextId.fetch_add(1)), _done(true), _safty_net(false), _thrd(nullptr),
                                    _gen(DIVF_SEED), _gen64(DIVF_SEED), _uniform_dist(1, random_perc),
                                    _next_task_id(0) {}
 
@@ -116,7 +116,7 @@ public:
         FatalAssert(threadSelf->ID() == _parent_id, LOG_TAG_THREAD, "caller should be parent");
         FatalAssert(_thrd == nullptr, LOG_TAG_THREAD, "thread should be null");
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
-        _thrd = new std::thread(std::forward<_Callable>(func), this, (std::forward<Args>(args))...)
+        _thrd = new std::thread(std::forward<_Callable>(func), this, (std::forward<Args>(args))...);
     }
 
     inline void Detach() {
@@ -163,7 +163,7 @@ public:
         return _thrd->joinable();
     }
 
-    inline const DIVFThreadID ID() const {
+    inline DIVFThreadID ID() const {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         return _id;
     }
@@ -315,38 +315,38 @@ public:
     inline uint32_t UniformRandom(uint32_t range) {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         FatalAssert(range > 0, LOG_TAG_THREAD, "range cannot be 0!");
-        return (_gen(_uniform_dist) % range);
+        return (_uniform_dist(_gen) % range);
     }
 
     inline bool UniformBinary(uint32_t rate) {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
-        return (_gen(_uniform_dist) <= rate)
+        return (_uniform_dist(_gen) <= rate);
     }
 
     inline uint32_t UniformRange32(uint32_t first, uint32_t second) {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
-        return _gen(std::uniform_int_distribution<uint32_t>(first, second))
+        return std::uniform_int_distribution<uint32_t>(first, second)(_gen);
     }
 
     inline uint64_t UniformRange64(uint64_t first, uint64_t second) {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
-        return _gen(std::uniform_int_distribution<uint64_t>(first, second))
+        return std::uniform_int_distribution<uint64_t>(first, second)(_gen);
     }
 
     inline std::pair<uint32_t, uint32_t> UniformRangeTwo32(uint32_t first, uint32_t second) {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
         std::uniform_int_distribution<uint32_t> temp_dist(first, second);
-        return std::make_pair(_gen(temp_dist), _gen(temp_dist));
+        return std::make_pair(temp_dist(_gen), temp_dist(_gen));
     }
 
     inline std::pair<uint64_t, uint64_t> UniformRangeTwo64(uint64_t first, uint64_t second) {
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         FatalAssert(first <= second, LOG_TAG_THREAD, "first cannot be greater than second!");
         std::uniform_int_distribution<uint64_t> temp_dist(first, second);
-        return std::make_pair(_gen64(temp_dist), _gen64(temp_dist));
+        return std::make_pair(temp_dist(_gen64), temp_dist(_gen64));
     }
 
     inline uint64_t GetNextTaskID() {
@@ -359,7 +359,7 @@ public:
      * Now if 80% of the clusters in the layer are unusable(delete/Not stable), (which is not a good case!) the
      * probablity of us failing to get a good cluster after 21 retries is less than 1%.
      */
-    inline static constexpr Thread::MAX_RETRY = 21;
+    inline static constexpr uint64_t MAX_RETRY = 21;
 
 protected:
     static inline std::atomic<DIVFThreadID> nextId = 0;

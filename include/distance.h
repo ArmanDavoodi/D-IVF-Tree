@@ -37,7 +37,7 @@ inline constexpr int LessSimilarCmp(const ANNVectorInfo& a, const ANNVectorInfo&
     return MoreSimilar(b.distance_to_query, a.distance_to_query);
 }
 
-inline void ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* vectors2, size_t size2, uint16_t dim,
+inline bool ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* vectors2, size_t size2, uint16_t dim,
                             VTYPE* centroid) {
     FatalAssert(size1 > 0, LOG_TAG_BASIC, "size cannot be 0");
     CHECK_NOT_NULLPTR(vectors1, LOG_TAG_BASIC);
@@ -61,6 +61,8 @@ inline void ComputeCentroid(const VTYPE* vectors1, size_t size1, const VTYPE* ve
     for (uint16_t e = 0; e < dim; ++e) {
         centroid[e] /= size1 + size2;
     }
+
+    return true;
 }
 
 inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_t cluster_cap, bool is_leaf,
@@ -143,8 +145,7 @@ inline bool ComputeCentroid(const Cluster& cluster, uint16_t block_size, uint16_
                             DistanceType distanceAlg, VTYPE* centroid) {
     switch (distanceAlg) {
     case DistanceType::L2:
-        return L2::ComputeCentroid(cluster, block_size, cluster_cap, is_leaf, vectors, size, dim,
-                                   distanceAlg, centroid);
+        return L2::ComputeCentroid(cluster, block_size, cluster_cap, is_leaf, vectors, size, dim, centroid);
     default:
         DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_BASIC,
              "ComputeCentroid: Invalid distance type: %s", DISTANCE_TYPE_NAME[(int8_t)distanceAlg]);

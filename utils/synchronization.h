@@ -19,7 +19,7 @@ namespace divftree {
 // pass the same pointer as two arguments to compare_exchange128.
 
 union alignas(16) atomic_data128 {
-    struct {
+    struct Detail {
 #if defined(__DIVFTREE_ATOMIC128__) || defined(__DIVFTREE_CMPXCHG128__)
         std::atomic<uint64_t> lo;
         std::atomic<uint64_t> hi;
@@ -27,6 +27,7 @@ union alignas(16) atomic_data128 {
         std::atomic<__int128_t> raw_atomic;
 #endif
     };
+    Detail detail;
     __int128_t raw;
 
     atomic_data128(__int128_t data) : raw{data} {}
@@ -50,10 +51,10 @@ inline bool compare_exchange128(atomic_data128* dest, atomic_data128* expected, 
             "setz %0"       // on gcc6 and later, use a flag output constraint instead
             : "=q" ( result )
             , "+m" ( *dest )
-            , "+d" ( expected->hi )
-            , "+a" ( expected->lo )
-            : "c" ( desired->hi )
-            , "b" ( desired->lo )
+            , "+d" ( expected->detail.hi )
+            , "+a" ( expected->detail.lo )
+            : "c" ( desired->detail.hi )
+            , "b" ( desired->detail.lo )
             : "cc"
         );
     }
@@ -64,10 +65,10 @@ inline bool compare_exchange128(atomic_data128* dest, atomic_data128* expected, 
             "setz %0"       // on gcc6 and later, use a flag output constraint instead
             : "=q" ( result )
             , "+m" ( *dest )
-            , "+d" ( expected->hi )
-            , "+a" ( expected->lo )
-            : "c" ( desired->hi )
-            , "b" ( desired->lo )
+            , "+d" ( expected->detail.hi )
+            , "+a" ( expected->detail.lo )
+            : "c" ( desired->detail.hi )
+            , "b" ( desired->detail.lo )
             : "cc", "memory" // compile-time memory barrier.  Omit if you want memory_order_relaxed compile-time ordering.
         );
     }
@@ -145,7 +146,7 @@ inline void atomic_load128(const atomic_data128* src, atomic_data128* dest, bool
 /* Todo: a more efficent implementation */
 class SXLock {
 public:
-    SXLock() : _mode(SX_SHARED), _num_shared_holders(0), _signal{true} {}
+    SXLock() : _mode(SX_SHARED), _num_shared_holders(0) {}
     ~SXLock() = default;
 
     void Lock(LockMode mode) {
@@ -169,7 +170,7 @@ public:
 
     void Unlock() {
         if (_mode == SX_SHARED) {
-            threadSelf->SanityCheckLockHeldByMe(this, SX_SHARED);
+            threadSelf->SanityCheckLockHeldInModeByMe(this, SX_SHARED);
             FatalAssert(_num_shared_holders.load() > 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
             threadSelf->ReleaseLockSanityLog(this, SX_SHARED);
@@ -234,12 +235,11 @@ protected:
     LockMode _mode;
     std::atomic<uint64_t> _num_shared_holders;
     std::shared_mutex _m;
-    // std::atomic<bool> _signal;
 };
 
 class SXSpinLock {
 public:
-    SXSpinLock() : _mode(SX_SHARED), _lock{0} {}
+    SXSpinLock() : _mode(SX_SHARED), _lock(0) {}
     ~SXSpinLock() = default;
 
     void Lock(LockMode mode) {
@@ -250,7 +250,7 @@ public:
             }
 
             if (mode == SX_SHARED) {
-                non_atomic_lock res{0};
+                non_atomic_lock res(0);
                 res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
                 if (res._data._exclusive_flag == LOCKED) {
                     _lock._counter.fetch_sub(1, std::memory_order_release);
@@ -260,7 +260,7 @@ public:
                 break;
             }
             else {
-                non_atomic_lock expected{0};
+                non_atomic_lock expected(0);
                 if (!_lock._data._exclusive_flag.compare_exchange_strong(expected._data._exclusive_flag,
                                                                          LOCKED, std::memory_order_seq_cst)) {
                     continue;
@@ -279,7 +279,7 @@ public:
 
     void Unlock() {
         if (_mode == SX_SHARED) {
-            threadSelf->SanityCheckLockHeldByMe(this, SX_SHARED);
+            threadSelf->SanityCheckLockHeldInModeByMe(this, SX_SHARED);
             FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) > 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
             threadSelf->ReleaseLockSanityLog(this, SX_SHARED);
@@ -301,7 +301,7 @@ public:
     bool TryLock(LockMode mode) {
         threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
-            non_atomic_lock res{0};
+            non_atomic_lock res(0);
             res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
             if (res._data._exclusive_flag == LOCKED) {
                 _lock._counter.fetch_sub(1, std::memory_order_release);
@@ -312,7 +312,7 @@ public:
             return true;
         }
         else {
-            non_atomic_lock expected{0};
+            non_atomic_lock expected(0);
             if (!_lock._data._exclusive_flag.compare_exchange_strong(expected._data._exclusive_flag,
                                                                         LOCKED, std::memory_order_seq_cst)) {
                 return false;
@@ -353,14 +353,21 @@ protected:
             uint32_t _shared_counter;
         } _data;
         uint64_t _counter;
+
+        non_atomic_lock(uint64_t initial): _counter(initial) {}
     };
-    union {
-        struct {
+    union atomic_lock {
+        struct Detail {
             std::atomic<uint32_t> _exclusive_flag;
             std::atomic<uint32_t> _shared_counter;
-        } _data;
+        };
+        Detail _data;
         std::atomic<uint64_t> _counter;
-    } _lock;
+
+        atomic_lock(uint64_t initial): _counter(initial) {}
+    };
+
+    atomic_lock _lock;
 };
 
 template<LockMode mode>

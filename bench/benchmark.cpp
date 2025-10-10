@@ -1,7 +1,7 @@
-#include "benchmark.h"
+#include "bench/benchmark.h"
 
-#include "config_reader.h"
-#include "dataset.h"
+#include "bench/config_reader.h"
+#include "bench/dataset.h"
 
 inline divftree::DIVFTree* vector_index = nullptr;
 inline std::atomic<bool> stop = false;

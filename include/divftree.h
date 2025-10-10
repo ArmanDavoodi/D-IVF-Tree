@@ -501,12 +501,53 @@ public:
         }
     }
 
-    // String ToString(bool detailed = false) const override {
-    //     return String("{clustering algorithm=%s, distance=%s, centroid_copy=%s, LockState=%s, Cluster=",
-    //                   CLUSTERING_TYPE_NAME[clusteringAlg], DISTANCE_TYPE_NAME[_distanceAlg],
-    //                   _centroid_copy.ToString(cluster._dim).ToCStr(), lock.ToString().ToCStr()) +
-    //            cluster.ToString(detailed) + String("}");
-    // }
+    String ToString(bool detailed = false) const override {
+        uint16_t reserved = cluster.header.reserved_size.load(std::memory_order_acquire);
+        uint16_t visible = cluster.header.visible_size.load(std::memory_order_acquire);
+        uint16_t deleted = cluster.header.num_deleted.load(std::memory_order_acquire);
+        String rs = String("{self=%p, unpinCount:%lu, reserved_size:%hu, visible_size:%hu, num_deleted:%hu, attr:%s",
+                           this, attr.ToString().ToCStr(), unpinCount.load(std::memory_order_acquire),
+                           reserved, visible, deleted);
+        if (!detailed) {
+            return rs+String("}");
+        }
+
+        FatalAssert(Cluster::NumBlocks(attr.block_size, attr.cap) == 1,
+                    LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
+        rs += String(", Cluster:{num_blocks=1, blocks=[{");
+
+        uint16_t dim = attr.index->GetAttributes().dimension;
+        const VTYPE* vec = cluster.Data(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
+        const void* meta = cluster.MetaData(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
+        for (uint16_t i = 0; i < visible; ++i) {
+            if (attr.centroid_id.IsLeaf()) {
+                const VectorMetaData* vmd = static_cast<const VectorMetaData*>(meta);
+                rs += String("{meta:{ID: " VECTORID_LOG_FMT ", State: %s}, data:{", VECTORID_LOG(vmd[i].id),
+                             VectorStateToString(vmd[i].state.load(std::memory_order_acquire)).ToCStr());
+                for (uint16_t j = 0; j < dim; ++j) {
+                    rs += String(VTYPE_FMT, vec[i * dim + j]);
+                    if (j < dim - 1) {
+                        rs += String(", ");
+                    }
+                }
+            } else {
+                const CentroidMetaData* vmd = static_cast<const CentroidMetaData*>(meta);
+                rs += String("{meta:{ID: " VECTORID_LOG_FMT " Version: %lu, State: %s}, data:{",
+                             VECTORID_LOG(vmd[i].id), vmd[i].version,
+                             VectorStateToString(vmd[i].state.load(std::memory_order_acquire)).ToCStr());
+                for (uint16_t j = 0; j < dim; ++j) {
+                    rs += String(VTYPE_FMT, vec[i * dim + j]);
+                    if (j < dim - 1) {
+                        rs += String(", ");
+                    }
+                }
+            }
+            rs += String((i == visible - 1 ? "}}" : "}}, "));
+        }
+        rs += String("}]}}");
+
+        return rs;
+    }
 
 
 protected:
@@ -521,10 +562,20 @@ friend class DIVFTree;
 class DIVFTree : public DIVFTreeInterface {
 public:
     DIVFTree(DIVFTreeAttributes attributes) : attr(attributes), real_size(0), end_signal(false) {
-        Thread* _self = new Thread(attr.random_base_perc);
+        Thread* _self = new Thread(attributes.random_base_perc);
         _self->InitDIVFThread();
         attr.similarityComparator = GetDistancePairSimilarityComparator(attr.distanceAlg, false);
         attr.reverseSimilarityComparator = GetDistancePairSimilarityComparator(attr.distanceAlg, true);
+        if (attr.use_block_bytes) {
+            attr.leaf_blck_size = Cluster::BlockSize(attr.leaf_blck_bytes, sizeof(VectorMetaData), attr.dimension);
+            attr.internal_blck_size = Cluster::BlockSize(attr.internal_blck_bytes, sizeof(CentroidMetaData),
+                                                         attr.dimension);
+        } else {
+            attr.leaf_blck_bytes = Cluster::BlockBytes(attr.leaf_blck_size, sizeof(VectorMetaData),
+                                                       attr.leaf_max_size, attr.dimension);
+            attr.internal_blck_bytes = Cluster::BlockBytes(attr.internal_blck_size, sizeof(CentroidMetaData),
+                                                           attr.internal_max_size, attr.dimension);
+        }
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
         VectorID root_id;
         BufferVertexEntry* root_entry =
@@ -731,7 +782,7 @@ public:
         return attr;
     }
 
-    // inline String ToString() override {
+    // inline String ToString(bool detailed = false) const override {
     //     String out("{Attr=<Dim=%hu, ClusteringAlg=%s, DistanceAlg=%s, "
     //                "LeafMinSize=%hu, LeafMaxSize=%hu, InternalMinSize=%hu, InternalMaxSize=%hu, "
     //                "SplitInternal=%hu, SplitLeaf=%hu, Size=%lu, Levels=%lu>, RootID=" VECTORID_LOG_FMT
@@ -800,7 +851,7 @@ public:
     // }
 
 protected:
-    const DIVFTreeAttributes attr;
+    DIVFTreeAttributes attr;
     std::atomic<uint64_t> real_size;
     std::atomic<bool> end_signal;
 

@@ -4,9 +4,6 @@ cd $ROOT
 
 CONF_FILE="bench/run.conf"
 
-MAX_DIM=256
-MAX_VTYPE_BYTES=64
-
 VAR_LOG_OUTPUT_PATH=$ROOT/bench/out/logs/
 
 VAR_CLUSTERING="SimpleDivide"
@@ -14,9 +11,12 @@ VAR_LEAF_SIZE=(128 1024)
 VAR_INTERNAL_SIZE=(128 1024)
 VAR_LEAF_SPLIT=2
 VAR_INTERNAL_SPLIT=2
-# set block size to max to make sure each cluster is only one block!
-VAR_LEAF_BLOCK_BYTES=$((${VAR_LEAF_SIZE[1]} * $MAX_DIM * $MAX_VTYPE_BYTES))
-VAR_INTERNAL_BLOCK_BYTES=$((${VAR_INTERNAL_SIZE[1]} * $MAX_DIM * $MAX_VTYPE_BYTES))
+
+VAR_USE_BLOCK_BYTES=0
+VAR_LEAF_BLOCK_BYTES=$(( 1024 * 16 ))
+VAR_INTERNAL_BLOCK_BYTES=$(( 1024 * 16 ))
+VAR_LEAF_BLOCK_SIZE=$((${VAR_LEAF_SIZE[1]}))
+VAR_INTERNAL_BLOCK_SIZE=$((${VAR_INTERNAL_SIZE[1]}))
 
 VAR_DEF_LEAF_SEARCH_SPAN=10
 VAR_DEF_INTERNAL_SEARCH_SPAN=10
@@ -50,6 +50,16 @@ echo "leaf-size:[${VAR_LEAF_SIZE[0]},${VAR_LEAF_SIZE[1]}]" >> $CONF_FILE
 echo "internal-size:[${VAR_INTERNAL_SIZE[0]},${VAR_INTERNAL_SIZE[1]}]" >> $CONF_FILE
 echo "leaf-split:$VAR_LEAF_SPLIT" >> $CONF_FILE
 echo "internal-split:$VAR_INTERNAL_SPLIT" >> $CONF_FILE
+echo "use-block-bytes:$VAR_USE_BLOCK_BYTES" >> $CONF_FILE
+
+if [ $VAR_USE_BLOCK_BYTES -eq 0 ]; then
+    echo "leaf-block-size:$VAR_LEAF_BLOCK_SIZE" >> $CONF_FILE
+    echo "internal-block-size:$VAR_INTERNAL_BLOCK_SIZE" >> $CONF_FILE
+else
+    echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
+    echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE
+fi
+
 echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
 echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE
 echo "default-leaf-search-span:$VAR_DEF_LEAF_SEARCH_SPAN" >> $CONF_FILE

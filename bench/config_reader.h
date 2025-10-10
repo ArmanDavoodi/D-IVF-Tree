@@ -1,7 +1,7 @@
 #ifndef CONFIG_READER_H_
 #define CONFIG_READER_H_
 
-#include "benchmark.h"
+#include "bench/benchmark.h"
 
 #include <fstream>
 #include <string>
@@ -78,6 +78,16 @@ bool parseUnsignedInt(const std::string& s, T& value) {
     }
 
     value = static_cast<T>(temp);
+    return true;
+}
+
+bool parseBool(const std::string& s, bool& value) {
+    uint8_t val;
+    if (!parseUnsignedInt<uint8_t>(s, val)) {
+        return false;
+    }
+
+    value = (val == 0 ? false : true);
     return true;
 }
 
@@ -178,24 +188,56 @@ void ParseConfigs() {
         throw std::runtime_error("Internal split not provided!");
     }
 
-    vit = var_configs.find("leaf-block-bytes");
+    vit = var_configs.find("use-block-bytes");
     if (vit != var_configs.end()) {
-        if (!parseUnsignedInt(vit->second, index_attr.leaf_blck_size) ||
-            index_attr.leaf_blck_size < index_attr.dimension * sizeof(divftree::VTYPE)) {
-            throw std::runtime_error("Invalid leaf block size!");
+        if (!parseBool(vit->second, index_attr.use_block_bytes)) {
+            throw std::runtime_error("Invalid use block bytes!");
         }
     } else {
-        throw std::runtime_error("Leaf block size not provided!");
+        throw std::runtime_error("Use block bytes not provided!");
     }
 
-    vit = var_configs.find("internal-block-bytes");
-    if (vit != var_configs.end()) {
-        if (!parseUnsignedInt(vit->second, index_attr.internal_blck_size) ||
-            index_attr.internal_blck_size < index_attr.dimension * sizeof(divftree::VTYPE)) {
-            throw std::runtime_error("Invalid internal block size!");
+    if (index_attr.use_block_bytes) {
+        vit = var_configs.find("leaf-block-bytes");
+        if (vit != var_configs.end()) {
+            if (!parseUnsignedInt(vit->second, index_attr.leaf_blck_bytes) ||
+                index_attr.leaf_blck_bytes < index_attr.dimension * sizeof(divftree::VTYPE)) {
+                throw std::runtime_error("Invalid leaf block bytes!");
+            }
+        } else {
+            throw std::runtime_error("Leaf block bytes not provided!");
         }
+
+        vit = var_configs.find("internal-block-bytes");
+        if (vit != var_configs.end()) {
+            if (!parseUnsignedInt(vit->second, index_attr.internal_blck_bytes) ||
+                index_attr.internal_blck_bytes < index_attr.dimension * sizeof(divftree::VTYPE)) {
+                throw std::runtime_error("Invalid internal block bytes!");
+            }
+        } else {
+            throw std::runtime_error("Internal block bytes not provided!");
+        }
+
     } else {
-        throw std::runtime_error("Internal block size not provided!");
+        vit = var_configs.find("leaf-block-size");
+        if (vit != var_configs.end()) {
+            if (!parseUnsignedInt(vit->second, index_attr.leaf_blck_size) ||
+                index_attr.leaf_blck_size < index_attr.dimension * sizeof(divftree::VTYPE)) {
+                throw std::runtime_error("Invalid leaf block size!");
+            }
+        } else {
+            throw std::runtime_error("Leaf block size not provided!");
+        }
+
+        vit = var_configs.find("internal-block-size");
+        if (vit != var_configs.end()) {
+            if (!parseUnsignedInt(vit->second, index_attr.internal_blck_size) ||
+                index_attr.internal_blck_size < index_attr.dimension * sizeof(divftree::VTYPE)) {
+                throw std::runtime_error("Invalid internal block size!");
+            }
+        } else {
+            throw std::runtime_error("Internal block size not provided!");
+        }
     }
 
     vit = var_configs.find("default-leaf-search-span");
