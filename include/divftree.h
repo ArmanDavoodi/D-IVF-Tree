@@ -66,16 +66,23 @@ struct SearchTask {
     const VTYPE* query;
     size_t k;
 
-    std::atomic<bool> taken;
-    std::atomic<bool> done;
+    std::atomic<bool>* taken;
+    std::atomic<bool>* done;
     bool done_waiting;
     SortedList<ANNVectorInfo, SimilarityComparator>* neighbours;
 
     SearchTask() = default;
-    SearchTask(VectorID id, Version ver, const VTYPE* q, size_t span) :
+    SearchTask(VectorID id, Version ver, const VTYPE* q, size_t span, std::atomic<bool>* tk,
+               std::atomic<bool>* dn) :
         master(threadSelf->ID()), taskId(threadSelf->GetNextTaskID()),
         target(id), version(ver), query(q), k(span),
-        taken(false), done(false), done_waiting(false), neighbours(nullptr) {}
+        taken(tk), done(dn), done_waiting(false), neighbours(nullptr) {
+        CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(q, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(tk, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(dn, LOG_TAG_DIVFTREE);
+        FatalAssert(span > 0, LOG_TAG_DIVFTREE, "k cannot be 0!");
+    }
 
     inline void CopyFrom(const SearchTask& other) {
         master = other.master;
@@ -350,15 +357,15 @@ public:
                     "if final state is valid. this can only happen when a migration fails and "
                     "we want to revert our state back to valid");
 
-        VectorID* id = nullptr;
+        // VectorID* id = nullptr;
         std::atomic<VectorState>* state = nullptr;
         if (attr.centroid_id.IsLeaf()) {
             VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
-            id = &(vmd->id);
+            // id = &(vmd->id);
             state = &(vmd->state);
         } else {
             CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
-            id = &(vmd->id);
+            // id = &(vmd->id);
             if (version != nullptr) {
                 *version = vmd->version;
             }
@@ -392,10 +399,13 @@ public:
                 RetStatus{.stat=RetStatus::FAILED_TO_CAS_VECTOR_STATE, .message=nullptr});
     }
 
-    void Search(const VTYPE* query, size_t k, SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
+    void Search(const VTYPE* query, size_t k, SortedList<ANNVectorInfo, SimilarityComparator>* neighbours,
                 std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) override {
         /* todo: should I also ignore same vectors with different versions? e.g. if it is newer replace o.w ignore */
-        FatalAssert(neighbours.Size() <= k, LOG_TAG_DIVFTREE_VERTEX, "neighbour list size out of bounds!");
+        CHECK_NOT_NULLPTR(query, LOG_TAG_DIVFTREE_VERTEX);
+        CHECK_NOT_NULLPTR(neighbours, LOG_TAG_DIVFTREE_VERTEX);
+        FatalAssert(k > 0, LOG_TAG_DIVFTREE_VERTEX, "k must be greater than 0!");
+        FatalAssert(neighbours->Size() <= k, LOG_TAG_DIVFTREE_VERTEX, "neighbour list size out of bounds!");
         const uint16_t dim = attr.index->GetAttributes().dimension;
         const DistanceType dtype = attr.index->GetAttributes().distanceAlg;
         VTYPE* data = cluster.Data(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
@@ -421,10 +431,10 @@ public:
                     case VECTOR_STATE_VALID:
                     case VECTOR_STATE_MIGRATED:
                         new_vector = ANNVectorInfo(Distance(query, &data[i * dim], dim, dtype), vmd[i].id);
-                        neighbours.Insert(new_vector);
+                        neighbours->Insert(new_vector);
                         seen.emplace(new_vector.id, new_vector.version);
-                        if (neighbours.Size() > k) {
-                            neighbours.PopBack();
+                        if (neighbours->Size() > k) {
+                            neighbours->PopBack();
                         }
                         break;
                     case VECTOR_STATE_OUTDATED:
@@ -438,12 +448,12 @@ public:
                         continue;
                     }
 
-                    std::unordered_map<divftree::VectorID, std::pair<uint16_t, DTYPE>,
-                                       divftree::VectorIDHash>::iterator emplace_res;
+                    std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash>::iterator emplace_res;
+                    std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash>::iterator check;
                     switch (vmd[i].state.load(std::memory_order_acquire)) {
                     case VECTOR_STATE_VALID:
                     case VECTOR_STATE_MIGRATED:
-                        auto check = in_list.find(vmd[i].id);
+                        check = in_list.find(vmd[i].id);
                         if (check != in_list.end()) { /* todo: we can handle this case much more efficiently! */
                             /* a vector was outdated in a previous pass */
                             FatalAssert((vmd[check->second.first].id == vmd[i].id) &&
@@ -453,23 +463,23 @@ public:
                                         "the one that we have seen before should be outdated!");
                             ANNVectorInfo outdated(check->second.second, vmd[check->second.first].id,
                                                    vmd[check->second.first].version);
-                            auto it = neighbours.Find(outdated);
-                            FatalAssert((it != neighbours.end()),
+                            auto it = neighbours->Find(outdated);
+                            FatalAssert((it != neighbours->end()),
                                         LOG_TAG_DIVFTREE_VERTEX, "Could not find the outdated version!");
-                            neighbours.Erase(it);
+                            neighbours->Erase(it);
                             check->second.first = i;
                             check->second.second = Distance(query, &data[i * dim], dim, dtype);
                             emplace_res = check;
                         } else {
-                            emplace_res = in_list.emplace(new_vector.id, i,
-                                                          Distance(query, &data[i * dim], dim, dtype)).first;
+                            emplace_res = in_list.insert({new_vector.id,
+                                                         {i, Distance(query, &data[i * dim], dim, dtype)}}).first;
                         }
                         new_vector = ANNVectorInfo(emplace_res->second.second, vmd[i].id, vmd[i].version);
-                        neighbours.Insert(new_vector);
+                        neighbours->Insert(new_vector);
                         in_cluster.emplace(new_vector.id);
                         seen.emplace(new_vector.id, new_vector.version);
-                        if (neighbours.Size() > k) {
-                            auto to_be_deleted = std::prev(neighbours.end());
+                        if (neighbours->Size() > k) {
+                            auto to_be_deleted = std::prev(neighbours->end());
                             if (new_vector == *to_be_deleted) {
                                 in_list.erase(emplace_res);
                             } else {
@@ -478,7 +488,7 @@ public:
                                     in_list.erase(it);
                                 }
                             }
-                            neighbours.Erase(to_be_deleted);
+                            neighbours->Erase(to_be_deleted);
                         }
                         break;
                     case VECTOR_STATE_OUTDATED:
@@ -499,6 +509,22 @@ public:
                 old_size = curr_size;
             }
         }
+    }
+
+    inline Cluster& GetCluster() override {
+        return cluster;
+    }
+
+    inline const DIVFTreeVertexAttributes& GetAttributes() const override {
+        return attr;
+    }
+
+    inline VectorID CentroidID() const override {
+        return attr.centroid_id;
+    }
+
+    inline Version VertexVersion() const override {
+        return attr.version;
     }
 
     String ToString(bool detailed = false) const override {
@@ -567,24 +593,26 @@ public:
         attr.similarityComparator = GetDistancePairSimilarityComparator(attr.distanceAlg, false);
         attr.reverseSimilarityComparator = GetDistancePairSimilarityComparator(attr.distanceAlg, true);
         if (attr.use_block_bytes) {
-            attr.leaf_blck_size = Cluster::BlockSize(attr.leaf_blck_bytes, sizeof(VectorMetaData), attr.dimension);
+            attr.leaf_blck_size = Cluster::BlockSize(attr.leaf_blck_bytes, sizeof(VectorMetaData),
+                                                     attr.leaf_max_size, attr.dimension);
             attr.internal_blck_size = Cluster::BlockSize(attr.internal_blck_bytes, sizeof(CentroidMetaData),
-                                                         attr.dimension);
+                                                         attr.internal_max_size, attr.dimension);
         } else {
             attr.leaf_blck_bytes = Cluster::BlockBytes(attr.leaf_blck_size, sizeof(VectorMetaData),
-                                                       attr.leaf_max_size, attr.dimension);
+                                                       attr.dimension);
             attr.internal_blck_bytes = Cluster::BlockBytes(attr.internal_blck_size, sizeof(CentroidMetaData),
-                                                           attr.internal_max_size, attr.dimension);
+                                                           attr.dimension);
         }
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
         VectorID root_id;
         BufferVertexEntry* root_entry =
             BufferManager::Init(sizeof(DIVFTreeVertex) - sizeof(ClusterHeader),
+                                attr.leaf_blck_size, attr.internal_blck_size,
                                 attr.leaf_max_size, attr.internal_max_size, attr.dimension);
         CHECK_NOT_NULLPTR(root_entry, LOG_TAG_DIVFTREE);
         (void)(new (root_entry->ReadLatestVersion(false)) DIVFTreeVertex(attr, root_entry->centroidMeta.selfId, this));
         BufferManager::GetInstance()->
-            ReleaseBufferEntryIfNotNull(root_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            ReleaseBufferEntryIfNotNull(root_entry, ReleaseBufferEntryFlags(true, true));
 
         StartBGThreads();
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index End");
@@ -618,7 +646,6 @@ public:
         //      "Insert BEGIN: Vector=%s, _size=%lu, _levels=%hhu",
         //      vec.ToString(core_attr.dimension).ToCStr(), _size, _levels);
 
-        RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
@@ -630,7 +657,7 @@ public:
         CHECK_VECTORID_IS_VECTOR(vec_id, LOG_TAG_DIVFTREE);
         const ConstVectorBatch batch(vec, &vec_id, nullptr, 1);
 
-        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&> layers;
+        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>*> layers;
         VectorID target_leaf;
         Version target_version;
         BufferVertexEntry* leaf_entry = nullptr;
@@ -642,7 +669,6 @@ public:
                 CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
                 if (root->attr.centroid_id.IsLeaf()) {
-                    /* need to split the root */
                     target_leaf = root->attr.centroid_id;
                     target_version = root->attr.version;
                     root->Unpin();
@@ -650,11 +676,11 @@ public:
                 }
 
                 layers.reserve(root->attr.centroid_id._level + 1);
-                /* this layer represents vectors and we do not need them */
+                /* level 0 represents vectors and we do not need them */
                 layers.emplace_back(nullptr);
                 for (uint64_t i = 1; i <= root->attr.centroid_id._level; ++i) {
                     layers.emplace_back(
-                        *(new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator)));
+                        new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator));
                 }
 
                 rs = ANNSearch(vec, 1, search_span, 1,
@@ -663,15 +689,14 @@ public:
                 root->Unpin();
 
                 if (rs.IsOK()) {
-                    FatalAssert(layers[VectorID::LEAF_LEVEL].Size() == 1, LOG_TAG_DIVFTREE,
+                    FatalAssert(layers[VectorID::LEAF_LEVEL]->Size() == 1, LOG_TAG_DIVFTREE,
                                 "if rs is OK we should have found the leaf!");
-                    VectorID leaf_id = layers[VectorID::LEAF_LEVEL][0].id;
-                    Version leaf_version = layers[VectorID::LEAF_LEVEL][0].version;
+                    target_leaf = (*layers[VectorID::LEAF_LEVEL])[0].id;
+                    target_version = (*layers[VectorID::LEAF_LEVEL])[0].version;
                 }
 
                 for (uint64_t i = 1; i < layers.size(); ++i) {
-                    SortedList<ANNVectorInfo, SimilarityComparator>* list = &layers[i];
-                    delete list;
+                    delete layers[i];
                 }
                 layers.clear();
 
@@ -685,7 +710,7 @@ public:
             if (leaf_entry == nullptr || leaf_entry->currentVersion != target_version) {
                 /* todo: if there is a difference in version we may be able to solve it using update logs! */
                 /* todo: check how many retries! */
-                bufferMgr->ReleaseBufferEntryIfNotNull(leaf_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                bufferMgr->ReleaseBufferEntryIfNotNull(leaf_entry, ReleaseBufferEntryFlags(false, false));
                 continue;
             }
             /* todo: maybe we can read the parent and only go one layer up instead of rereading from root */
@@ -741,7 +766,7 @@ public:
 
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
-        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&> layers;
+        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>*> layers;
 
         while (real_size.load(std::memory_order_acquire) > 0) {
             DIVFTreeVertex* root =
@@ -750,17 +775,16 @@ public:
 
             layers.reserve(root->attr.centroid_id._level + 1);
             for (uint64_t i = 0; i <= root->attr.centroid_id._level; ++i) {
-                layers.emplace_back(*(new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator)));
+                layers.emplace_back(new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator));
             }
 
             rs = ANNSearch(query, k, internal_node_search_span, leaf_node_search_span,
                            (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, layers, root);
             root->Unpin();
 
-            layers[0].Extract(neighbours, (sort_type == SortType::IncreasingSimilarity));
+            layers[0]->Extract(neighbours, (sort_type == SortType::IncreasingSimilarity));
             for (uint64_t i = 0; i < layers.size(); ++i) {
-                SortedList<ANNVectorInfo, SimilarityComparator>* list = &layers[i];
-                delete list;
+                delete layers[i];
             }
             layers.clear();
 
@@ -862,7 +886,7 @@ protected:
     std::vector<Thread*> bg_compactors;
     BlockingQueue<CompactionTask> compaction_tasks;
     std::vector<Thread*> searchers;
-    BlockingQueue<SearchTask&> search_tasks;
+    BlockingQueue<SearchTask> search_tasks;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -1026,14 +1050,14 @@ protected:
         CHECK_NOT_NULLPTR(cluster, LOG_TAG_DIVFTREE);
 
         if (cluster->cluster.header.num_deleted.load(std::memory_order_relaxed) == 0) {
-            bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(false, false));
             return;
         }
 
         entry->state.store(CLUSTER_FULL, std::memory_order_release);
         VectorBatch dummy;
         (void)CompactAndInsert(entry, dummy);
-        bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+        bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(true, true));
     }
 
     inline void SimpleDivideClustering(const DIVFTreeVertex* base, const ConstVectorBatch& batch,
@@ -1178,6 +1202,7 @@ protected:
         {
         case ClusteringType::SimpleDivide:
             SimpleDivideClustering(base, batch, entries, clusters, centroids, marked_for_update);
+            break;
         default:
             DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
                  "Cluster: Invalid clustering type: %hhu", (uint8_t)(attr.clusteringAlg));
@@ -1210,20 +1235,20 @@ protected:
         DIVFTreeVertex* current = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(current, LOG_TAG_DIVFTREE);
 
-        uint16_t size = current->cluster.header.reserved_size.load(std::memory_order_relaxed);
+        // uint16_t size = current->cluster.header.reserved_size.load(std::memory_order_relaxed);
         const bool is_leaf = container_entry->centroidMeta.selfId.IsLeaf();
         const uint16_t dim = attr.dimension;
         const uint16_t cap = current->attr.cap;
         const uint16_t blckSize = current->attr.block_size;
-        const uint8_t level = (uint8_t)(container_entry->centroidMeta.selfId._level);
+        // const uint8_t level = (uint8_t)(container_entry->centroidMeta.selfId._level);
         /* Todo: this will not work if we have more than one block! */
         FatalAssert(current->cluster.NumBlocks(blckSize, cap) == 1,
                     LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
 
         FatalAssert(!is_leaf || (batch.version != nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
-        uint16_t total_size = current->cluster.header.reserved_size.load(std::memory_order_relaxed) -
-                              current->cluster.header.num_deleted.load(std::memory_order_relaxed) +
-                              batch.size;
+        // uint16_t total_size = current->cluster.header.reserved_size.load(std::memory_order_relaxed) -
+        //                       current->cluster.header.num_deleted.load(std::memory_order_relaxed) +
+        //                       batch.size;
 
         VectorBatch centroids;
         DIVFTreeVertex** clusters = nullptr;
@@ -1252,9 +1277,9 @@ protected:
             CHECK_NOT_NULLPTR(parent, LOG_TAG_DIVFTREE);
             FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
                         "null parent with valid location!");
-            rs = BatchInsertInto(parent, centroids, false, currentLocation.entryOffset);
+            rs = BatchInsertInto(parent, centroids, false, currentLocation.detail.entryOffset);
             if (!rs.IsOK()) {
-                bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags(false, false));
                 parent = nullptr;
                 continue;
             }
@@ -1265,7 +1290,7 @@ protected:
         threadSelf->SanityCheckLockHeldInModeByMe(&parent->clusterLock, SX_SHARED);
 
         container_entry->UpdateClusterPtr(clusters[0], centroids.version[0]);
-        bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags(false, false));
         parent = nullptr;
 
         for (uint16_t i = 0; i < centroids.size; ++i) {
@@ -1290,9 +1315,9 @@ protected:
         }
 
         for (uint16_t i = centroids.size - 1; i != 0; --i) {
-            bufferMgr->ReleaseBufferEntry(entries[i-1], ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            bufferMgr->ReleaseBufferEntry(entries[i-1], ReleaseBufferEntryFlags(true, true));
         }
-        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
 
         delete[] clusters;
         delete[] entries;
@@ -1375,7 +1400,7 @@ protected:
             FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "Major update failed!");
             if (releaseEntry) {
                 BufferManager::GetInstance()->
-                    ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+                    ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
             } else {
                 container_entry->DowngradeAccessToShared();
             }
@@ -1385,7 +1410,7 @@ protected:
 
         if (releaseEntry) {
             BufferManager::GetInstance()->
-                ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
         }
         return rs;
     }
@@ -1421,7 +1446,7 @@ protected:
 
         if (((size - num_deleted) > 1)) {
             /* no need to prune */
-            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
             return;
         }
 
@@ -1443,7 +1468,7 @@ protected:
         bufferMgr->UpdateVectorLocation(newRootId, INVALID_VECTOR_LOCATION);
         bufferMgr->UpdateRoot(newRootId, newRootVersion, container_entry);
         container_entry->UnpinVersion(container_entry->currentVersion);
-        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=0});
+        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, false));
     }
 
     inline void PruneEmptyVertexAndRelease(BufferVertexEntry* container_entry) {
@@ -1464,7 +1489,7 @@ protected:
                     "we cannot delete more vectors than there are in the cluster!");
         if (((size - num_deleted) >= 1)) {
             /* no need to prune */
-            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
             return;
         }
 
@@ -1484,7 +1509,7 @@ protected:
         UNUSED_VARIABLE(rs);
         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "this deletion should not fail!");
         container_entry->UnpinVersion(container_entry->currentVersion);
-        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=0});
+        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, false));
     }
 
     inline void PruneIfNeededAndRelease(BufferVertexEntry* container_entry) {
@@ -1500,7 +1525,7 @@ protected:
             CHECK_VECTORID_IS_CENTROID(rootId, LOG_TAG_DIVFTREE);
             if (rootId.IsLeaf()) {
                 FatalAssert(container_entry->centroidMeta.selfId == rootId, LOG_TAG_DIVFTREE, "we should be the root!");
-                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
                 return;
             }
 
@@ -1511,7 +1536,7 @@ protected:
                 /* todo: can it cause problems since we are loading reserve first then deleted? -> we may see num_deleted > reserved */
                 if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
                     container->cluster.header.num_deleted.load(std::memory_order_acquire)) > 1) {
-                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
                     return;
                 }
                 BufferVertexEntryState state = BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS;
@@ -1521,7 +1546,7 @@ protected:
                 } else if (state == BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS ||
                            state == BufferVertexEntryState::CLUSTER_DELETED) {
                     /* someone else has handled it */
-                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
                     return;
                 } else if (state == BufferVertexEntryState::CLUSTER_FULL) {
                     /* recheck if pruning is needed */
@@ -1544,14 +1569,14 @@ protected:
                     UNUSED_VARIABLE(res);
                     FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
                 }
-                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
                 return;
             }
             BufferVertexEntryState state = BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS;
             if (container_entry->UpgradeAccessToExclusive(state).IsOK()) {
                 if ((container->cluster.header.reserved_size.load(std::memory_order_acquire) -
                     container->cluster.header.num_deleted.load(std::memory_order_acquire)) >= 1) {
-                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
                     return;
                 }
 
@@ -1559,7 +1584,7 @@ protected:
                 if (rootId.IsLeaf()) {
                     FatalAssert(container_entry->centroidMeta.selfId == rootId, LOG_TAG_DIVFTREE,
                                 "we should be the root!");
-                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=1, .stablize=1});
+                    bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
                     return;
                 }
                 if (container_entry->centroidMeta.selfId == rootId) {
@@ -1571,7 +1596,7 @@ protected:
             } else if (state == BufferVertexEntryState::CLUSTER_DELETE_IN_PROGRESS ||
                        state == BufferVertexEntryState::CLUSTER_DELETED) {
                 /* someone else has handled it */
-                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
             } else if (state == BufferVertexEntryState::CLUSTER_FULL) {
                 /* recheck if pruning is needed */
                 continue;
@@ -1586,15 +1611,15 @@ protected:
         CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
         FatalAssert(target._level + 1 == container_entry->centroidMeta.selfId._level, LOG_TAG_DIVFTREE,
                     "target cannot be child of container");
-        FatalAssert(loc.containerId == container_entry->centroidMeta.selfId, LOG_TAG_DIVFTREE, "Location Id mismatch");
-        FatalAssert(container_entry->currentVersion == loc.containerVersion, LOG_TAG_DIVFTREE,
+        FatalAssert(loc.detail.containerId == container_entry->centroidMeta.selfId, LOG_TAG_DIVFTREE, "Location Id mismatch");
+        FatalAssert(container_entry->currentVersion == loc.detail.containerVersion, LOG_TAG_DIVFTREE,
                     "Location version mismatch");
         threadSelf->SanityCheckLockHeldInModeByMe(&container_entry->clusterLock, SX_SHARED);
         DIVFTreeVertex* container = static_cast<DIVFTreeVertex*>(container_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(container, LOG_TAG_DIVFTREE);
         Version version = 0;
         VectorState expState = VECTOR_STATE_VALID;
-        RetStatus rs = container->ChangeVectorState(target, loc.entryOffset, expState, VECTOR_STATE_INVALID,
+        RetStatus rs = container->ChangeVectorState(target, loc.detail.entryOffset, expState, VECTOR_STATE_INVALID,
                                                     &version);
         FatalAssert(target.IsVector() || rs.IsOK(), LOG_TAG_DIVFTREE,
                     "state change will never fail if target is a vertex as it should be locked in X mode.");
@@ -1608,7 +1633,7 @@ protected:
             container->cluster.header.num_deleted.fetch_add(1);
             PruneIfNeededAndRelease(container_entry);
         } else {
-            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
         }
 
         return rs;
@@ -1639,7 +1664,7 @@ protected:
 
         if (!rs.IsOK()) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                               ReleaseBufferEntryFlags(false, false));
         }
 
         return rs;
@@ -1741,13 +1766,13 @@ protected:
         for (size_t i = 0; i < targetBatch.size(); ++i) {
             if (compacted) {
                 VectorLocation cur_loc = bufferMgr->LoadCurrentVectorLocation(targetBatch[i].id);
-                if (cur_loc.containerId != src_id) {
+                if (cur_loc.detail.containerId != src_id) {
                     continue;
                 }
 
-                FatalAssert(cur_loc.containerVersion == src_ver, LOG_TAG_DIVFTREE,
+                FatalAssert(cur_loc.detail.containerVersion == src_ver, LOG_TAG_DIVFTREE,
                             "Eventhough the src version is the same as what was used container version has changed!");
-                targetBatch[i].offset = cur_loc.entryOffset;
+                targetBatch[i].offset = cur_loc.detail.entryOffset;
             }
 
             if (src_id.IsLeaf()) {
@@ -1814,7 +1839,7 @@ protected:
             }
             rs = RetStatus{.stat=RetStatus::NEW_CONTAINER_UPDATED, .message=nullptr};
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                           ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                           ReleaseBufferEntryFlags(false, false));
         } else {
             uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) - batch.size;
             uint16_t reserved = src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire);
@@ -1832,7 +1857,7 @@ protected:
             BufferVertexEntry* src_entry_cpy = *src_entry;
             *src_entry = nullptr;
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                               ReleaseBufferEntryFlags(false, false));
             PruneIfNeededAndRelease(src_entry_cpy);
         }
 
@@ -1858,7 +1883,6 @@ protected:
         FatalAssert(first_cluster._level == second_cluster._level, LOG_TAG_DIVFTREE,
                     "clusters should be on the same level!");
 
-        RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
         constexpr uint8_t max_entries = 2;
@@ -1885,7 +1909,7 @@ protected:
         entries[0] = bufferMgr->ReadBufferEntry(ids[0], SX_SHARED);
         if (entries[0] == nullptr) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                               ReleaseBufferEntryFlags(false, false));
             return;
         }
         ++num_entries;
@@ -1902,15 +1926,15 @@ protected:
         parents[1] = static_cast<DIVFTreeVertex*>(entries[1]->centroidMeta.ReadAndPinParent(loc));
         if (parents[1] == nullptr) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                               ReleaseBufferEntryFlags(false, false));
             return;
         }
         FatalAssert(
             (static_cast<CentroidMetaData*>(parents[1]->
-                cluster.MetaData(loc.entryOffset, false, parents[1]->attr.block_size,
+                cluster.MetaData(loc.detail.entryOffset, false, parents[1]->attr.block_size,
                                  parents[1]->attr.cap, attr.dimension))->id == ids[1]) &&
             (static_cast<CentroidMetaData*>(parents[1]->
-                cluster.MetaData(loc.entryOffset, false, parents[1]->attr.block_size,
+                cluster.MetaData(loc.detail.entryOffset, false, parents[1]->attr.block_size,
                                  parents[1]->attr.cap, attr.dimension))->version == versions[1]),
             LOG_TAG_DIVFTREE,
             "Invalid centroid location returned!"
@@ -1921,7 +1945,7 @@ protected:
         //                          parents[1]->attr.cap, attr.dimension))->id != ids[1])) {
         //     parents[1]->Unpin();
         //     bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-        //                                        ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        //                                        ReleaseBufferEntryFlags(false, false));
         //     return;
 
         // }
@@ -1930,16 +1954,16 @@ protected:
         if (parents[0] == nullptr) {
             parents[1]->Unpin();
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                               ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                               ReleaseBufferEntryFlags(false, false));
             return;
         }
 
         FatalAssert(
             static_cast<CentroidMetaData*>(parents[0]->
-                cluster.MetaData(loc.entryOffset, false, parents[0]->attr.block_size,
+                cluster.MetaData(loc.detail.entryOffset, false, parents[0]->attr.block_size,
                                  parents[0]->attr.cap, attr.dimension))->id == ids[0] &&
             (static_cast<CentroidMetaData*>(parents[0]->
-                cluster.MetaData(loc.entryOffset, false, parents[0]->attr.block_size,
+                cluster.MetaData(loc.detail.entryOffset, false, parents[0]->attr.block_size,
                                  parents[0]->attr.cap, attr.dimension))->version == versions[0]),
             LOG_TAG_DIVFTREE,
             "Invalid centroid location returned!"
@@ -1951,14 +1975,14 @@ protected:
         //     parents[1]->Unpin();
         //     parents[0]->Unpin();
         //     bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-        //                                        ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        //                                        ReleaseBufferEntryFlags(false, false));
         //     return;
 
         // }
 
         std::vector<MigrationInfo> migration_batch[max_entries];
         for (uint8_t cn = 0; cn < max_entries; ++cn) {
-            centroidData[cn] = parents[cn]->cluster.Data(loc.entryOffset, false, parents[cn]->attr.block_size,
+            centroidData[cn] = parents[cn]->cluster.Data(loc.detail.entryOffset, false, parents[cn]->attr.block_size,
                                                        parents[cn]->attr.cap, attr.dimension);
             visible_size[cn] = clusters[cn]->cluster.header.visible_size.load(std::memory_order_acquire);
             FatalAssert(visible_size[cn] > 0, LOG_TAG_DIVFTREE, "size should be greater than 0!");
@@ -2019,7 +2043,7 @@ protected:
         }
 
         bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                           ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                           ReleaseBufferEntryFlags(false, false));
 
         /* todo: have to change for multi ndoe setup */
         if (threadSelf->UniformBinary(attr.random_base_perc / 2)) {
@@ -2077,7 +2101,7 @@ protected:
             totalSize = reservedSize - srcCluster->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if (totalSize >= srcCluster->attr.min_size) {
                 bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                                   ReleaseBufferEntryFlags(false, false));
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
             }
 
@@ -2110,7 +2134,7 @@ protected:
             totalSize = reservedSize - srcCluster->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if (totalSize >= srcCluster->attr.min_size) {
                 bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                                   ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                                   ReleaseBufferEntryFlags(false, false));
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
             }
         }
@@ -2193,7 +2217,7 @@ protected:
         }
 
         bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
-                                           ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+                                           ReleaseBufferEntryFlags(false, false));
         delete[] batch.data;
         if (is_leaf) {
             delete[] batch.version;
@@ -2207,7 +2231,6 @@ protected:
         CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(target, LOG_TAG_DIVFTREE);
 
-        RetStatus rs = RetStatus::Success();
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
         BufferVertexEntry* target_entry = bufferMgr->ReadBufferEntry(target, SX_SHARED);
@@ -2219,7 +2242,7 @@ protected:
         VectorLocation target_loc;
         BufferVertexEntry* parent_entry = target_entry->ReadParentEntry(target_loc);
         if (parent_entry == nullptr) {
-            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
             return;
         }
 
@@ -2231,8 +2254,8 @@ protected:
         uint16_t target_num_deleted = target_cluster->cluster.header.num_deleted.load(std::memory_order_acquire);
         uint16_t target_size = target_cluster->cluster.header.visible_size.load(std::memory_order_acquire);
         if (target_size - target_num_deleted == 0) {
-            bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
+            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
             return;
         }
 
@@ -2240,8 +2263,8 @@ protected:
         bool res = ComputeCentroid(target_cluster->cluster, target_cluster->attr.block_size, target_cluster->attr.cap,
                                    target.IsLeaf(), nullptr, 0, attr.dimension, attr.distanceAlg, target_centroid);
         if (!res) {
-            bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+            bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
+            bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
             return;
         }
 
@@ -2280,15 +2303,15 @@ protected:
             }
         }
 
-        bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
-        bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags{.notifyAll=0, .stablize=0});
+        bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
+        bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
 
         /* todo: change in multi node */
         Merge(target, target_ver, best_id, best_version);
     }
 
     void SearchRoot(const VTYPE* query, size_t span,
-                    std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&>& layers,
+                    std::vector<SortedList<ANNVectorInfo, SimilarityComparator>*>& layers,
                     DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
@@ -2296,9 +2319,9 @@ protected:
         CHECK_VECTORID_IS_VALID(pinned_root_version->attr.centroid_id, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(pinned_root_version->attr.centroid_id, LOG_TAG_DIVFTREE);
         uint8_t level = pinned_root_version->attr.centroid_id._level;
-        FatalAssert(layers[level].Size() == 1 &&
-                    layers[level][0].id == pinned_root_version->attr.centroid_id &&
-                    layers[level][0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
+        FatalAssert(layers[level]->Size() == 1 &&
+                    (*layers[level])[0].id == pinned_root_version->attr.centroid_id &&
+                    (*layers[level])[0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
                     "the highest level should only contain the pinned version of the root");
         FatalAssert(span > 0, LOG_TAG_DIVFTREE, "span cannot be 0");
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
@@ -2307,11 +2330,12 @@ protected:
     }
 
     void SearchVertex(VectorID id, Version version, const VTYPE* query, size_t span,
-                      SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
+                      SortedList<ANNVectorInfo, SimilarityComparator>* neighbours,
                       std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_DIVFTREE);
         CHECK_NOT_NULLPTR(query, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(neighbours, LOG_TAG_DIVFTREE);
         FatalAssert(span > 0, LOG_TAG_DIVFTREE, "span should be larget than 0!");
 
         BufferManager* bufferMgr = BufferManager::GetInstance();
@@ -2339,24 +2363,26 @@ protected:
        if there are few threads, they will do the search layer themselves but if there are free threads they
        can help each other */
     void SearchLayer(const VTYPE* query, size_t span,
-                     std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&>& layers, uint8_t level) {
+                     std::vector<SortedList<ANNVectorInfo, SimilarityComparator>*>& layers, uint8_t level) {
         FatalAssert(level < layers.size() - 1, LOG_TAG_DIVFTREE, "level out of bounds!");
         FatalAssert((uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_DIVFTREE, "level out of bounds!");
-        FatalAssert(layers[level - 1].Empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
+        FatalAssert(layers[level - 1]->Empty(), LOG_TAG_DIVFTREE, "next level should be empty!");
         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash> seen;
-        seen.reserve(layers[level].Size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
+        seen.reserve(layers[level]->Size() * (((uint64_t)level == VectorID::LEAF_LEVEL) ? attr.leaf_max_size :
                                                                                          attr.internal_max_size));
-        if (layers[level].Size() == 1) {
-            FatalAssert(layers[level][0].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-            SearchVertex(layers[level][0].id, layers[level][0].version, query, span, layers[level - 1], seen);
+        if (layers[level]->Size() == 1) {
+            FatalAssert((*layers[level])[0].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+            SearchVertex((*layers[level])[0].id, (*layers[level])[0].version, query, span, layers[level - 1], seen);
             return;
         }
 
         std::vector<SearchTask> tasks;
-        tasks.reserve(layers[level].Size());
-        for (auto it : layers[level]) {
-            FatalAssert(it.id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-            tasks.emplace_back(it.id, it.version, query, span);
+        std::atomic<bool>* sync_bools = new std::atomic<bool>[layers[level]->Size() * 2];
+        tasks.reserve(layers[level]->Size());
+        for (size_t i = 0; i < layers[level]->Size(); ++i) {
+            FatalAssert((*layers[level])[i].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
+            tasks.emplace_back((*layers[level])[i].id, (*layers[level])[i].version, query, span,
+                                &sync_bools[i], &sync_bools[i + layers[level]->Size()]);
         }
 
         bool rs = search_tasks.BatchPush(&tasks[0], tasks.size());
@@ -2365,12 +2391,12 @@ protected:
 
         for (size_t i = tasks.size() - 1; i != UINT64_MAX; --i) {
             bool exp = false;
-            if (!tasks[i].taken.compare_exchange_strong(exp, true)) {
+            if (!tasks[i].taken->compare_exchange_strong(exp, true)) {
                 continue;
             }
 
             SearchVertex(tasks[i].target, tasks[i].version, query, span, layers[level - 1], seen);
-            tasks[i].done.store(true, std::memory_order_relaxed);
+            tasks[i].done->store(true, std::memory_order_relaxed);
         }
 
         size_t num_done = 0;
@@ -2386,7 +2412,7 @@ protected:
                 if (tasks[i].done_waiting) {
                     continue;
                 }
-                if (tasks[i].done.load(std::memory_order_acquire)) {
+                if (tasks[i].done->load(std::memory_order_acquire)) {
                     ++num_done;
                     tasks[i].done_waiting = true;
                 }
@@ -2405,18 +2431,19 @@ protected:
             }
 
             lists.insert(reinterpret_cast<uintptr_t>(tasks[i].neighbours));
-            layers[level - 1].MergeWith(*tasks[i].neighbours, span, false);
+            layers[level - 1]->MergeWith(*tasks[i].neighbours, span, false);
             delete tasks[i].neighbours;
             tasks[i].neighbours = nullptr;
         }
+
+        delete[] sync_bools;
     }
 
     RetStatus ANNSearch(const VTYPE* query, size_t k, uint8_t internal_node_search_span, uint8_t leaf_node_search_span,
                         uint8_t start_level, uint8_t end_level,
-                        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>&>& layers,
+                        std::vector<SortedList<ANNVectorInfo, SimilarityComparator>*>& layers,
                         DIVFTreeVertex* pinned_root_version) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
-        RetStatus rs = RetStatus::Success();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
         CHECK_NOT_NULLPTR(pinned_root_version, LOG_TAG_DIVFTREE);
         /*
@@ -2431,26 +2458,26 @@ protected:
         uint8_t span;
         while (current_level > end_level) {
             /* migration trigger check */
-            if ((layers[current_level].Size() > 1) &&
+            if ((layers[current_level]->Size() > 1) &&
                 (threadSelf->UniformBinary(attr.migration_check_triger_rate))) {
                 VectorID firstId = INVALID_VECTOR_ID;
                 VectorID secondId = INVALID_VECTOR_ID;
                 if (threadSelf->UniformBinary(attr.migration_check_triger_single_rate)) {
-                    uint64_t index = threadSelf->UniformRange64(0, layers[current_level].Size());
-                    firstId = layers[current_level][index].id;
+                    uint64_t index = threadSelf->UniformRange64(0, layers[current_level]->Size());
+                    firstId = (*layers[current_level])[index].id;
                     /* todo: this will not work when we have multi node system as it relies on creator node id to be 0*/
                     secondId = bufferMgr->GetRandomCentroidIdAtLayer(current_level, firstId);
                     if (secondId == INVALID_VECTOR_ID) {
                         firstId = INVALID_VECTOR_ID;
                     }
                 } else {
-                    auto indices = threadSelf->UniformRangeTwo64(0, layers[current_level].Size());
-                    firstId = layers[current_level][indices.first].id;
-                    secondId = layers[current_level][indices.second].id;
+                    auto indices = threadSelf->UniformRangeTwo64(0, layers[current_level]->Size());
+                    firstId = (*layers[current_level])[indices.first].id;
+                    secondId = (*layers[current_level])[indices.second].id;
                     uint64_t num_retry = 0;
                     while(secondId == firstId) {
-                        uint64_t index = threadSelf->UniformRange64(0, layers[current_level].Size());
-                        secondId = layers[current_level][index].id;
+                        uint64_t index = threadSelf->UniformRange64(0, layers[current_level]->Size());
+                        secondId = (*layers[current_level])[index].id;
                         ++num_retry;
                         if (num_retry >= Thread::MAX_RETRY) {
                             firstId = INVALID_VECTOR_ID;
@@ -2479,24 +2506,24 @@ protected:
                             "if it is at vector level, the first condition will handle it.");
                 span = leaf_node_search_span;
             }
-            FatalAssert(!layers[current_level].Empty(), LOG_TAG_DIVFTREE,
+            FatalAssert(!layers[current_level]->Empty(), LOG_TAG_DIVFTREE,
                         "current level cannot be empty!");
-            FatalAssert(layers[next_level].Empty(), LOG_TAG_DIVFTREE,
+            FatalAssert(layers[next_level]->Empty(), LOG_TAG_DIVFTREE,
                         "next level should be empty!");
             FatalAssert(span > 0, LOG_TAG_DIVFTREE,
                         "span should be at least 1");
             if (pinned_root_version->attr.centroid_id._level == current_level) {
-                FatalAssert(layers[current_level].Size() == 1 &&
-                            layers[current_level][0].id == pinned_root_version->attr.centroid_id &&
-                            layers[current_level][0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
+                FatalAssert(layers[current_level]->Size() == 1 &&
+                            (*layers[current_level])[0].id == pinned_root_version->attr.centroid_id &&
+                            (*layers[current_level])[0].version == pinned_root_version->attr.version, LOG_TAG_DIVFTREE,
                             "the highest level should only contain the pinned version of the root");
                 SearchRoot(query, span, layers, pinned_root_version);
             } else {
                 SearchLayer(query, span, layers, current_level);
             }
 
-            if (layers[next_level].Empty()) {
-                layers[current_level].Clear();
+            if (layers[next_level]->Empty()) {
+                layers[current_level]->Clear();
                 if (current_level == pinned_root_version->attr.centroid_id._level) {
                     return RetStatus{.stat=RetStatus::FAIL, .message=nullptr};
                 }
@@ -2525,13 +2552,15 @@ protected:
             SearchTask nextTask;
             if (search_tasks.PopHead(nextTask)) {
                 bool exp = false;
-                if (!nextTask.taken.compare_exchange_strong(exp, true)) {
+                if (!(nextTask.taken->compare_exchange_strong(exp, true))) {
                     continue;
                 }
                 CHECK_VECTORID_IS_VALID(nextTask.target, LOG_TAG_DIVFTREE);
 
                 if ((nextTask.master != oldTask.master) || (nextTask.taskId != oldTask.taskId) ||
                     (oldTask.target == INVALID_VECTOR_ID)) {
+                    /* todo: we can add another bool pointer to this and when we change the neighbours, we set that
+                       to true so that the user knows it can proceed with that list */
                     nextTask.neighbours =
                         new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator, nextTask.k);
                     seen.clear();
@@ -2541,8 +2570,9 @@ protected:
                 }
                 oldTask.CopyFrom(nextTask);
 
-                SearchVertex(nextTask.target, nextTask.version, nextTask.query, nextTask.k, *nextTask.neighbours, seen);
-                nextTask.done.store(true, std::memory_order_release);
+                SearchVertex(nextTask.target, nextTask.version, nextTask.query, nextTask.k,
+                             nextTask.neighbours, seen);
+                nextTask.done->store(true, std::memory_order_release);
             }
         }
         self->DestroyDIVFThread();
@@ -2607,25 +2637,25 @@ protected:
         searchers.reserve(attr.num_searchers);
         for (size_t i = 0; i < attr.num_searchers; ++i) {
             searchers.emplace_back(new Thread(attr.random_base_perc));
-            searchers.back()->Start(AsyncSearch, searchers.back());
+            searchers.back()->StartMemberFunction(&DIVFTree::AsyncSearch, this);
         }
 
         bg_migrators.reserve(attr.num_migrators);
         for (size_t i = 0; i < attr.num_migrators; ++i) {
             bg_migrators.emplace_back(new Thread(attr.random_base_perc));
-            bg_migrators.back()->Start(BGMigration, bg_migrators.back());
+            bg_migrators.back()->StartMemberFunction(&DIVFTree::BGMigration, this);
         }
 
         bg_mergers.reserve(attr.num_mergers);
         for (size_t i = 0; i < attr.num_mergers; ++i) {
             bg_mergers.emplace_back(new Thread(attr.random_base_perc));
-            bg_mergers.back()->Start(BGMerge, bg_mergers.back());
+            bg_mergers.back()->StartMemberFunction(&DIVFTree::BGMerge, this);
         }
 
         bg_compactors.reserve(attr.num_compactors);
         for (size_t i = 0; i < attr.num_compactors; ++i) {
             bg_compactors.emplace_back(new Thread(attr.random_base_perc));
-            bg_compactors.back()->Start(BGCompaction, bg_compactors.back());
+            bg_compactors.back()->StartMemberFunction(&DIVFTree::BGCompaction, this);
         }
     }
 

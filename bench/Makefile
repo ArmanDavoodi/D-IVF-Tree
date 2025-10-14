@@ -16,7 +16,7 @@ $(info Source directory: $(SRC_DIR))
 
 CXX = g++
 IGNORE_WARNING = -Wno-pedantic -Wno-write-strings -Wno-pointer-arith
-CXXFLAGS = -std=c++20 $(INCLUDE_PATHS) -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic $(IGNORE_WARNING)
+CXXFLAGS = -std=c++20 $(INCLUDE_PATHS) -march=native -mcx16 -latomic -Wall -Wextra -pedantic -g -ldl -MMD -MP -rdynamic $(IGNORE_WARNING)
 
 # Add custom defines if they are provided
 ifneq ($(filter -D%,$(DEFINES)),)

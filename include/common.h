@@ -56,6 +56,7 @@ struct RetStatus {
         TREE_HIGHT_TOO_LOW,
 
         NO_HANDLE_FOUND_FOR_TARGET,
+        ALREADY_HAS_A_HANDLE,
 
         FAIL
     } stat;
@@ -79,7 +80,8 @@ struct RetStatus {
     }
 };
 
-constexpr uint64_t INVALID_VECTOR_ID = UINT64_MAX;
+typedef uint64_t RawVectorID;
+constexpr RawVectorID INVALID_VECTOR_ID = UINT64_MAX;
 constexpr uint16_t INVALID_OFFSET = UINT16_MAX;
 
 /*
@@ -95,7 +97,7 @@ constexpr uint8_t MAX_TREE_HIGHT = 10;
 constexpr float COMPACTION_FACTOR = 1.15;
 
 union VectorID {
-    uint64_t _id;
+    RawVectorID _id;
     struct {
         uint64_t _val : 48;
         uint64_t _level : 8; // == 0 for vectors, == 1 for leaves
@@ -106,10 +108,15 @@ union VectorID {
     static constexpr uint64_t VECTOR_LEVEL = 0;
     static constexpr uint64_t LEAF_LEVEL = 1;
 
-    VectorID() : _id(INVALID_VECTOR_ID) {}
-    VectorID(const uint64_t& ID) : _id(ID) {}
-    VectorID(const VectorID& ID) : _id(ID._id) {}
-    VectorID(VectorID&& ID) : _id(ID._id) {}
+    constexpr VectorID() : _id(INVALID_VECTOR_ID) {}
+    constexpr VectorID(const RawVectorID& ID) : _id(ID) {}
+    constexpr VectorID(const VectorID& ID) : _id(ID._id) {}
+    constexpr VectorID(VectorID&& ID) : _id(ID._id) {}
+    ~VectorID() = default;
+
+    inline static VectorID AsID(RawVectorID id) {
+        return VectorID(id);
+    }
 
     inline bool IsValid() const {
         return (_id != INVALID_VECTOR_ID) && (_val < MAX_ID_PER_LEVEL);
@@ -131,7 +138,11 @@ union VectorID {
         return _level > LEAF_LEVEL;
     }
 
-    inline void operator=(const VectorID& ID) {
+    inline constexpr void operator=(const VectorID& ID) {
+        _id = ID._id;
+    }
+
+    inline constexpr void operator=(VectorID&& ID) {
         _id = ID._id;
     }
 
@@ -143,15 +154,19 @@ union VectorID {
         return _id != ID._id;
     }
 
-    inline void operator=(const uint64_t& ID) {
+    inline constexpr void operator=(const RawVectorID& ID) {
         _id = ID;
     }
 
-    inline bool operator==(const uint64_t& ID) const {
+    inline constexpr void operator=(RawVectorID&& ID) {
+        _id = ID;
+    }
+
+    inline bool operator==(const RawVectorID& ID) const {
         return _id == ID;
     }
 
-    inline bool operator!=(const uint64_t& ID) const {
+    inline bool operator!=(const RawVectorID& ID) const {
         return _id != ID;
     }
 
@@ -249,9 +264,9 @@ typedef const void* AddressToConst;
 
 constexpr Address INVALID_ADDRESS = nullptr;
 
-class DIVFTreeVertexInterface;
-class DIVFTreeInterface;
-class BufferManagerInterface;
+// class DIVFTreeVertexInterface;
+// class DIVFTreeInterface;
+// class BufferManagerInterface;
 // class DIVFTreeVertex;
 // class DIVFTree;
 // class BufferManager;
@@ -660,9 +675,9 @@ struct ANNVectorInfo {
 // }
 // Todo: Log DIVFTree: DIVFTree(RootID:%s(%lu, %lu, %lu), # levels:lu, # vertices:lu, # vectors:lu, size:lu)
 
-#ifndef PRINT_BUCKET
-#define PRINT_BUCKET false
-#endif
+// #ifndef PRINT_BUCKET
+// #define PRINT_BUCKET false
+// #endif
 
 #define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
 #define VECTORID_LOG(vid) (!((vid).IsValid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
@@ -689,5 +704,7 @@ struct ANNVectorInfo {
 
 #define CHECK_NOT_NULLPTR(ptr, tag) \
     FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
+
+};
 
 #endif

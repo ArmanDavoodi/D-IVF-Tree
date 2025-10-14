@@ -21,8 +21,10 @@ namespace divftree {
 union alignas(16) atomic_data128 {
     struct Detail {
 #if defined(__DIVFTREE_ATOMIC128__) || defined(__DIVFTREE_CMPXCHG128__)
-        std::atomic<uint64_t> lo;
-        std::atomic<uint64_t> hi;
+        // std::atomic<uint64_t> lo;
+        // std::atomic<uint64_t> hi;
+        uint64_t lo;
+        uint64_t hi;
 #else
         std::atomic<__int128_t> raw_atomic;
 #endif
@@ -30,9 +32,9 @@ union alignas(16) atomic_data128 {
     Detail detail;
     __int128_t raw;
 
-    atomic_data128(__int128_t data) : raw{data} {}
+    constexpr atomic_data128(__int128_t data) : raw{data} {}
 
-    atomic_data128() : raw{0} {}
+    constexpr atomic_data128() : raw{0} {}
 };
 
 
@@ -101,12 +103,12 @@ inline void atomic_store128(atomic_data128* dest, const atomic_data128* src, boo
             : "xmm0", "memory"
         );
     }
-#elif defined(__DIVFTREE_CMPXCHG128__)
-    atomic_data128 expected;
-    std::memcpy(&expected, src, 16);
-    while (!compare_exchange128(dest, &expected, src, relaxed)) {
-        DIVFTREE_YIELD();
-    }
+// #elif defined(__DIVFTREE_CMPXCHG128__)
+//     atomic_data128 expected;
+//     std::memcpy(&expected, src, 16);
+//     while (!compare_exchange128(dest, &expected, src, relaxed)) {
+//         DIVFTREE_YIELD();
+//     }
 #else
     dest->raw_atomic.store(src->raw, relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst);
 #endif
@@ -134,9 +136,9 @@ inline void atomic_load128(const atomic_data128* src, atomic_data128* dest, bool
             : "xmm0", "memory"
         );
     }
-#elif defined(__DIVFTREE_CMPXCHG128__)
-    // std::memcpy(dest, src, 16);
-    compare_exchange128(const_cast<atomic_data128*>(src), dest, src, relaxed);
+// #elif defined(__DIVFTREE_CMPXCHG128__)
+//     // std::memcpy(dest, src, 16);
+//     compare_exchange128(const_cast<atomic_data128*>(src), dest, src, relaxed);
 #else
     std::memcpy(dest, src->raw_atomic.load(relaxed ? std::memory_order_relaxed : std::memory_order_seq_cst),
                 16);

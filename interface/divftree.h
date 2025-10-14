@@ -12,6 +12,8 @@
 
 namespace divftree {
 
+class DIVFTreeInterface;
+
 struct DIVFTreeVertexAttributes {
     VectorID centroid_id;
     Version version;
@@ -117,8 +119,14 @@ public:
     virtual RetStatus ChangeVectorState(Address meta, VectorState& expectedState, VectorState finalState,
                                         Version* version = nullptr) = 0;
     virtual void Search(const VTYPE* query, size_t k,
-                        SortedList<ANNVectorInfo, SimilarityComparator>& neighbours,
+                        SortedList<ANNVectorInfo, SimilarityComparator>* neighbours,
                         std::unordered_set<std::pair<VectorID, Version>, VectorIDVersionPairHash>& seen) = 0;
+
+    virtual VectorID CentroidID() const = 0;
+    virtual Version VertexVersion() const = 0;
+    virtual Cluster& GetCluster() = 0;
+    virtual const DIVFTreeVertexAttributes& GetAttributes() const = 0;
+
     virtual String ToString(bool detailed = false) const = 0;
 };
 

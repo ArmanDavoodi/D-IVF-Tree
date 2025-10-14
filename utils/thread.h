@@ -119,6 +119,15 @@ public:
         _thrd = new std::thread(std::forward<_Callable>(func), this, (std::forward<Args>(args))...);
     }
 
+    template<class _Callable, class _Object, class... Args>
+    inline void StartMemberFunction(_Callable&& func, _Object* obj, Args&&... args) {
+        FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller should be a valid thread!");
+        FatalAssert(threadSelf->ID() == _parent_id, LOG_TAG_THREAD, "caller should be parent");
+        FatalAssert(_thrd == nullptr, LOG_TAG_THREAD, "thread should be null");
+        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
+        _thrd = new std::thread(std::forward<_Callable>(func), obj, this, (std::forward<Args>(args))...);
+    }
+
     inline void Detach() {
         FatalAssert(threadSelf != nullptr, LOG_TAG_THREAD, "caller should be a valid thread!");
         FatalAssert(threadSelf->ID() == _parent_id, LOG_TAG_THREAD, "caller should be parent");

@@ -62,7 +62,24 @@ public:
         data.insert(std::upper_bound(data.begin(), data.end(), d, cmp), std::forward<T>(d));
     }
 
-    inline Iterator Find(const T& d) const {
+    inline Iterator Find(const T& d) {
+        auto it = std::lower_bound(data.begin(), data.end(), d, cmp);
+        if (it == data.end()) {
+            return it;
+        }
+
+        while (it != data.end() && (cmp(*it, d) == 0) && (*it != d)) {
+            ++it;
+        }
+
+        if (it != data.end() && *it != d) {
+            it = data.end();
+        }
+
+        return it;
+    }
+
+    inline const Iterator Find(const T& d) const {
         auto it = std::lower_bound(data.begin(), data.end(), d, cmp);
         if (it == data.end()) {
             return it;
@@ -119,7 +136,7 @@ public:
                     j++;
                 }
             }
-            if (data[i] <= other.data[j]) {
+            if (cmp(data[i], other.data[j]) <= 0) {
                 tmp.push_back(data[i++]);
             } else {
                 tmp.push_back(other.data[j++]);
@@ -145,19 +162,19 @@ public:
         data.swap(tmp);
     }
 
-    inline Iterator& begin() {
+    inline Iterator begin() {
         return data.begin();
     }
 
-    inline Iterator& end() {
+    inline Iterator end() {
         return data.end();
     }
 
-    inline const Iterator& begin() const {
+    inline const Iterator begin() const {
         return data.begin();
     }
 
-    inline const Iterator& end() const {
+    inline const Iterator end() const {
         return data.end();
     }
 

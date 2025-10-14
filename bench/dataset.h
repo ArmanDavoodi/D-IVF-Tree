@@ -47,7 +47,7 @@ void OpenDataFile(FILE* input_file_ptr, bool read_header = false) {
     }
 
     uint32_t num_dimensions = 0;
-    size_t ret_code = fread(&num_dimensions, sizeof(uint32_t), 1, input_file_ptr);
+    ret_code = fread(&num_dimensions, sizeof(uint32_t), 1, input_file_ptr);
     if (ret_code != 1) {
         if (feof(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected end of file!");
