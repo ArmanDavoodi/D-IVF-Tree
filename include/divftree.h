@@ -606,7 +606,7 @@ public:
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
         VectorID root_id;
         BufferVertexEntry* root_entry =
-            BufferManager::Init(sizeof(DIVFTreeVertex) - sizeof(ClusterHeader),
+            BufferManager::Init(sizeof(DIVFTreeVertex) - ALLIGNED_SIZE(sizeof(ClusterHeader)),
                                 attr.leaf_blck_size, attr.internal_blck_size,
                                 attr.leaf_max_size, attr.internal_max_size, attr.dimension);
         CHECK_NOT_NULLPTR(root_entry, LOG_TAG_DIVFTREE);

@@ -3,7 +3,7 @@
 # todo adding necessary flags for gdb at least when mode is debug
 # todo changing the core location after making gdb work
 
-ROOT := $(CURDIR)/..
+ROOT := $(shell dirname $(CURDIR))
 DIVFTREE_PATH = $(ROOT)/include
 INCLUDE_PATHS = -I$(DIVFTREE_PATH) -I$(ROOT)
 

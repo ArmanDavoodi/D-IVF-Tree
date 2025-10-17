@@ -702,9 +702,6 @@ struct ANNVectorInfo {
     FatalAssert((!((vid).IsLeaf()) && ((vid).IsCentroid())), (tag), \
                 "VectorID " VECTORID_LOG_FMT " is not a leaf", VECTORID_LOG((vid)))
 
-#define CHECK_NOT_NULLPTR(ptr, tag) \
-    FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
-
 };
 
 #endif

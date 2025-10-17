@@ -442,13 +442,14 @@ BufferVertexEntry* BufferManager::CreateNewRootEntry() {
     }
     FatalAssert(MAX_TREE_HIGHT > newId._level && newId._level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                 "Level is out of bounds.");
-    newId._val = clusterDirectory[newId._level].size();
+    const uint64_t newLevelIdx = newId._level - 1;
+    newId._val = clusterDirectory[newLevelIdx].size();
     DIVFTreeVertexInterface* memLoc = AllocateMemoryForVertex(newId._level);
     CHECK_NOT_NULLPTR(memLoc, LOG_TAG_BUFFER);
     /* because of the currentVersion + currentRootId pin should be 2 */
     BufferVertexEntry* newRoot = new (std::align_val_t(16)) BufferVertexEntry(memLoc, newId, 2);
     newRoot->clusterLock.Lock(SX_EXCLUSIVE);
-    clusterDirectory[newId._level].emplace_back(newRoot);
+    clusterDirectory[newLevelIdx].emplace_back(newRoot);
     newRoot->PinVersion(newRoot->currentVersion);
     currentRootId.store(newId._id, std::memory_order_release);
     if (oldRootEntry != nullptr) {
@@ -470,7 +471,8 @@ void BufferManager::BatchCreateBufferEntry(uint16_t num_entries, uint8_t level, 
     bufferMgrLock.Lock(SX_EXCLUSIVE);
     FatalAssert(level <= VectorID::AsID(currentRootId.load(std::memory_order_relaxed))._level, LOG_TAG_BUFFER,
                 "Level is out of bounds.");
-    const uint64_t nextVal = clusterDirectory[level].size();
+    const uint64_t levelIdx = level - 1;
+    const uint64_t nextVal = clusterDirectory[levelIdx].size();
     for (size_t i = 0; i < num_entries; ++i) {
         VectorID id = 0;
         id._val = nextVal + i;
@@ -492,7 +494,7 @@ void BufferManager::BatchCreateBufferEntry(uint16_t num_entries, uint8_t level, 
             versions[i] = entries[i]->currentVersion;
         }
 
-        clusterDirectory[level].emplace_back(entries[i]);
+        clusterDirectory[levelIdx].emplace_back(entries[i]);
     }
     bufferMgrLock.Unlock();
 }
@@ -507,7 +509,7 @@ void BufferManager::BatchCreateVectorEntry(size_t num_entries, BufferVectorEntry
     for (size_t i = 0; i < num_entries; ++i) {
         VectorID id = 0;
         id._val = nextVal + i;
-        id._level = VectorID::LEAF_LEVEL;
+        id._level = VectorID::VECTOR_LEVEL;
         id._creator_node_id = 0;
 
         entries[i] = new (std::align_val_t(16)) BufferVectorEntry(id);
@@ -893,8 +895,9 @@ String BufferManager::ToString() {
     uint64_t height = GetHeight();
     String str = "<Height: " + std::to_string(height) + ", ";
     str += "Directory:[";
+    /* todo: start from higher level to lower */
     for (size_t i = 0; i < height; ++i) {
-        str += "Level: " + std::to_string(i) + ":[";
+        str += "Level: " + std::to_string(i+1) + ":[";
         for (size_t j = 0; j < clusterDirectory[i].size(); ++j) {
             BufferVertexEntry *entry = clusterDirectory[i][j];
             if (entry == nullptr) {
@@ -915,6 +918,8 @@ String BufferManager::ToString() {
         }
         str += ">";
     }
+
+    /* todo: print vertex entries */
     bufferMgrLock.Unlock();
     return str;
 }
@@ -999,6 +1004,7 @@ VectorID BufferManager::GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclu
                                                    bool need_lock, uint64_t* num_retries) {
     FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                 "Level is out of bounds.");
+    const uint64_t levelIdx = level - 1;
     if (need_lock) {
         bufferMgrLock.Lock(SX_SHARED);
     }
@@ -1020,7 +1026,7 @@ VectorID BufferManager::GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclu
     while (ret == exclude) {
         ret._level = level;
         ret._creator_node_id = 0; /* todo: rething in multi-node */
-        ret._val = threadSelf->UniformRange64(0, clusterDirectory[level - 1].size());
+        ret._val = threadSelf->UniformRange64(0, clusterDirectory[levelIdx].size());
         BufferVertexEntry* vertex = GetVertexEntry(ret, false);
         if (vertex == nullptr || vertex->state.load(std::memory_order_acquire) != CLUSTER_STABLE) {
             ret = exclude;
@@ -1042,6 +1048,7 @@ VectorID BufferManager::GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclu
 std::pair<VectorID, VectorID> BufferManager::GetTwoRandomCentroidIdAtLayer(uint8_t level, bool need_lock) {
     FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                 "Level is out of bounds.");
+    const uint64_t levelIdx = level - 1;
     if (need_lock) {
         bufferMgrLock.Lock(SX_SHARED);
     }
@@ -1066,7 +1073,7 @@ std::pair<VectorID, VectorID> BufferManager::GetTwoRandomCentroidIdAtLayer(uint8
 
     /* todo: add a stat collection code here to see how many times this fails and rethink if it is a bottelneck */
     while (true) {
-        auto index = threadSelf->UniformRangeTwo64(0, clusterDirectory[level - 1].size());
+        auto index = threadSelf->UniformRangeTwo64(0, clusterDirectory[levelIdx].size());
         first._val = index.first;
 
         if (index.first == index.second) {
@@ -1129,8 +1136,12 @@ std::pair<VectorID, VectorID> BufferManager::GetTwoRandomCentroidIdAtLayer(uint8
 
 VectorID BufferManager::GetRandomCentroidIdAtNonRootLayer(VectorID exclude) {
     bufferMgrLock.Lock(SX_SHARED);
-    uint8_t level =
-        threadSelf->UniformRange32(1, VectorID::AsID(currentRootId.load(std::memory_order_relaxed))._level - 1);
+    uint8_t max_level = VectorID::AsID(currentRootId.load(std::memory_order_relaxed))._level - 1;
+    if (max_level < 2) {
+        bufferMgrLock.Unlock();
+        return INVALID_VECTOR_ID;
+    }
+    uint8_t level = threadSelf->UniformRange32(1, max_level);
     VectorID ret = GetRandomCentroidIdAtLayer(level, exclude, false);
     bufferMgrLock.Unlock();
     return ret;
@@ -1138,8 +1149,12 @@ VectorID BufferManager::GetRandomCentroidIdAtNonRootLayer(VectorID exclude) {
 
 std::pair<VectorID, VectorID> BufferManager::GetTwoRandomCentroidIdAtNonRootLayer() {
     bufferMgrLock.Lock(SX_SHARED);
-    uint8_t level =
-        threadSelf->UniformRange32(1, VectorID::AsID(currentRootId.load(std::memory_order_relaxed))._level - 1);
+    uint8_t max_level = VectorID::AsID(currentRootId.load(std::memory_order_relaxed))._level - 1;
+    if (max_level < 2) {
+        bufferMgrLock.Unlock();
+        return std::make_pair(INVALID_VECTOR_ID, INVALID_VECTOR_ID);
+    }
+    uint8_t level = threadSelf->UniformRange32(1, max_level);
     std::pair<VectorID, VectorID> ret = GetTwoRandomCentroidIdAtLayer(level, false);
     bufferMgrLock.Unlock();
     return ret;

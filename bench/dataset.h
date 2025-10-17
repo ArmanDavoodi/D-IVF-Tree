@@ -10,7 +10,7 @@ inline std::atomic<uint32_t> next_offset = 0;
    not the best benchmark as it does not take the search skew in account */
 inline constexpr uint32_t BATCH_SIZE = 1024 * 16;
 
-void OpenDataFile(FILE* input_file_ptr, bool read_header = false) {
+void OpenDataFile(FILE*& input_file_ptr, bool read_header = false) {
     if (input_file_ptr != nullptr) {
         fclose(input_file_ptr);
         input_file_ptr = nullptr;
@@ -24,7 +24,7 @@ void OpenDataFile(FILE* input_file_ptr, bool read_header = false) {
 
     uint32_t dummy_num_v = 0;
     uint32_t* num_vec = nullptr;
-    if (read_header) {
+    if (!read_header) {
         num_vec = &dummy_num_v;
     } else {
         num_vec = &total_num_vectors;

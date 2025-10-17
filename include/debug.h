@@ -3,10 +3,6 @@
 
 #include <cstdint>
 
-#ifndef BUILD
-#define BUILD RELEASE
-#endif
-
 #ifdef TESTING
 #undef BUILD
 #define BUILD DEBUG
@@ -15,6 +11,10 @@
 #define TESTABLE friend class UT::Test
 #else
 #define TESTABLE
+#endif
+
+#if !defined(BUILD) || (BUILD!=DEBUG && BUILD!=RELEASE)
+#error "BUILD must be defined as DEBUG or RELEASE"
 #endif
 
 // might add other modes as well later and consider not completly disabling the logs in release
@@ -97,7 +97,7 @@ enum LOG_TAG_BITS : uint64_t {
 #define PRINT_CALLSTACK_MAX_FRAMES (10)
 #endif
 
-#ifdef PRINT_FUNCTION_NAME_PRETY
+#ifdef PRINT_FUNCTION_NAME_PRETTY
 #define FUNCTION_NAME __PRETTY_FUNCTION__
 #define FUNCTION_NAME_MAX_SIZE 50
 #else
@@ -105,7 +105,7 @@ enum LOG_TAG_BITS : uint64_t {
 #define FUNCTION_NAME_MAX_SIZE 35
 #endif
 
-#define FILE_NAME_MAX_SIZE 35
+#define FILE_NAME_MAX_SIZE 64
 
 #define _COLORF_BLACK "\033[0;30m"
 #define _COLORF_RED "\033[0;31m"
@@ -378,7 +378,7 @@ inline const char* tagtostr(uint64_t tag)
     case LOG_TAG_BUFFER:
         return "    Buffer     ";
     case LOG_TAG_DIVFTREE_VERTEX:
-        return "  DIVFTree Vertex  ";
+        return "DIVFTree Vertex";
     case LOG_TAG_DIVFTREE:
         return " Vector Index  ";
     case LOG_TAG_CLUSTERING:
@@ -388,7 +388,7 @@ inline const char* tagtostr(uint64_t tag)
     case LOG_TAG_LOCK:
         return "     Lock      ";
     case LOG_TAG_THREAD:
-        return "     Thread    ";
+        return "    Thread     ";
     case LOG_TAG_NOT_IMPLEMENTED:
         return "Not Implemented";
     case LOG_TAG_TEST:
@@ -417,6 +417,10 @@ inline bool Pass_CallStack_Level(LOG_LEVELS level) {
 /* todo: Make it threadlocal */
 namespace debug {
 inline bool * fault_checking = nullptr;
+
+inline void* _lock_ptr = nullptr; // pointer to an SXSpinLock which is used when we need to change log_file
+inline char output_log_path[256];
+inline uint64_t next_log_sn = 0;
 inline FILE * output_log = stdout;
 
 class FaultCheckingExc : public std::exception  {};
@@ -646,6 +650,9 @@ static inline std::map<std::string, std::binary_semaphore> FI_MAP;
 #define FAULT_INJECTION_WAIT(name)
 #define FAULT_INJECTION_SIGNAL(name)
 #endif
+
+#define CHECK_NOT_NULLPTR(ptr, tag) \
+    FatalAssert((ptr) != nullptr, (tag), "Pointer is nullptr")
 
 #define DIVF_TEXT_TO_STR(T) #T
 #define DIVF_MACRO_TO_STR(T) DIVF_TEXT_TO_STR(T)

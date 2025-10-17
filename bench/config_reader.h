@@ -12,7 +12,7 @@
 #include <charconv>
 #include <typeinfo>
 
-inline constexpr char config_path[] = "run.conf";
+inline constexpr char config_path[] = "bench/run.conf";
 
 inline std::unordered_map<std::string, std::string> var_configs;
 inline std::unordered_map<std::string, std::vector<std::string>> list_configs;
@@ -27,8 +27,6 @@ void ReadConfigs() {
     while (std::getline(file, line)) {
         /* remove all whitespace */
         line.erase(std::remove_if(line.begin(), line.end(), ::isspace), line.end());
-        /* convert all characters to lower case */
-        std::transform(line.begin(), line.end(), line.begin(), [](unsigned char c){ return std::tolower(c); });
 
         // Split into name and value
         auto pos = line.find(':');
@@ -108,7 +106,12 @@ void ParseConfigs() {
 
     auto vit = var_configs.find("log-path");
     if (vit != var_configs.end()) {
-        divftree::debug::output_log = fopen(vit->second.c_str(), "w");
+        strncpy(::divftree::debug::output_log_path, vit->second.c_str(), 255);
+        char file_name[512] = "";
+        strcat(file_name, ::divftree::debug::output_log_path);
+        strcat(file_name, (std::to_string(::divftree::debug::next_log_sn) + ".log").c_str());
+        divftree::debug::output_log = fopen(file_name, "w");
+        printf("Logging to %s\n", file_name);
         if (divftree::debug::output_log == nullptr) {
             throw std::runtime_error(
                     divftree::String("Could not open the output log file! errno %d, errno msg: %s",

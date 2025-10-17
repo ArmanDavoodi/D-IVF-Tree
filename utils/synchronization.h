@@ -155,23 +155,23 @@ public:
         threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
             _m.lock_shared();
-            FatalAssert(_mode != SX_EXCLUSIVE, LOG_TAG_BASIC,
+            FatalAssert(_mode.load(std::memory_order_acquire) != SX_EXCLUSIVE, LOG_TAG_BASIC,
                         "Cannot lock in SX_SHARED mode when already in SX_EXCLUSIVE mode!");
             _num_shared_holders.fetch_add(1);
         } else {
             FatalAssert(mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Non Shared Lock should be exclusive!");
             _m.lock();
-            FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC,
+            FatalAssert(_mode.load(std::memory_order_acquire) == SX_SHARED, LOG_TAG_BASIC,
                         "Cannot lock in SX_EXCLUSIVE mode when it is not free!");
             FatalAssert(_num_shared_holders.load() == 0,
                         LOG_TAG_BASIC, "Cannot lock in SX_EXCLUSIVE mode when there are shared holders!");
-            _mode = SX_EXCLUSIVE;
+            _mode.store(SX_EXCLUSIVE, std::memory_order_release);
         }
         threadSelf->AcquireLockSanityLog(this, mode);
     }
 
     void Unlock() {
-        if (_mode == SX_SHARED) {
+        if (_mode.load(std::memory_order_acquire) == SX_SHARED) {
             threadSelf->SanityCheckLockHeldInModeByMe(this, SX_SHARED);
             FatalAssert(_num_shared_holders.load() > 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
@@ -180,11 +180,12 @@ public:
             _m.unlock_shared();
         } else {
             threadSelf->SanityCheckLockHeldInModeByMe(this, SX_EXCLUSIVE);
-            FatalAssert(_mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
+            FatalAssert(_mode.load(std::memory_order_acquire) == SX_EXCLUSIVE, LOG_TAG_BASIC,
+                        "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
             FatalAssert(_num_shared_holders.load() == 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when there are shared holders!");
             threadSelf->ReleaseLockSanityLog(this, SX_EXCLUSIVE);
-            _mode = SX_SHARED;
+            _mode.store(SX_SHARED, std::memory_order_release);
             _m.unlock();
         }
     }
@@ -195,7 +196,7 @@ public:
         if (mode == SX_SHARED) {
             locked = _m.try_lock_shared();
             if (locked) {
-                FatalAssert(_mode != SX_EXCLUSIVE, LOG_TAG_BASIC,
+                FatalAssert(_mode.load(std::memory_order_acquire) != SX_EXCLUSIVE, LOG_TAG_BASIC,
                             "Cannot lock in SX_SHARED mode when already in SX_EXCLUSIVE mode!");
                 _num_shared_holders.fetch_add(1);
                 threadSelf->AcquireLockSanityLog(this, mode);
@@ -204,11 +205,11 @@ public:
             FatalAssert(mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Non Shared Lock should be exclusive!");
             locked = _m.try_lock();
             if (locked) {
-                FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC,
-                        "Cannot lock in SX_EXCLUSIVE mode when it is not free!");
+                FatalAssert(_mode.load(std::memory_order_acquire) == SX_SHARED, LOG_TAG_BASIC,
+                            "Cannot lock in SX_EXCLUSIVE mode when it is not free!");
                 FatalAssert(_num_shared_holders.load() == 0,
                             LOG_TAG_BASIC, "Cannot lock in SX_EXCLUSIVE mode when there are shared holders!");
-                _mode = SX_EXCLUSIVE;
+                _mode.store(SX_EXCLUSIVE, std::memory_order_release);
                 threadSelf->AcquireLockSanityLog(this, mode);
             }
         }
@@ -231,10 +232,11 @@ public:
 
     inline String ToString() const {
         return String("<LockMode=%s, SharedHolders=%lu>",
-                      LockModeToString(_mode).ToCStr(), _num_shared_holders.load());
+                      LockModeToString(_mode.load(std::memory_order_acquire)).ToCStr(),
+                      _num_shared_holders.load());
     }
 protected:
-    LockMode _mode;
+    std::atomic<LockMode> _mode;
     std::atomic<uint64_t> _num_shared_holders;
     std::shared_mutex _m;
 };
@@ -253,12 +255,13 @@ public:
 
             if (mode == SX_SHARED) {
                 non_atomic_lock res(0);
-                res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
+                res._data._shared_counter = _lock._data._shared_counter.fetch_add(1, std::memory_order_seq_cst);
                 if (res._data._exclusive_flag == LOCKED) {
-                    _lock._counter.fetch_sub(1, std::memory_order_release);
+                    _lock._data._shared_counter.fetch_sub(1, std::memory_order_seq_cst);
                     continue;
                 }
-                FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+                FatalAssert(_mode.load(std::memory_order_acquire) == SX_SHARED, LOG_TAG_BASIC,
+                            "Lock mode is exclusive!");
                 break;
             }
             else {
@@ -271,8 +274,9 @@ public:
                 while (_lock._data._shared_counter.load(std::memory_order_acquire) > 0) {
                     DIVFTREE_YIELD();
                 }
-                FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
-                _mode = SX_EXCLUSIVE;
+                FatalAssert(_mode.load(std::memory_order_acquire) == SX_SHARED, LOG_TAG_BASIC,
+                            "Lock mode is exclusive!");
+                _mode.store(SX_EXCLUSIVE, std::memory_order_release);
                 break;
             }
         } while(true);
@@ -280,7 +284,7 @@ public:
     }
 
     void Unlock() {
-        if (_mode == SX_SHARED) {
+        if (_mode.load(std::memory_order_acquire) == SX_SHARED) {
             threadSelf->SanityCheckLockHeldInModeByMe(this, SX_SHARED);
             FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) > 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_SHARED mode when no holders!");
@@ -288,13 +292,14 @@ public:
             _lock._data._shared_counter.fetch_sub(1, std::memory_order_release);
         } else {
             threadSelf->SanityCheckLockHeldInModeByMe(this, SX_EXCLUSIVE);
-            FatalAssert(_mode == SX_EXCLUSIVE, LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
+            FatalAssert(_mode.load(std::memory_order_acquire) == SX_EXCLUSIVE, LOG_TAG_BASIC,
+                        "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
             FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) == 0,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when there are shared holders!");
             FatalAssert(_lock._data._exclusive_flag.load(std::memory_order_acquire) == LOCKED,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
             threadSelf->ReleaseLockSanityLog(this, SX_EXCLUSIVE);
-            _mode = SX_SHARED;
+            _mode.store(SX_SHARED, std::memory_order_release);
             _lock._data._exclusive_flag.store(0, std::memory_order_release);
         }
     }
@@ -304,12 +309,12 @@ public:
         threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
             non_atomic_lock res(0);
-            res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
+            res._data._shared_counter = _lock._data._shared_counter.fetch_add(1, std::memory_order_seq_cst);
             if (res._data._exclusive_flag == LOCKED) {
-                _lock._counter.fetch_sub(1, std::memory_order_release);
+                _lock._data._shared_counter.fetch_sub(1, std::memory_order_release);
                 return false;
             }
-            FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+            FatalAssert(_mode.load(std::memory_order_acquire) == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
             threadSelf->AcquireLockSanityLog(this, mode);
             return true;
         }
@@ -325,8 +330,8 @@ public:
                 return false;
             }
 
-            FatalAssert(_mode == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
-            _mode = SX_EXCLUSIVE;
+            FatalAssert(_mode.load(std::memory_order_acquire) == SX_SHARED, LOG_TAG_BASIC, "Lock mode is exclusive!");
+            _mode.store(SX_EXCLUSIVE, std::memory_order_release);
             threadSelf->AcquireLockSanityLog(this, mode);
             return true;
         }
@@ -343,11 +348,12 @@ public:
 
     inline String ToString() const {
         return String("<LockMode=%s, SharedHolders=%u>",
-                      LockModeToString(_mode).ToCStr(), _lock._data._shared_counter.load());
+                      LockModeToString(_mode.load(std::memory_order_acquire)).ToCStr(),
+                                       _lock._data._shared_counter.load());
     }
 protected:
     constexpr static uint32_t LOCKED = INT32_MIN;
-    LockMode _mode;
+    std::atomic<LockMode> _mode;
 
     union non_atomic_lock {
         struct {
