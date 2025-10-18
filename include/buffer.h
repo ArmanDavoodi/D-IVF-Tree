@@ -192,6 +192,7 @@ struct BufferVertexEntry {
     SXLock clusterLock;
     CondVar condVar;
     Version currentVersion;
+    uint64_t nextVersionPin;
     /*
      * liveVersions can only be updated if parent is locked(any mode),
      * self is locked in X mode, and headerLock is locked in X mode

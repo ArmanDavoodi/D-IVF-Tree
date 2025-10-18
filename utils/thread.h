@@ -90,6 +90,9 @@ public:
                 ++retry;
                 DIVFTREE_YIELD();
             }
+            if (_thrd.load(std::memory_order_acquire) == nullptr) {
+                _thrd.wait(nullptr);
+            }
         }
 
         FatalAssert(threadSelf == nullptr, LOG_TAG_THREAD, "thread should not be inited yet!");
@@ -128,6 +131,7 @@ public:
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         _thrd.store(new std::thread(std::forward<_Callable>(func), this, (std::forward<Args>(args))...),
                     std::memory_order_release);
+        _thrd.notify_one();
     }
 
     template<class _Callable, class _Object, class... Args>
@@ -138,6 +142,7 @@ public:
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Starting thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         _thrd.store(new std::thread(std::forward<_Callable>(func), obj, this, (std::forward<Args>(args))...),
                     std::memory_order_release);
+        _thrd.notify_one();
     }
 
     inline void Detach() {

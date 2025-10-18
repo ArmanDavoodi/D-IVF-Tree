@@ -126,7 +126,6 @@ public:
         CHECK_VECTORID_IS_CENTROID(attr.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
         CHECK_NOT_NULLPTR(attr.index, LOG_TAG_DIVFTREE_VERTEX);
         FatalAssert(attr.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
-        FatalAssert(attr.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
     }
 
     DIVFTreeVertex(const DIVFTreeAttributes& attributes, VectorID id, DIVFTreeInterface* index) :
@@ -181,8 +180,8 @@ public:
             return;
         }
         else {
-            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin vertex " VECTORID_LOG_FMT,
-                 VECTORID_LOG(attr.centroid_id));
+            // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin vertex " VECTORID_LOG_FMT,
+            //      VECTORID_LOG(attr.centroid_id));
         }
     }
 
@@ -492,7 +491,7 @@ public:
                         }
                         break;
                     case VECTOR_STATE_OUTDATED:
-                        if (in_cluster.find(vmd[i].id) != in_cluster.end()) {
+                        if (in_cluster.find(vmd[i].id) == in_cluster.end()) {
                             old_size = curr_size;
                         }
                     default:
@@ -683,6 +682,8 @@ public:
                         new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator));
                 }
 
+                layers[root->attr.centroid_id._level]->Insert(ANNVectorInfo(0, root->attr.centroid_id,
+                                                                            root->attr.version));
                 rs = ANNSearch(vec, 1, search_span, 1,
                                (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::LEAF_LEVEL,
                                layers, root);
@@ -711,10 +712,12 @@ public:
                 /* todo: if there is a difference in version we may be able to solve it using update logs! */
                 /* todo: check how many retries! */
                 bufferMgr->ReleaseBufferEntryIfNotNull(leaf_entry, ReleaseBufferEntryFlags(false, false));
+                rs = RetStatus::Fail(nullptr);
                 continue;
             }
             /* todo: maybe we can read the parent and only go one layer up instead of rereading from root */
-        } while(!BatchInsertInto(leaf_entry, batch, true).IsOK());
+            rs = BatchInsertInto(leaf_entry, batch, true);
+        } while(!rs.IsOK());
 
         return rs;
     }
@@ -778,6 +781,8 @@ public:
                 layers.emplace_back(new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator));
             }
 
+            layers[root->attr.centroid_id._level]->Insert(ANNVectorInfo(0, root->attr.centroid_id,
+                                                                        root->attr.version));
             rs = ANNSearch(query, k, internal_node_search_span, leaf_node_search_span,
                            (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, layers, root);
             root->Unpin();
@@ -977,8 +982,9 @@ protected:
         FatalAssert(current->cluster.header.visible_size.load(std::memory_order_relaxed) ==
                     current->cluster.header.reserved_size.load(std::memory_order_relaxed), LOG_TAG_DIVFTREE,
                     "not all updates went through!");
-        FatalAssert(new_size == current->cluster.header.reserved_size.load(std::memory_order_relaxed) -
-                                current->cluster.header.num_deleted.load(std::memory_order_relaxed),
+        FatalAssert(new_size == (current->cluster.header.reserved_size.load(std::memory_order_relaxed) -
+                                 current->cluster.header.num_deleted.load(std::memory_order_relaxed) -
+                                 (marked_for_update != INVALID_OFFSET ? 1 : 0)),
                     LOG_TAG_DIVFTREE, "not all deletes went through!");
         FatalAssert(new_size + batch.size >= new_size, LOG_TAG_DIVFTREE, "overflow detected!");
         FatalAssert(new_size + batch.size <= cap, LOG_TAG_DIVFTREE, "Cluster cannot contain all of these vectors!");
@@ -1245,7 +1251,7 @@ protected:
         FatalAssert(current->cluster.NumBlocks(blckSize, cap) == 1,
                     LOG_TAG_NOT_IMPLEMENTED, "Currently cannot handle more than one block!");
 
-        FatalAssert(!is_leaf || (batch.version != nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
+        FatalAssert(is_leaf == (batch.version == nullptr), LOG_TAG_DIVFTREE, "Batch of versions to insert is null!");
         // uint16_t total_size = current->cluster.header.reserved_size.load(std::memory_order_relaxed) -
         //                       current->cluster.header.num_deleted.load(std::memory_order_relaxed) +
         //                       batch.size;
@@ -1272,11 +1278,12 @@ protected:
                 FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(), LOG_TAG_DIVFTREE,
                             "null parent but we are not root!");
                 parent = ExpandTree();
+            } else {
+                FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+                        "null parent with valid location!");
             }
 
             CHECK_NOT_NULLPTR(parent, LOG_TAG_DIVFTREE);
-            FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
-                        "null parent with valid location!");
             rs = BatchInsertInto(parent, centroids, false, currentLocation.detail.entryOffset);
             if (!rs.IsOK()) {
                 bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags(false, false));
@@ -1314,10 +1321,11 @@ protected:
             }
         }
 
-        for (uint16_t i = centroids.size - 1; i != 0; --i) {
+        for (uint16_t i = centroids.size; i > 1; --i) {
             bufferMgr->ReleaseBufferEntry(entries[i-1], ReleaseBufferEntryFlags(true, true));
         }
-        bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
+        // this is released in the caller
+        // bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, true));
 
         delete[] clusters;
         delete[] entries;

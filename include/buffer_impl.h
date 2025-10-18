@@ -119,7 +119,7 @@ DIVFTreeVertexInterface* BufferVectorEntry::ReadAndPinParent(VectorLocation& cur
     }
 }
 BufferVertexEntry::BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin) :
-    centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0) {
+    centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0), nextVersionPin(0) {
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vertex entry should be
         16 byte aligned as well */
     FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
@@ -240,7 +240,8 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Ve
     FatalAssert(liveVersions.find(currentVersion) == liveVersions.end(), LOG_TAG_BUFFER,
                 "new version already exists!");
     FatalAssert(newCluster != nullptr, LOG_TAG_BUFFER, "Invalid cluster ptr!");
-    liveVersions[currentVersion] = VersionedClusterPtr(1, 0, newCluster);
+    liveVersions[currentVersion] = VersionedClusterPtr(1 + nextVersionPin, 0, newCluster);
+    nextVersionPin = 0;
     UnpinVersion(currentVersion - 1, true);
     headerLock.Unlock();
 }
@@ -290,14 +291,18 @@ void BufferVertexEntry::PinVersion(Version version, bool headerLocked) {
         headerLock.Lock(SX_SHARED);
     }
     threadSelf->SanityCheckLockHeldByMe(&headerLock);
-    FatalAssert(version <= currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
+    FatalAssert(version <= currentVersion + 1, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
                 VECTORID_LOG_FMT ", latest version = %u, input version = %u",
                 VECTORID_LOG(centroidMeta.selfId), currentVersion, version);
-    auto it = liveVersions.find(version);
-    FatalAssert(it != liveVersions.end(), LOG_TAG_BUFFER, "version is not live!");
-    uint64_t oldVersionPin = it->second.versionPin.fetch_add(1);
-    UNUSED_VARIABLE(oldVersionPin);
-    FatalAssert(oldVersionPin != 0, LOG_TAG_BUFFER, "oldVersionPin was zero!");
+    if (version <= currentVersion) {
+        auto it = liveVersions.find(version);
+        FatalAssert(it != liveVersions.end(), LOG_TAG_BUFFER, "version is not live!");
+        uint64_t oldVersionPin = it->second.versionPin.fetch_add(1);
+        UNUSED_VARIABLE(oldVersionPin);
+        FatalAssert(oldVersionPin != 0, LOG_TAG_BUFFER, "oldVersionPin was zero!");
+    } else {
+        ++nextVersionPin;
+    }
 
     if (!headerLocked) {
         headerLock.Unlock();
@@ -808,7 +813,7 @@ BufferVertexEntry* BufferManager::ReadBufferEntry(VectorID vertexId, LockMode mo
         return nullptr;
     }
 
-    FatalAssert(state == CLUSTER_STABLE, LOG_TAG_BUFFER,
+    FatalAssert((mode != SX_EXCLUSIVE) || (state == CLUSTER_STABLE), LOG_TAG_BUFFER,
                 "BufferEntry state is not stable! VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
     return entry;
 }
@@ -832,8 +837,8 @@ BufferVertexEntry* BufferManager::TryReadBufferEntry(VectorID vertexId, LockMode
         return nullptr;
     }
 
-    FatalAssert(entry->state.load() == CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is not stable! VertexID="
-                VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
+    FatalAssert((mode != SX_EXCLUSIVE) || (entry->state.load() == CLUSTER_STABLE), LOG_TAG_BUFFER,
+                "BufferEntry state is not stable! VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
     return entry;
 }
 
@@ -859,9 +864,9 @@ void BufferManager::ReleaseBufferEntry(BufferVertexEntry* entry, ReleaseBufferEn
     CHECK_VECTORID_IS_VALID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
     CHECK_VECTORID_IS_CENTROID(entry->centroidMeta.selfId, LOG_TAG_BUFFER);
     if ((bool)(flags.notifyAll)) {
+        threadSelf->SanityCheckLockHeldInModeByMe(&entry->clusterLock, SX_EXCLUSIVE);
         FatalAssert(entry->state.load() != CLUSTER_STABLE, LOG_TAG_BUFFER, "BufferEntry state is Stable! VertexID="
                     VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
-        threadSelf->SanityCheckLockHeldInModeByMe(&entry->clusterLock, SX_EXCLUSIVE);
         if ((bool)(flags.stablize)) {
             entry->state.store(CLUSTER_STABLE);
         } else {

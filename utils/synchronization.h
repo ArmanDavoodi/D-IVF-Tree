@@ -255,7 +255,9 @@ public:
 
             if (mode == SX_SHARED) {
                 non_atomic_lock res(0);
-                res._data._shared_counter = _lock._data._shared_counter.fetch_add(1, std::memory_order_seq_cst);
+                res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
+                FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) > 0, LOG_TAG_BASIC,
+                            "counter overflow!");
                 if (res._data._exclusive_flag == LOCKED) {
                     _lock._data._shared_counter.fetch_sub(1, std::memory_order_seq_cst);
                     continue;
@@ -294,8 +296,6 @@ public:
             threadSelf->SanityCheckLockHeldInModeByMe(this, SX_EXCLUSIVE);
             FatalAssert(_mode.load(std::memory_order_acquire) == SX_EXCLUSIVE, LOG_TAG_BASIC,
                         "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
-            FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) == 0,
-                        LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when there are shared holders!");
             FatalAssert(_lock._data._exclusive_flag.load(std::memory_order_acquire) == LOCKED,
                         LOG_TAG_BASIC, "Cannot unlock in SX_EXCLUSIVE mode when it is not locked!");
             threadSelf->ReleaseLockSanityLog(this, SX_EXCLUSIVE);
@@ -309,7 +309,9 @@ public:
         threadSelf->SanityCheckLockNotHeldByMe(this);
         if (mode == SX_SHARED) {
             non_atomic_lock res(0);
-            res._data._shared_counter = _lock._data._shared_counter.fetch_add(1, std::memory_order_seq_cst);
+            res._counter = _lock._counter.fetch_add(1, std::memory_order_seq_cst);
+            FatalAssert(_lock._data._shared_counter.load(std::memory_order_acquire) > 0, LOG_TAG_BASIC,
+                        "counter overflow!");
             if (res._data._exclusive_flag == LOCKED) {
                 _lock._data._shared_counter.fetch_sub(1, std::memory_order_release);
                 return false;
@@ -357,8 +359,8 @@ protected:
 
     union non_atomic_lock {
         struct {
-            uint32_t _exclusive_flag;
             uint32_t _shared_counter;
+            uint32_t _exclusive_flag;
         } _data;
         uint64_t _counter;
 
@@ -366,8 +368,8 @@ protected:
     };
     union atomic_lock {
         struct Detail {
-            std::atomic<uint32_t> _exclusive_flag;
             std::atomic<uint32_t> _shared_counter;
+            std::atomic<uint32_t> _exclusive_flag;
         };
         Detail _data;
         std::atomic<uint64_t> _counter;
