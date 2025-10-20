@@ -322,6 +322,7 @@ BufferManager::BufferManager(uint64_t internalSize, uint64_t leafSize) : interna
 
 BufferManager::~BufferManager() {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+    DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_BUFFER, "deleting the buffer manager!");
 
     for (BufferVectorEntry* entry : vectorDirectory) {
         if (entry == nullptr) {
@@ -454,8 +455,9 @@ BufferVertexEntry* BufferManager::CreateNewRootEntry() {
     /* because of the currentVersion + currentRootId pin should be 2 */
     BufferVertexEntry* newRoot = new (std::align_val_t(16)) BufferVertexEntry(memLoc, newId, 2);
     newRoot->clusterLock.Lock(SX_EXCLUSIVE);
+    newRoot->headerLock.Lock(SX_EXCLUSIVE);
     clusterDirectory[newLevelIdx].emplace_back(newRoot);
-    newRoot->PinVersion(newRoot->currentVersion);
+    newRoot->PinVersion(newRoot->currentVersion, true);
     currentRootId.store(newId._id, std::memory_order_release);
     if (oldRootEntry != nullptr) {
         /* Unpin once due to not being root anymore */
@@ -626,11 +628,13 @@ inline VectorLocation BufferManager::LoadCurrentVectorLocation(VectorID vectorId
     }
 }
 
-inline void BufferManager::UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation) {
+inline void BufferManager::UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation, bool pinNewUnpinOld) {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
     CHECK_VECTORID_IS_VALID(vectorId, LOG_TAG_BUFFER);
     VectorLocation oldLocation = INVALID_VECTOR_LOCATION;
-    if (newLocation != INVALID_VECTOR_LOCATION) {
+    FatalAssert((newLocation != INVALID_VECTOR_LOCATION) || pinNewUnpinOld, LOG_TAG_BUFFER,
+                "if newLocation is invalid then pinNewUnpinOld should be true");
+    if (pinNewUnpinOld && (newLocation != INVALID_VECTOR_LOCATION)) {
         CHECK_VECTORID_IS_VALID(newLocation.detail.containerId, LOG_TAG_BUFFER);
         CHECK_VECTORID_IS_CENTROID(newLocation.detail.containerId, LOG_TAG_BUFFER);
         FatalAssert(newLocation.detail.entryOffset != INVALID_OFFSET, LOG_TAG_BUFFER,
@@ -658,33 +662,46 @@ inline void BufferManager::UpdateVectorLocation(VectorID vectorId, VectorLocatio
         entry->location.Store(newLocation);
     }
 
-    if (oldLocation != INVALID_VECTOR_LOCATION) {
+    FatalAssert(oldLocation != newLocation, LOG_TAG_BUFFER, "new and old location are the same!");
+    FatalAssert((oldLocation != INVALID_VECTOR_LOCATION) || pinNewUnpinOld, LOG_TAG_BUFFER,
+                "if oldLocation is invalid then pinNewUnpinOld should be true");
+    FatalAssert(!pinNewUnpinOld == ((newLocation.detail.containerId == oldLocation.detail.containerId) &&
+                                    (newLocation.detail.containerVersion == oldLocation.detail.containerVersion)),
+                LOG_TAG_BUFFER,
+                "if pinNewUnpinOld is false, only the offset of the old and new location should be different");
+    if (pinNewUnpinOld && (oldLocation != INVALID_VECTOR_LOCATION)) {
         UnpinVertexVersion(oldLocation.detail.containerId,
-                            oldLocation.detail.containerVersion);
+                           oldLocation.detail.containerVersion);
     }
+    // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_BUFFER, "Updated vector location with id " VECTORID_LOG_FMT
+    //         " from {id: " VECTORID_LOG_FMT ", ver:%u, offset:%hu} to {id: "
+    //         VECTORID_LOG_FMT ", ver:%u, offset:%hu} with pin=%s",
+    //         VECTORID_LOG(vectorId), VECTORID_LOG(oldLocation.detail.containerId), oldLocation.detail.containerVersion,
+    //         oldLocation.detail.entryOffset, VECTORID_LOG(newLocation.detail.containerId),
+    //         newLocation.detail.containerVersion, newLocation.detail.entryOffset, (pinNewUnpinOld ? "ON" : "OFF"));
 }
 
-inline void BufferManager::UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset) {
-    FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
-    CHECK_VECTORID_IS_VALID(vectorId, LOG_TAG_BUFFER);
+// inline void BufferManager::UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset) {
+//     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
+//     CHECK_VECTORID_IS_VALID(vectorId, LOG_TAG_BUFFER);
 
-    if (vectorId.IsCentroid()) {
-        BufferVertexEntry* entry = GetVertexEntry(vectorId);
-        FatalAssert(entry != nullptr, LOG_TAG_BUFFER, "VertexID not found in buffer. VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(vectorId));
-        FatalAssert(entry->state.load() != CLUSTER_DELETED, LOG_TAG_BUFFER, "BufferEntry state is Deleted! VertexID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(vectorId));
-        FatalAssert(entry->centroidMeta.selfId == vectorId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
-                    VECTORID_LOG_FMT "EntryID = " VECTORID_LOG_FMT, VECTORID_LOG(vectorId),
-                    VECTORID_LOG(entry->centroidMeta.selfId));
-        entry->centroidMeta.location.detail.entryOffset.store(newOffset);
-    } else {
-        BufferVectorEntry* entry = GetVectorEntry(vectorId);
-        FatalAssert(entry != nullptr, LOG_TAG_BUFFER, "VectorID not found in buffer. VectorID="
-                    VECTORID_LOG_FMT, VECTORID_LOG(vectorId));
-        entry->location.detail.entryOffset.store(newOffset);
-    }
-}
+//     if (vectorId.IsCentroid()) {
+//         BufferVertexEntry* entry = GetVertexEntry(vectorId);
+//         FatalAssert(entry != nullptr, LOG_TAG_BUFFER, "VertexID not found in buffer. VertexID="
+//                     VECTORID_LOG_FMT, VECTORID_LOG(vectorId));
+//         FatalAssert(entry->state.load() != CLUSTER_DELETED, LOG_TAG_BUFFER, "BufferEntry state is Deleted! VertexID="
+//                     VECTORID_LOG_FMT, VECTORID_LOG(vectorId));
+//         FatalAssert(entry->centroidMeta.selfId == vectorId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
+//                     VECTORID_LOG_FMT "EntryID = " VECTORID_LOG_FMT, VECTORID_LOG(vectorId),
+//                     VECTORID_LOG(entry->centroidMeta.selfId));
+//         entry->centroidMeta.location.detail.entryOffset.store(newOffset);
+//     } else {
+//         BufferVectorEntry* entry = GetVectorEntry(vectorId);
+//         FatalAssert(entry != nullptr, LOG_TAG_BUFFER, "VectorID not found in buffer. VectorID="
+//                     VECTORID_LOG_FMT, VECTORID_LOG(vectorId));
+//         entry->location.detail.entryOffset.store(newOffset);
+//     }
+// }
 
 DIVFTreeVertexInterface* BufferManager::ReadAndPinRoot() {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
@@ -1031,7 +1048,7 @@ VectorID BufferManager::GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclu
     while (ret == exclude) {
         ret._level = level;
         ret._creator_node_id = 0; /* todo: rething in multi-node */
-        ret._val = threadSelf->UniformRange64(0, clusterDirectory[levelIdx].size());
+        ret._val = threadSelf->UniformRange64(0, clusterDirectory[levelIdx].size() - 1);
         BufferVertexEntry* vertex = GetVertexEntry(ret, false);
         if (vertex == nullptr || vertex->state.load(std::memory_order_acquire) != CLUSTER_STABLE) {
             ret = exclude;
@@ -1078,7 +1095,7 @@ std::pair<VectorID, VectorID> BufferManager::GetTwoRandomCentroidIdAtLayer(uint8
 
     /* todo: add a stat collection code here to see how many times this fails and rethink if it is a bottelneck */
     while (true) {
-        auto index = threadSelf->UniformRangeTwo64(0, clusterDirectory[levelIdx].size());
+        auto index = threadSelf->UniformRangeTwo64(0, clusterDirectory[levelIdx].size() - 1);
         first._val = index.first;
 
         if (index.first == index.second) {

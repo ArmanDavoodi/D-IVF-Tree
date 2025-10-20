@@ -270,8 +270,8 @@ public:
      *                     parent is locked in S mode and this thread has changed this vector's state to Migrated
      * The atomicity is only meant to synchronize reads with writes and not writes with writes!!
      */
-    inline void UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation);
-    inline void UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset);
+    inline void UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation, bool pinNewUnpinOld = true);
+    // inline void UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset);
 
     DIVFTreeVertexInterface* ReadAndPinRoot();
     DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated = nullptr);
