@@ -6,6 +6,9 @@
 inline uint32_t total_num_vectors = 0;
 inline std::atomic<uint32_t> next_offset = 0;
 
+inline uint32_t total_num_queries = 0;
+inline divftree::VTYPE* search_query_vectors = nullptr;
+
 /* todo: for every 10 writes, use the next vector for search ->
    not the best benchmark as it does not take the search skew in account */
 inline constexpr uint32_t BATCH_SIZE = 1024 * 16;
@@ -91,11 +94,60 @@ size_t ReadNextBatch(FILE* input_file_ptr, divftree::VTYPE* buffer) {
     return ret_code;
 }
 
-void CloseDataFile(FILE* input_file_ptr) {
+void CloseFile(FILE* input_file_ptr) {
     if (input_file_ptr != nullptr) {
         fclose(input_file_ptr);
         input_file_ptr = nullptr;
     }
+}
+
+void LoadQueryVectors() {
+    if (search_query_vectors != nullptr || total_num_queries != 0) {
+        throw std::runtime_error("query vectors are already loaded!");
+    }
+
+    FILE* input_file_ptr = fopen(QUERY_PATH, "rb");
+    if (input_file_ptr == nullptr) {
+        throw std::runtime_error(
+                divftree::String("Could not open the query data file! errno %d, errno msg: %s",
+                                    errno, strerror(errno)).ToCStr());
+    }
+
+    size_t ret_code = fread(&total_num_queries, sizeof(uint32_t), 1, input_file_ptr);
+    if (ret_code != 1) {
+        if (feof(input_file_ptr))
+            throw std::runtime_error("Error reading data file: unexpected end of file!");
+        else if (ferror(input_file_ptr))
+            throw std::runtime_error("Error reading data file: unexpected error!");
+    }
+
+    if (total_num_queries == 0) {
+        throw std::runtime_error("Error: num vectors cannot be 0!");
+    }
+
+    uint32_t num_dimensions = 0;
+    ret_code = fread(&num_dimensions, sizeof(uint32_t), 1, input_file_ptr);
+    if (ret_code != 1) {
+        if (feof(input_file_ptr))
+            throw std::runtime_error("Error reading data file: unexpected end of file!");
+        else if (ferror(input_file_ptr))
+            throw std::runtime_error("Error reading data file: unexpected error!");
+    }
+
+    if (num_dimensions != DIMENSION) {
+        throw std::runtime_error("Error: dimension mismatch!");
+    }
+
+    search_query_vectors = new divftree::VTYPE[total_num_queries * DIMENSION];
+    ret_code = fread(search_query_vectors, sizeof(divftree::VTYPE) * DIMENSION, total_num_queries, input_file_ptr);
+    if (ret_code < total_num_queries) {
+        if (feof(input_file_ptr))
+            throw std::runtime_error("Error reading data file: unexpected end of file!");
+        else if (ferror(input_file_ptr))
+            throw std::runtime_error("Error reading data file: unexpected error!");
+    }
+
+    CloseFile(input_file_ptr);
 }
 
 #endif

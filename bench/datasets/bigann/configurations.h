@@ -24,6 +24,12 @@
 #define DIMENSION ((uint16_t)128)
 #define DISTANCE_ALG (divftree::DistanceType::L2)
 
+#if DATASET == BIGANN100M
 #define DATA_PATH "bench/datasets/bigann/raw_data/BIGANN100M.u8bin"
+#elif DATASET == BIGANN1B
+#define DATA_PATH "bench/datasets/bigann/raw_data/BIGANN1B.u8bin"
+#endif
+
+#define QUERY_PATH "bench/datasets/bigann/raw_data/BIGANNQ10K.u8bin"
 
 #endif

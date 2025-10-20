@@ -1,11 +1,7 @@
 #ifndef CONFIGURATIONS_H_
 #define CONFIGURATIONS_H_
 
-#ifndef DATASET
-#define DATASET BIGANN100M
-#endif
-
-#if DATASET == BIGANN100M
+#if defined(DATASET) && ((DATASET == BIGANN100M) || (DATASET == BIGANN1B))
 #include "bench/datasets/bigann/configurations.h"
 #else
     #error UNDEFINED DATASET!

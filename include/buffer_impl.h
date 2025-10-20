@@ -114,6 +114,19 @@ DIVFTreeVertexInterface* BufferVectorEntry::ReadAndPinParent(VectorLocation& cur
             continue;
         }
 
+        const uint16_t block_size = parent->GetAttributes().block_size;
+        const uint16_t cap = parent->GetAttributes().cap;
+        const uint16_t dim = parent->GetAttributes().index->GetAttributes().dimension;
+        CentroidMetaData* selfMetaData =
+            static_cast<CentroidMetaData*>(parent->GetCluster().MetaData(
+                currentLocation.detail.entryOffset, false, block_size, cap, dim));
+        if (selfMetaData->id != selfId) {
+            parent->Unpin();
+            selfMetaData = nullptr;
+            parent = nullptr;
+            continue;
+        }
+
         /* todo: stat collect how many times we have to retry */
         return parent;
     }

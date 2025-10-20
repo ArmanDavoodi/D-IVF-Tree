@@ -176,8 +176,8 @@ public:
 
     inline void Unpin() override {
         if (unpinCount.fetch_add(1) == UINT64_MAX) {
-            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT,
-                 VECTORID_LOG(attr.centroid_id));
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT
+                    ", ver:%u, addr:%p", VECTORID_LOG(attr.centroid_id), attr.version, this);
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
             this->~DIVFTreeVertex();
             BufferManager::GetInstance()->Recycle(this);
