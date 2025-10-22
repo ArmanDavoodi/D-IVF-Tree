@@ -280,6 +280,14 @@ namespace divftree {
 // TESTABLE;
 // };
 
+String VectorToString(const VTYPE* vec, uint16_t dim) {
+    String res = "{";
+    for (uint16_t i = 0; i < dim; ++i) {
+        res += String(VTYPE_FMT "%s", vec[i], (i == dim - 1 ? "}" : ", "));
+    }
+    return res;
+}
+
 enum VectorState : uint8_t {
     VECTOR_STATE_INVALID = 0,
     VECTOR_STATE_VALID = 1,
@@ -305,18 +313,18 @@ inline String VectorStateToString(VectorState state) {
 
 /* this struct is always moved and never copied! */
 struct VectorBatch {
-    VTYPE* data;
-    VectorID* id;
-    Version* version;
-    uint16_t size;
+    VTYPE* data = nullptr;
+    VectorID* id = nullptr;
+    Version* version = nullptr;
+    uint16_t size = 0;
 };
 
 /* this struct is always moved and never copied! */
 struct ConstVectorBatch {
-    const VTYPE* data;
-    const VectorID* id;
-    const Version* version;
-    const uint16_t size;
+    const VTYPE* data = nullptr;
+    const VectorID* id = nullptr;
+    const Version* version = nullptr;
+    const uint16_t size = 0;
 
     ConstVectorBatch() = default;
     ConstVectorBatch(const ConstVectorBatch& other) = default;

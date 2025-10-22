@@ -6,11 +6,9 @@
 
 #include "debug.h"
 
-struct A {
-    int a;
-    int b;
-};
+#include "utils/string.h"
 
+namespace divftree {
 template<typename T, typename CMP>
 class SortedList {
 public:
@@ -185,9 +183,20 @@ public:
         dest = std::move(data);
     }
 
+    template <String (*ElementToString)(const T&)>
+    inline String ToString() {
+        String res = "[";
+        for (size_t i = 0; i < data.size(); ++i) {
+            res += ElementToString(data[i]) + String(i == data.size() - 1 ? "]" : ", ");
+        }
+        return res;
+    }
+
 protected:
     CMP cmp;
     std::vector<T> data;
+};
+
 };
 
 #endif

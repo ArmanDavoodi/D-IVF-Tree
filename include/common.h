@@ -621,6 +621,10 @@ inline constexpr const void* ALLIGNED_PTR(const void* ptr) {
                                                                            CACHE_LINE_SIZE))));
 }
 
+
+#define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
+#define VECTORID_LOG(vid) (!((vid).IsValid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
+
 typedef VECTOR_TYPE VTYPE;
 typedef DISTANCE_TYPE DTYPE;
 
@@ -641,6 +645,11 @@ struct ANNVectorInfo {
         return (id != other.id) || (version != other.version);
     }
 };
+
+String ANNVectorInfoToString(const ANNVectorInfo& target) {
+    return String("{dist=" DTYPE_FMT ", id=" VECTORID_LOG_FMT ", Version=%u}",
+                 target.distance_to_query, VECTORID_LOG(target.id), target.version);
+}
 
 // enum DataType : int8_t {
 //     Invalid = -1,
@@ -678,9 +687,6 @@ struct ANNVectorInfo {
 // #ifndef PRINT_BUCKET
 // #define PRINT_BUCKET false
 // #endif
-
-#define VECTORID_LOG_FMT "%s%lu(%lu, %lu, %lu)"
-#define VECTORID_LOG(vid) (!((vid).IsValid()) ? "[INV]" : ""), (vid)._id, (vid)._creator_node_id, (vid)._level, (vid)._val
 
 #define CHECK_MIN_MAX_SIZE(min_size, max_size, tag) \
     do { \

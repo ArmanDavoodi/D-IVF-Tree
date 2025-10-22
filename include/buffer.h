@@ -115,6 +115,11 @@ union alignas(16) VectorLocation {
         return raw != other.raw;
     }
 
+    inline String ToString() const {
+        return String("{containerId=" VECTORID_LOG_FMT ", containerVersion=%u, offset=%hu}",
+                      VECTORID_LOG(detail.containerId), detail.containerVersion, detail.entryOffset);
+    }
+
     constexpr VectorLocation() : raw(0) {}
     constexpr VectorLocation(__int128_t other) : raw(other) {}
     constexpr VectorLocation(const VectorLocation& other) : raw(other.raw) {}
@@ -203,7 +208,7 @@ struct BufferVertexEntry {
 
     inline BufferVertexEntry* ReadParentEntry(VectorLocation& currentLocation);
     DIVFTreeVertexInterface* ReadLatestVersion(bool pinCluster = true, bool needsHeaderLock = false);
-    DIVFTreeVertexInterface* MVCCReadAndPinCluster(Version version, bool headerLocked=false);
+    // DIVFTreeVertexInterface* MVCCReadAndPinCluster(Version version, bool headerLocked=false);
 
     RetStatus UpgradeAccessToExclusive(BufferVertexEntryState& targetState, bool unlockOnFail = false);
     void DowngradeAccessToShared();
@@ -273,7 +278,9 @@ public:
     inline void UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation, bool pinNewUnpinOld = true);
     // inline void UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset);
 
+    /* have to unpin root using UnpinRoot function */
     DIVFTreeVertexInterface* ReadAndPinRoot();
+    inline void UnpinRoot(DIVFTreeVertexInterface* root_vertex);
     DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated = nullptr);
 
     /*

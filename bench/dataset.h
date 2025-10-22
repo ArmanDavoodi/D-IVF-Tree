@@ -11,7 +11,7 @@ inline divftree::VTYPE* search_query_vectors = nullptr;
 
 /* todo: for every 10 writes, use the next vector for search ->
    not the best benchmark as it does not take the search skew in account */
-inline constexpr uint32_t BATCH_SIZE = 1024 * 16;
+inline constexpr uint32_t BATCH_SIZE = 8;
 
 void OpenDataFile(FILE*& input_file_ptr, bool read_header = false) {
     if (input_file_ptr != nullptr) {

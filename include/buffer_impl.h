@@ -73,11 +73,13 @@ BufferVertexEntry* BufferVectorEntry::ReadParentEntry(VectorLocation& currentLoc
         if (is_leaf) {
             VectorMetaData* vmt = reinterpret_cast<VectorMetaData*>(meta);
             FatalAssert(vmt->id == selfId, LOG_TAG_BUFFER, "Corrupted location data!");
-            FatalAssert(vmt->state == VECTOR_STATE_VALID, LOG_TAG_BUFFER, "Corrupted location data!");
+            /* state might change to migrated or invalid if there is a delete or migration task */
+            // FatalAssert(vmt->state == VECTOR_STATE_VALID, LOG_TAG_BUFFER, "Corrupted location data!");
         } else {
             CentroidMetaData* vmt = reinterpret_cast<CentroidMetaData*>(meta);
             FatalAssert(vmt->id == selfId, LOG_TAG_BUFFER, "Corrupted location data!");
-            FatalAssert(vmt->state == VECTOR_STATE_VALID, LOG_TAG_BUFFER, "Corrupted location data!");
+            /* state might change to migrated or invalid if the child is not locked exclusively */
+            // FatalAssert(vmt->state == VECTOR_STATE_VALID, LOG_TAG_BUFFER, "Corrupted location data!");
         }
     )
     return parent;
@@ -145,7 +147,7 @@ BufferVertexEntry::BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID 
 }
 
 inline BufferVertexEntry* BufferVertexEntry::ReadParentEntry(VectorLocation& currentLocation) {
-    threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_EXCLUSIVE);
+    threadSelf->SanityCheckLockHeldByMe(&clusterLock);
     return centroidMeta.ReadParentEntry(currentLocation);
 }
 
@@ -176,27 +178,27 @@ DIVFTreeVertexInterface* BufferVertexEntry::ReadLatestVersion(bool pinCluster, b
     return cluster;
 }
 
-DIVFTreeVertexInterface* BufferVertexEntry::MVCCReadAndPinCluster(Version version, bool headerLocked) {
-    if (!headerLocked) {
-        headerLock.Lock(SX_SHARED);
-    }
+// DIVFTreeVertexInterface* BufferVertexEntry::MVCCReadAndPinCluster(Version version, bool headerLocked) {
+//     if (!headerLocked) {
+//         headerLock.Lock(SX_SHARED);
+//     }
 
-    FatalAssert(version <= currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
-                VECTORID_LOG_FMT ", latest version = %u, input version = %u",
-                VECTORID_LOG(centroidMeta.selfId), currentVersion, version);
-    DIVFTreeVertexInterface* cluster = nullptr;
-    auto it = liveVersions.find(version);
-    if (it != liveVersions.end() && it->second.versionPin.load() != 0) {
-        cluster = it->second.clusterPtr.clusterPtr;
-        it->second.clusterPtr.pin.fetch_add(1);
-    }
+//     FatalAssert(version <= currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
+//                 VECTORID_LOG_FMT ", latest version = %u, input version = %u",
+//                 VECTORID_LOG(centroidMeta.selfId), currentVersion, version);
+//     DIVFTreeVertexInterface* cluster = nullptr;
+//     auto it = liveVersions.find(version);
+//     if (it != liveVersions.end() && it->second.versionPin.load() != 0) {
+//         cluster = it->second.clusterPtr.clusterPtr;
+//         it->second.clusterPtr.pin.fetch_add(1);
+//     }
 
-    if (!headerLocked) {
-        headerLock.Unlock();
-    }
+//     if (!headerLocked) {
+//         headerLock.Unlock();
+//     }
 
-    return cluster;
-}
+//     return cluster;
+// }
 
 RetStatus BufferVertexEntry::UpgradeAccessToExclusive(BufferVertexEntryState& targetState, bool unlockOnFail) {
     threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_SHARED);
@@ -289,7 +291,6 @@ void BufferVertexEntry::UnpinVersion(Version version, bool headerLocked) {
         if (version == currentVersion) {
             FatalAssert(state.load() == CLUSTER_DELETE_IN_PROGRESS, LOG_TAG_BUFFER,
                         "cluster should be in pruning process");
-            state.store(CLUSTER_DELETED, std::memory_order_release);
         }
         liveVersions.erase(it);
         cluster->MarkForRecycle(pinCount);
@@ -736,12 +737,22 @@ DIVFTreeVertexInterface* BufferManager::ReadAndPinRoot() {
             continue;
         }
 
+        uint64_t oldVersionPin = it->second.versionPin.fetch_add(1);
+        UNUSED_VARIABLE(oldVersionPin);
+        FatalAssert(oldVersionPin != 0, LOG_TAG_BUFFER, "oldVersionPin was zero!");
         it->second.clusterPtr.pin.fetch_add(1);
         DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
         entry->headerLock.Unlock();
         CHECK_NOT_NULLPTR(vertex, LOG_TAG_BUFFER);
         return vertex;
     }
+}
+
+inline void BufferManager::UnpinRoot(DIVFTreeVertexInterface* root_vertex) {
+    CHECK_NOT_NULLPTR(root_vertex, LOG_TAG_BUFFER);
+    DIVFTreeVertexAttributes root_attr = root_vertex->GetAttributes();
+    UnpinVertexVersion(root_attr.centroid_id, root_attr.version);
+    root_vertex->Unpin();
 }
 
 DIVFTreeVertexInterface* BufferManager::ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated) {
