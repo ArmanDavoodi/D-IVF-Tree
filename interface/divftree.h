@@ -81,7 +81,7 @@ struct DIVFTreeAttributes {
             "use_block_bytes:%s, "
             "leaf_blck_bytes:%lu"
             "leaf_blck_size:%hu, "
-            "internal_blck_bytes:%lu"
+            "internal_blck_bytes:%lu "
             "internal_blck_size:%hu, "
             "split_internal:%hu, "
             "split_leaf:%hu, "

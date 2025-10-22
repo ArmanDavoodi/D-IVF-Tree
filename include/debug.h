@@ -398,19 +398,19 @@ inline const char* tagtostr(uint64_t tag)
     }
 }
 
-inline bool Pass_Min_Level(LOG_LEVELS level) {
+inline constexpr bool Pass_Min_Level(LOG_LEVELS level) {
     return ((uint8_t)(level) <= LOG_MIN_LEVEL);
 }
 
-inline bool Pass_Tag(uint64_t tag) {
+inline constexpr bool Pass_Tag(uint64_t tag) {
     return ((LOG_TAG & tag) != 0);
 }
 
-inline bool Pass_Level(LOG_LEVELS level) {
+inline constexpr bool Pass_Level(LOG_LEVELS level) {
     return ((uint8_t)(level) <= (uint8_t)(LOG_LEVEL));
 }
 
-inline bool Pass_CallStack_Level(LOG_LEVELS level) {
+inline constexpr bool Pass_CallStack_Level(LOG_LEVELS level) {
     return ((uint8_t)(level) <= (uint8_t)(PRINT_CALLSTACK_LEVEL));
 }
 
@@ -506,8 +506,8 @@ inline void Log(LOG_LEVELS level, uint64_t tag, const Log_Msg& msg,
 
 #define DIVFLOG(level, tag, msg, ...) \
     do {\
-        if (::divftree::Pass_Min_Level((level)) || ::divftree::Pass_Tag((tag))) {\
-            if (::divftree::Pass_Level((level))){\
+        if constexpr (::divftree::Pass_Min_Level((level)) || ::divftree::Pass_Tag((tag))) {\
+            if constexpr (::divftree::Pass_Level((level))){\
                 ::divftree::Log((level), (tag), (::divftree::Log_Msg((msg) __VA_OPT__(,) __VA_ARGS__)), \
                             std::chrono::system_clock::now(),\
                             __FILE__, FUNCTION_NAME, __LINE__, THREAD_ID, DIVF_THREAD_ID);\

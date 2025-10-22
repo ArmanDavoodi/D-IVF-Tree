@@ -26,7 +26,9 @@
 
 #if DATASET == BIGANN100M
 #define DATA_PATH "bench/datasets/bigann/raw_data/BIGANN100M.u8bin"
+#define DATASET_NAME "BIGANN100M"
 #elif DATASET == BIGANN1B
+#define DATASET_NAME "BIGANN1B"
 #define DATA_PATH "bench/datasets/bigann/raw_data/BIGANN1B.u8bin"
 #endif
 

@@ -263,6 +263,16 @@ void ParseConfigs() {
         throw std::runtime_error("Internal search span not provided!");
     }
 
+    vit = var_configs.find("default-k");
+    if (vit != var_configs.end()) {
+        if (!parseUnsignedInt(vit->second, default_k) ||
+            default_k < 1) {
+            throw std::runtime_error("Invalid k!");
+        }
+    } else {
+        throw std::runtime_error("k not provided!");
+    }
+
     vit = var_configs.find("random-rate-base");
     if (vit != var_configs.end()) {
         if (!parseUnsignedInt(vit->second, index_attr.random_base_perc)) {
@@ -355,13 +365,13 @@ void ParseConfigs() {
         throw std::runtime_error("Delete ratio not provided!");
     }
 
-    vit = var_configs.find("build-time");
+    vit = var_configs.find("build-size");
     if (vit != var_configs.end()) {
-        if (!parseUnsignedInt(vit->second, build_time)) {
-            throw std::runtime_error("Invalid build time!");
+        if (!parseUnsignedInt(vit->second, build_size)) {
+            throw std::runtime_error("Invalid build size!");
         }
     } else {
-        throw std::runtime_error("Build time not provided!");
+        throw std::runtime_error("Build size not provided!");
     }
 
     vit = var_configs.find("warmup-time");
@@ -380,6 +390,15 @@ void ParseConfigs() {
         }
     } else {
         throw std::runtime_error("Run time not provided!");
+    }
+
+    vit = var_configs.find("throughput-report-time");
+    if (vit != var_configs.end()) {
+        if (!parseUnsignedInt(vit->second, throughput_report_time)) {
+            throw std::runtime_error("Invalid throughput report time!");
+        }
+    } else {
+        throughput_report_time = 0;
     }
 }
 
