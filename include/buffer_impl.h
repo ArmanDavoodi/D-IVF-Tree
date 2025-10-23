@@ -24,8 +24,9 @@ BufferVertexEntry* BufferVectorEntry::ReadParentEntry(VectorLocation& currentLoc
         VectorLocation expLocation = location.Load();
         if (expLocation == INVALID_VECTOR_LOCATION) {
             /* this means that we should have become the new root! */
-            FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
-                        "if location is invalid and we are a centroid we have to be the root!");
+            /* there becomming the new root and change of address are not done atomically so this assertion can fail */
+            // FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
+            //             "if location is invalid and we are a centroid we have to be the root!");
             return nullptr;
         }
 
@@ -37,8 +38,8 @@ BufferVertexEntry* BufferVectorEntry::ReadParentEntry(VectorLocation& currentLoc
                 bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags(false, false));
                 parent = nullptr;
             }
-            FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
-                        "if location is invalid and we are a centroid we have to be the root!");
+            // FatalAssert(selfId.IsVector() || (selfId == bufferMgr->GetCurrentRootId()), LOG_TAG_BUFFER,
+            //             "if location is invalid and we are a centroid we have to be the root!");
             return nullptr;
         }
 
@@ -372,9 +373,10 @@ BufferManager::~BufferManager() {
 
     sleep(10);
 
+    std::align_val_t al = (std::align_val_t)16;
     for (BufferVectorEntry* entry : vectorDirectory) {
         if (entry != nullptr) {
-            delete entry;
+            operator delete(entry, al);
             entry = nullptr;
         }
     }
@@ -383,7 +385,7 @@ BufferManager::~BufferManager() {
     for (size_t level = MAX_TREE_HIGHT - 1; level != (size_t)(-1); --level) {
         for (BufferVertexEntry* entry : clusterDirectory[level]) {
             if (entry != nullptr) {
-                delete entry;
+                operator delete(entry, al);
                 entry = nullptr;
             }
         }
@@ -770,6 +772,11 @@ DIVFTreeVertexInterface* BufferManager::ReadAndPinVertex(VectorID vertexId, Vers
     // }
 
     entry->headerLock.Lock(SX_SHARED);
+    if (version > entry->currentVersion) {
+        entry->headerLock.Unlock();
+        return nullptr;
+    }
+
     FatalAssert(version <= entry->currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
                 VECTORID_LOG_FMT ", latest version = %u, input version = %u",
                 VECTORID_LOG(vertexId), entry->currentVersion, version);

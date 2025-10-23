@@ -206,56 +206,57 @@ using os_thread_id = pid_t; // pid_t is typically int or long
 #define OS_THREAD_ID ((os_thread_id)(syscall(SYS_gettid)))
 
 std::string print_callstack() {
-    std::string callstack = "[";
-    void* frames[PRINT_CALLSTACK_MAX_FRAMES];
-    int numFrames = backtrace(frames, PRINT_CALLSTACK_MAX_FRAMES);
+    return "";
+    // std::string callstack = "[";
+    // void* frames[PRINT_CALLSTACK_MAX_FRAMES];
+    // int numFrames = backtrace(frames, PRINT_CALLSTACK_MAX_FRAMES);
 
-    // Get symbolic names
-    std::unique_ptr<char*, decltype(&free)> symbols(
-        backtrace_symbols(frames, numFrames),
-        free
-    );
+    // // Get symbolic names
+    // std::unique_ptr<char*, decltype(&free)> symbols(
+    //     backtrace_symbols(frames, numFrames),
+    //     free
+    // );
 
-    if (!symbols) {
-        callstack += "Error retrieving callstack]";
-        return callstack;
-    }
+    // if (!symbols) {
+    //     callstack += "Error retrieving callstack]";
+    //     return callstack;
+    // }
 
-    // Iterate through the symbols and demangle C++ names
-    for (int i = 0; i < numFrames; ++i) {
-        std::string symbolStr = symbols.get()[i];
+    // // Iterate through the symbols and demangle C++ names
+    // for (int i = 0; i < numFrames; ++i) {
+    //     std::string symbolStr = symbols.get()[i];
 
-        // Attempt to demangle C++ names
-        size_t start_mangled = symbolStr.find('(');
-        size_t end_mangled = symbolStr.find('+', start_mangled);
+    //     // Attempt to demangle C++ names
+    //     size_t start_mangled = symbolStr.find('(');
+    //     size_t end_mangled = symbolStr.find('+', start_mangled);
 
-        if (start_mangled != std::string::npos && end_mangled != std::string::npos) {
-            std::string mangled_name = symbolStr.substr(start_mangled + 1, end_mangled - (start_mangled + 1));
-            int status;
-            std::unique_ptr<char, decltype(&free)> demangled_name(
-                abi::__cxa_demangle(mangled_name.c_str(), 0, 0, &status),
-                free
-            );
+    //     if (start_mangled != std::string::npos && end_mangled != std::string::npos) {
+    //         std::string mangled_name = symbolStr.substr(start_mangled + 1, end_mangled - (start_mangled + 1));
+    //         int status;
+    //         std::unique_ptr<char, decltype(&free)> demangled_name(
+    //             abi::__cxa_demangle(mangled_name.c_str(), 0, 0, &status),
+    //             free
+    //         );
 
-            if (status == 0 && demangled_name) {
-                // Successfully demangled
-                callstack += symbolStr.substr(0, start_mangled + 1) + demangled_name.get() +
-                             symbolStr.substr(end_mangled);
-            }
-            else {
-                // Demangling failed or not a mangled name
-                callstack += symbolStr;
-            }
-        }
-        else {
-            callstack += symbolStr;
-        }
-        if (i != numFrames - 1) {
-            callstack += ", ";
-        }
-    }
+    //         if (status == 0 && demangled_name) {
+    //             // Successfully demangled
+    //             callstack += symbolStr.substr(0, start_mangled + 1) + demangled_name.get() +
+    //                          symbolStr.substr(end_mangled);
+    //         }
+    //         else {
+    //             // Demangling failed or not a mangled name
+    //             callstack += symbolStr;
+    //         }
+    //     }
+    //     else {
+    //         callstack += symbolStr;
+    //     }
+    //     if (i != numFrames - 1) {
+    //         callstack += ", ";
+    //     }
+    // }
 
-    return callstack + "]";
+    // return callstack + "]";
 }
 
 #endif

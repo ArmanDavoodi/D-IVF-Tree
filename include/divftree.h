@@ -1412,8 +1412,9 @@ protected:
             if (parent == nullptr) {
                 FatalAssert(currentLocation == INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
                             "null parent with valid location!");
-                FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(), LOG_TAG_DIVFTREE,
-                            "null parent but we are not root!");
+                /* changing the root and location are not done atomically together hence this assert may fail */
+                // FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(), LOG_TAG_DIVFTREE,
+                //             "null parent but we are not root!");
                 parent = ExpandTree();
             } else {
                 FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
@@ -1475,7 +1476,7 @@ protected:
     }
 
     RetStatus BatchInsertInto(BufferVertexEntry* container_entry, const ConstVectorBatch& batch, bool releaseEntry,
-                              uint16_t marked_for_update = INVALID_OFFSET) {
+                              uint16_t marked_for_update = INVALID_OFFSET, bool no_major_updates = false) {
         CHECK_NOT_NULLPTR(container_entry, LOG_TAG_DIVFTREE);
         FatalAssert(batch.size != 0, LOG_TAG_DIVFTREE, "Batch of vectors to insert is empty.");
         FatalAssert(batch.data != nullptr, LOG_TAG_DIVFTREE, "Batch of vectors to insert is null.");
@@ -1494,7 +1495,7 @@ protected:
             CHECK_NOT_NULLPTR(container_vertex, LOG_TAG_DIVFTREE);
             // CHECK_VERTEX_IS_VALID(container_vertex, LOG_TAG_DIVFTREE, RetStatus::FAIL);
             rs = container_vertex->BatchInsert(batch, marked_for_update);
-            if (rs.IsOK()) {
+            if (rs.IsOK() || no_major_updates) {
                 break;
             }
 
@@ -1607,6 +1608,7 @@ protected:
         for (uint16_t i = 0; i < size; ++i) {
             if (vmd[i].state.load(std::memory_order_relaxed) == VECTOR_STATE_VALID) {
                 newRootId = vmd[i].id;
+                newRootVersion = vmd[i].version;
                 break;
             }
         }
@@ -1928,7 +1930,7 @@ protected:
 
         VectorBatch batch;
         batch.size = 0;
-        batch.data = new VTYPE[targetBatch.size()];
+        batch.data = new VTYPE[targetBatch.size() * attr.dimension];
         batch.id = new VectorID[targetBatch.size()];
         batch.version = nullptr;
         uint16_t* migrated_offsets = new uint16_t[targetBatch.size()];
@@ -2000,7 +2002,7 @@ protected:
 
         /* todo: we may be able to avoid this extra copy */
         if (batch.size > 0) {
-            rs = BatchInsertInto((*dest_entry), batch, true);
+            rs = BatchInsertInto((*dest_entry), batch, true, INVALID_OFFSET, dest_id < src_id);
             *dest_entry = nullptr;
         }
         delete[] batch.data;
@@ -2335,6 +2337,7 @@ protected:
         batch.size = totalSize;
         batch.id = new VectorID[totalSize];
         batch.data = new VTYPE[totalSize * attr.dimension];
+        batch.version = nullptr;
         bool is_leaf = srcId.IsLeaf();
         if (is_leaf) {
             batch.version = new Version[totalSize];
@@ -2372,7 +2375,7 @@ protected:
         }
         FatalAssert(i == totalSize, LOG_TAG_DIVFTREE, "fewer elements than excpected!");
 
-        rs = BatchInsertInto((*destEntry), batch, true);
+        rs = BatchInsertInto((*destEntry), batch, true, INVALID_OFFSET, destId < srcId);
         (*destEntry) = nullptr;
         if (rs.IsOK()) {
             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "Merged " VECTORID_LOG_FMT " into " VECTORID_LOG_FMT,
@@ -2384,8 +2387,10 @@ protected:
             if (is_leaf) {
                 delete[] batch.version;
             }
-            delete batch.id;
+            delete[] batch.id;
             return rs;
+        } else {
+            /* todo: add the task of checking the src to merge check */
         }
 
         i = 0;
@@ -2547,9 +2552,18 @@ protected:
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
         bool outdated;
-        DIVFTreeVertex* vertex =
-            static_cast<DIVFTreeVertex*>(bufferMgr->
-                ReadAndPinVertex(id, version, &outdated));
+        DIVFTreeVertex* vertex = nullptr;
+        while (vertex == nullptr) {
+            vertex = static_cast<DIVFTreeVertex*>(bufferMgr-> ReadAndPinVertex(id, version, &outdated));
+            /*
+             * todo use stats to make sure this does not happen often! this can only happen when there was a split and
+             * the new version is inserted into the parent but the clusterPtr is not yet updated.
+             */
+            if (vertex == nullptr) {
+                DIVFTREE_YIELD();
+            }
+        }
+
         CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
         if (!outdated) {
             uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);

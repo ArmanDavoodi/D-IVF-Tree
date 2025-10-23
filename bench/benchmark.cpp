@@ -38,12 +38,14 @@ struct IDSet {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_TEST);
         CHECK_VECTORID_IS_VECTOR(id, LOG_TAG_TEST);
         FatalAssert(_map.find(id) == _map.end(), LOG_TAG_TEST, "id should not exist in the set!");
-        _map[id] = _data.size() - 1;
+        _map[id] = _data.size();
         _data.push_back(id);
     }
 
     void remove(divftree::VectorID id) {
+        FatalAssert(_map.find(id) != _map.end(), LOG_TAG_TEST, "id should exist in the set!");
         size_t idx = _map[id];
+        FatalAssert(idx < _data.size(), LOG_TAG_TEST, "invalid idx!");
         if (idx != _data.size() - 1) {
             _data[idx] = _data.back();
             _map[_data[idx]] = idx;
@@ -58,6 +60,10 @@ struct IDSet {
 
     bool empty() const {
         return _data.empty();
+    }
+
+    size_t size() const {
+        return _data.size();
     }
 
     divftree::VectorID get_random_id() const {
@@ -212,7 +218,7 @@ void worker(divftree::Thread* self) {
             } else {
                 FlushIncrement(current_search_err, search_errors);
             }
-        } else if (!id_set.empty() && self->UniformBinary(delete_ratio)) {
+        } else if (id_set.size() > 2 && self->UniformBinary(delete_ratio)) {
             rs = Delete(id_set);
             if (rs.IsOK()) {
                 FlushIncrement(current_delete, delete_queries);
