@@ -7,7 +7,17 @@ BufferVectorEntry::BufferVectorEntry(VectorID id) : selfId(id), location(INVALID
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vector entry should be
     16 byte aligned as well */
     FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVectorEntry is not alligned!");
+#ifdef MEMORY_DEBUG
+    DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p created buffer vector entry -> ID:" VECTORID_LOG_FMT, this,
+            VECTORID_LOG(id));
+#endif
+}
 
+BufferVectorEntry::~BufferVectorEntry() {
+#ifdef MEMORY_DEBUG
+    DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p destroyed buffer vector entry -> ID:" VECTORID_LOG_FMT, this,
+            VECTORID_LOG(selfId));
+#endif
 }
 
 BufferVertexEntry* BufferVectorEntry::ReadParentEntry(VectorLocation& currentLocation) {
@@ -134,17 +144,29 @@ DIVFTreeVertexInterface* BufferVectorEntry::ReadAndPinParent(VectorLocation& cur
         return parent;
     }
 }
+
 BufferVertexEntry::BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin) :
     centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0), nextVersionPin(0) {
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vertex entry should be
         16 byte aligned as well */
     FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
     // liveVersions.emplace(initialPin, 0, cluster);
+#ifdef MEMORY_DEBUG
+    DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p created buffer vertex entry -> ID:" VECTORID_LOG_FMT
+            ", version pin=%u", this, VECTORID_LOG(id), initialPin);
+#endif
     liveVersions[0] = VersionedClusterPtr(initialPin, 0, cluster);
     /*
         * set version pin to 1 as BufferVertexEntry is referencing it with currentVersion and
         * set pin to 0 as no one is using it yet
         */
+}
+
+BufferVertexEntry::~BufferVertexEntry() {
+#ifdef MEMORY_DEBUG
+    DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p destroyed buffer vertex entry -> ID:" VECTORID_LOG_FMT, this,
+            VECTORID_LOG(centroidMeta.selfId));
+#endif
 }
 
 inline BufferVertexEntry* BufferVertexEntry::ReadParentEntry(VectorLocation& currentLocation) {
@@ -168,7 +190,12 @@ DIVFTreeVertexInterface* BufferVertexEntry::ReadLatestVersion(bool pinCluster, b
                     "Found current version but its version pin is 0!");
         cluster = it->second.clusterPtr.clusterPtr;
         if (pinCluster) {
-            it->second.clusterPtr.pin.fetch_add(1);
+            uint64_t pin = it->second.clusterPtr.pin.fetch_add(1);
+            UNUSED_VARIABLE(pin);
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster pinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCnt=%lu", cluster, VECTORID_LOG(centroidMeta.selfId), currentVersion, pin);
+#endif
         }
     }
 
@@ -239,9 +266,7 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster) {
     DIVFTreeVertexInterface* cluster = it->second.clusterPtr.clusterPtr;
     it->second.clusterPtr.pin.store(0, std::memory_order_relaxed);
     it->second.clusterPtr.clusterPtr = newCluster;
-    if (newCluster == nullptr) {
-        liveVersions.erase(it);
-    }
+    FatalAssert(newCluster != nullptr, LOG_TAG_BUFFER, "Invalid cluster ptr!");
     cluster->MarkForRecycle(pinCount);
     headerLock.Unlock();
 }
@@ -249,6 +274,7 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster) {
 void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion) {
     threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_EXCLUSIVE);
     headerLock.Lock(SX_EXCLUSIVE);
+    UNUSED_VARIABLE(newVersion);
     FatalAssert(liveVersions.find(currentVersion) != liveVersions.end(), LOG_TAG_BUFFER,
                 "new version already exists!");
     FatalAssert(newVersion == currentVersion + 1, LOG_TAG_BUFFER, "Version jump detected!");
@@ -259,6 +285,18 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Ve
     liveVersions[currentVersion] = VersionedClusterPtr(1 + nextVersionPin, 0, newCluster);
     nextVersionPin = 0;
     UnpinVersion(currentVersion - 1, true);
+    headerLock.Unlock();
+}
+
+void BufferVertexEntry::InitiateDelete() {
+    threadSelf->SanityCheckLockHeldInModeByMe(&clusterLock, SX_EXCLUSIVE);
+    headerLock.Lock(SX_EXCLUSIVE);
+    FatalAssert(liveVersions.find(currentVersion) != liveVersions.end(), LOG_TAG_BUFFER,
+                "new version already exists!");
+    FatalAssert(state.load() == CLUSTER_DELETE_IN_PROGRESS, LOG_TAG_BUFFER,
+                "cluster should be in pruning process");
+    state.store(CLUSTER_DELETED, std::memory_order_release);
+    UnpinVersion(currentVersion, true);
     headerLock.Unlock();
 }
 
@@ -280,24 +318,40 @@ void BufferVertexEntry::UnpinVersion(Version version, bool headerLocked) {
         */
     uint64_t versionPin = it->second.versionPin.fetch_sub(1, std::memory_order_relaxed) - 1;
     FatalAssert(versionPin != UINT64_MAX, LOG_TAG_BUFFER, "Possible unpin underflow!");
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster version unpinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCnt=%lu, currentVersion=%u", it->second.clusterPtr.clusterPtr,
+                VECTORID_LOG(centroidMeta.selfId), version, versionPin, currentVersion);
+#endif
+    bool needed_upgrade = false;
     if (versionPin == 0) {
-        headerLock.Unlock();
-        headerLock.Lock(SX_EXCLUSIVE);
+        if (headerLock.CurrentMode() != SX_EXCLUSIVE) {
+            headerLock.Unlock();
+            headerLock.Lock(SX_EXCLUSIVE);
+            needed_upgrade = true;
+        }
         FatalAssert(it->second.versionPin.load() == 0, LOG_TAG_BUFFER,
                     "version pin incremented during access mode upgrade!");
         uint64_t pinCount = it->second.clusterPtr.pin.load(std::memory_order_relaxed);
         DIVFTreeVertexInterface* cluster = it->second.clusterPtr.clusterPtr;
         it->second.clusterPtr.pin.store(0, std::memory_order_relaxed);
         it->second.clusterPtr.clusterPtr = nullptr;
-        if (version == currentVersion) {
-            FatalAssert(state.load() == CLUSTER_DELETE_IN_PROGRESS, LOG_TAG_BUFFER,
-                        "cluster should be in pruning process");
-        }
         liveVersions.erase(it);
         cluster->MarkForRecycle(pinCount);
+        if (version == currentVersion) {
+            FatalAssert(state.load() == CLUSTER_DELETED, LOG_TAG_BUFFER,
+                        "cluster should be in deleted state!");
+            if (liveVersions.empty()) {
+                // todo: delete the buffer entry?
+            }
+        }
+    }
+
+    if (!headerLocked) {
         headerLock.Unlock();
-    } else if (!headerLocked) {
+    } else if (needed_upgrade) {
         headerLock.Unlock();
+        headerLock.Lock(SX_SHARED);
     }
 }
 
@@ -315,8 +369,18 @@ void BufferVertexEntry::PinVersion(Version version, bool headerLocked) {
         uint64_t oldVersionPin = it->second.versionPin.fetch_add(1);
         UNUSED_VARIABLE(oldVersionPin);
         FatalAssert(oldVersionPin != 0, LOG_TAG_BUFFER, "oldVersionPin was zero!");
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster version pinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCnt=%lu, currentVersion=%u", it->second.clusterPtr.clusterPtr,
+                VECTORID_LOG(centroidMeta.selfId), version, oldVersionPin + 1, currentVersion);
+#endif
     } else {
         ++nextVersionPin;
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster version pinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCnt=%lu, currentVersion=%u", nullptr, VECTORID_LOG(centroidMeta.selfId),
+                version, nextVersionPin, currentVersion);
+#endif
     }
 
     if (!headerLocked) {
@@ -363,8 +427,9 @@ BufferManager::~BufferManager() {
                 clusterPtr->MarkForRecycle(readerPins);
             }
             entry->liveVersions.clear();
-            entry->currentVersion = 0;
+            entry->currentVersion = UINT32_MAX;
             entry->state.store(CLUSTER_DELETED);
+            entry->state.notify_all();
             entry->centroidMeta.location.Store(INVALID_VECTOR_LOCATION, true);
             entry->headerLock.Unlock();
             entry->clusterLock.Unlock();
@@ -418,16 +483,23 @@ DIVFTreeVertexInterface* BufferManager::AllocateMemoryForVertex(uint8_t level) {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
     FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                 "Level is out of bounds.");
-    return reinterpret_cast<DIVFTreeVertexInterface*>(std::aligned_alloc(CACHE_LINE_SIZE,
-                              ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize)));
+    void* res = std::aligned_alloc(CACHE_LINE_SIZE,
+                                   ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
+#ifdef MEMORY_DEBUG
+    DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p allocated", res);
+#endif
+    return reinterpret_cast<DIVFTreeVertexInterface*>(res);
 }
 
 void BufferManager::Recycle(DIVFTreeVertexInterface* memory) {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
     if (memory == nullptr) {
         return;
-        }
-        std::free(memory);
+    }
+#ifdef MEMORY_DEBUG
+    DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p freed", memory);
+#endif
+    std::free(memory);
     }
 
 void BufferManager::UpdateRoot(VectorID newRootId, Version newRootVersion, BufferVertexEntry* oldRootEntry) {
@@ -473,7 +545,8 @@ BufferVertexEntry* BufferManager::CreateNewRootEntry() {
     newRoot->clusterLock.Lock(SX_EXCLUSIVE);
     newRoot->headerLock.Lock(SX_EXCLUSIVE);
     clusterDirectory[newLevelIdx].emplace_back(newRoot);
-    newRoot->PinVersion(newRoot->currentVersion, true);
+    /* todo: should we pin the version here since we have already pinned it twice in the constructor! */
+    // newRoot->PinVersion(newRoot->currentVersion, true);
     currentRootId.store(newId._id, std::memory_order_release);
     if (oldRootEntry != nullptr) {
         /* Unpin once due to not being root anymore */
@@ -719,7 +792,7 @@ inline void BufferManager::UpdateVectorLocation(VectorID vectorId, VectorLocatio
 //     }
 // }
 
-DIVFTreeVertexInterface* BufferManager::ReadAndPinRoot() {
+DIVFTreeVertexInterface* BufferManager::GetIndexSnapshot() {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
     while (true) {
         BufferVertexEntry* entry = GetRootEntry();
@@ -740,21 +813,27 @@ DIVFTreeVertexInterface* BufferManager::ReadAndPinRoot() {
         }
 
         uint64_t oldVersionPin = it->second.versionPin.fetch_add(1);
-        UNUSED_VARIABLE(oldVersionPin);
-        FatalAssert(oldVersionPin != 0, LOG_TAG_BUFFER, "oldVersionPin was zero!");
-        it->second.clusterPtr.pin.fetch_add(1);
+        if (oldVersionPin == 0) {
+            it->second.versionPin.fetch_sub(1);
+            entry->headerLock.Unlock();
+            continue;
+        }
         DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster version pinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCnt=%lu", vertex, VECTORID_LOG(entry->centroidMeta.selfId),
+                entry->currentVersion, oldVersionPin + 1);
+#endif
         entry->headerLock.Unlock();
         CHECK_NOT_NULLPTR(vertex, LOG_TAG_BUFFER);
         return vertex;
     }
 }
 
-inline void BufferManager::UnpinRoot(DIVFTreeVertexInterface* root_vertex) {
+inline void BufferManager::FreeSnapshot(DIVFTreeVertexInterface* root_vertex) {
     CHECK_NOT_NULLPTR(root_vertex, LOG_TAG_BUFFER);
     DIVFTreeVertexAttributes root_attr = root_vertex->GetAttributes();
     UnpinVertexVersion(root_attr.centroid_id, root_attr.version);
-    root_vertex->Unpin();
 }
 
 DIVFTreeVertexInterface* BufferManager::ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated) {
@@ -789,8 +868,14 @@ DIVFTreeVertexInterface* BufferManager::ReadAndPinVertex(VectorID vertexId, Vers
         return nullptr;
     }
 
-    it->second.clusterPtr.pin.fetch_add(1);
+    uint64_t pin = it->second.clusterPtr.pin.fetch_add(1);
+    UNUSED_VARIABLE(pin);
     DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster pinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCnt=%lu", vertex, VECTORID_LOG(entry->centroidMeta.selfId),
+                entry->currentVersion, pin + 1);
+#endif
     entry->headerLock.Unlock();
     CHECK_NOT_NULLPTR(vertex, LOG_TAG_BUFFER);
     // if (vertex == nullptr) {
@@ -918,7 +1003,8 @@ void BufferManager::ReleaseBufferEntry(BufferVertexEntry* entry, ReleaseBufferEn
         if ((bool)(flags.stablize)) {
             entry->state.store(CLUSTER_STABLE);
         } else {
-            FatalAssert(entry->state.load() == CLUSTER_DELETED, LOG_TAG_BUFFER, "BufferEntry state is not deleted! "
+            FatalAssert(entry->state.load() == CLUSTER_DELETED,
+                        LOG_TAG_BUFFER, "BufferEntry state is not deleted! "
                         "VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(entry->centroidMeta.selfId));
         }
         entry->condVar.NotifyAll();

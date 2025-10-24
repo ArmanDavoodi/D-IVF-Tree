@@ -25,6 +25,7 @@
 #define DISTANCE_ALG (divftree::DistanceType::L2)
 
 // #define EXCESS_LOGING
+#define MEMORY_DEBUG
 #define DATASET_NAME "SMALLNORMAL"
 #define DATA_PATH "bench/datasets/smallnormalsample/raw_data/smallnormalsample128.u8bin"
 #define QUERY_PATH "bench/datasets/smallnormalsample/raw_data/smallnormalQ32.u8bin"

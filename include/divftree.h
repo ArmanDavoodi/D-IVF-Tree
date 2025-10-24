@@ -126,6 +126,10 @@ public:
         CHECK_VECTORID_IS_CENTROID(attr.centroid_id, LOG_TAG_DIVFTREE_VERTEX);
         CHECK_NOT_NULLPTR(attr.index, LOG_TAG_DIVFTREE_VERTEX);
         FatalAssert(attr.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p constructed -> ID:" VECTORID_LOG_FMT ", Version:%u",
+                this, VECTORID_LOG(attributes.centroid_id), attributes.version);
+#endif
     }
 
     DIVFTreeVertex(const DIVFTreeAttributes& attributes, VectorID id, DIVFTreeInterface* index) :
@@ -143,11 +147,19 @@ public:
         CHECK_NOT_NULLPTR(attr.index, LOG_TAG_DIVFTREE_VERTEX);
         FatalAssert(attr.block_size > 0, LOG_TAG_DIVFTREE_VERTEX, "Block size cannot be 0!");
         FatalAssert(attr.version == 0, LOG_TAG_DIVFTREE_VERTEX, "The first version should be 0!");
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p constructed -> ID:" VECTORID_LOG_FMT ", Version:%u",
+                this, VECTORID_LOG(id), 0);
+#endif
     }
 
     ~DIVFTreeVertex() override {
         FatalAssert(unpinCount.load(std::memory_order_relaxed) == 0, LOG_TAG_DIVFTREE_VERTEX,
                     "the vertex is still pinned!");
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p destroyed -> ID:" VECTORID_LOG_FMT ", Version:%u",
+                this, VECTORID_LOG(attr.centroid_id), attr.version);
+#endif
         if (attr.centroid_id.IsLeaf()) {
             return;
         }
@@ -175,7 +187,12 @@ public:
     }
 
     inline void Unpin() override {
-        if (unpinCount.fetch_add(1) == UINT64_MAX) {
+        uint64_t curr_cnt = unpinCount.fetch_add(1) + 1;
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster unpinned -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, unpinCnt=%lu", this, VECTORID_LOG(attr.centroid_id), attr.version, curr_cnt);
+#endif
+        if (curr_cnt == 0) {
             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT
                     ", ver:%u, addr:%p", VECTORID_LOG(attr.centroid_id), attr.version, this);
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
@@ -197,6 +214,11 @@ public:
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Mark vertex " VECTORID_LOG_FMT
             " ver:%u, addr=%p, for recycle with pin count %lu", VECTORID_LOG(attr.centroid_id),
             attr.version, this, pinCount);
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster marked for recycke -> ID:" VECTORID_LOG_FMT
+                ", Version:%u, pinCount=%lu, unpinCnt=%lu", this, VECTORID_LOG(attr.centroid_id), attr.version,
+                pinCount, newPin);
+#endif
         if (newPin == 0) {
             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT ", ver:%u, addr:%p",
                  VECTORID_LOG(attr.centroid_id), attr.version, this);
@@ -217,7 +239,7 @@ public:
         FatalAssert(batch.id != nullptr, LOG_TAG_DIVFTREE_VERTEX,
                     "Batch id must not be null.");
         uint16_t offset = cluster.header.reserved_size.fetch_add(batch.size);
-        if (offset + batch.size > attr.cap) {
+        if (offset + batch.size >= attr.cap) {
             cluster.header.reserved_size.fetch_sub(batch.size);
             return RetStatus{.stat = RetStatus::VERTEX_NOT_ENOUGH_SPACE, .message=nullptr};
         }
@@ -268,6 +290,7 @@ public:
                             &((CentroidMetaData*)(cluster.MetaData(0, false, attr.block_size, attr.cap, dim)))[i + offset],
                             LOG_TAG_DIVFTREE_VERTEX, "address mismatch!");
                 vmd[i].id = batch.id[i];
+                /* todo: should we pin version for the marked vertex?! yeah because its version is differnet */
                 bufferMgr->PinVertexVersion(batch.id[i], batch.version[i]);
                 vmd[i].version = batch.version[i];
                 FatalAssert(vmd[i].state.load(std::memory_order_relaxed) == VECTOR_STATE_INVALID,
@@ -704,13 +727,13 @@ public:
         do {
             while (true) {
                 DIVFTreeVertex* root =
-                    static_cast<DIVFTreeVertex*>(bufferMgr->ReadAndPinRoot());
+                    static_cast<DIVFTreeVertex*>(bufferMgr->GetIndexSnapshot());
                 CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
                 if (root->attr.centroid_id.IsLeaf()) {
                     target_leaf = root->attr.centroid_id;
                     target_version = root->attr.version;
-                    bufferMgr->UnpinRoot(root);
+                    bufferMgr->FreeSnapshot(root);
                     break;
                 }
 
@@ -727,7 +750,7 @@ public:
                 rs = ANNSearch(vec, 1, search_span, 1,
                                (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::LEAF_LEVEL,
                                layers, root);
-                bufferMgr->UnpinRoot(root);
+                bufferMgr->FreeSnapshot(root);
 
                 if (rs.IsOK()) {
                     FatalAssert(layers[VectorID::LEAF_LEVEL]->Size() == 1, LOG_TAG_DIVFTREE,
@@ -839,7 +862,7 @@ public:
 
         while (real_size.load(std::memory_order_acquire) > 0) {
             DIVFTreeVertex* root =
-                static_cast<DIVFTreeVertex*>(bufferMgr->ReadAndPinRoot());
+                static_cast<DIVFTreeVertex*>(bufferMgr->GetIndexSnapshot());
             CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
             layers.reserve(root->attr.centroid_id._level + 1);
@@ -851,7 +874,7 @@ public:
                                                                         root->attr.version));
             rs = ANNSearch(query, k, internal_node_search_span, leaf_node_search_span,
                            (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, layers, root);
-            bufferMgr->UnpinRoot(root);
+            bufferMgr->FreeSnapshot(root);
 
 #ifdef EXCESS_LOGING
         if (rs.IsOK()) {
@@ -1618,10 +1641,7 @@ protected:
         // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "UpdateVectorLocation prune invalidation");
         bufferMgr->UpdateVectorLocation(newRootId, INVALID_VECTOR_LOCATION);
         bufferMgr->UpdateRoot(newRootId, newRootVersion, container_entry);
-        container_entry->UnpinVersion(container_entry->currentVersion);
-        FatalAssert(container_entry->state.load(std::memory_order_acquire) == CLUSTER_DELETE_IN_PROGRESS,
-                    LOG_TAG_DIVFTREE, "cluster state should be delete in progress!");
-        container_entry->state.store(CLUSTER_DELETED, std::memory_order_release);
+        container_entry->InitiateDelete();
         bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, false));
     }
 
@@ -1664,11 +1684,7 @@ protected:
         RetStatus rs = DeleteVectorAndReleaseContainer(container_entry->centroidMeta.selfId, parent, loc);
         UNUSED_VARIABLE(rs);
         FatalAssert(rs.IsOK(), LOG_TAG_DIVFTREE, "this deletion should not fail!");
-        /* Why are we unpining the version here?! it is already unpinned by delete */
-        // container_entry->UnpinVersion(container_entry->currentVersion);
-        FatalAssert(container_entry->state.load(std::memory_order_acquire) == CLUSTER_DELETE_IN_PROGRESS,
-                    LOG_TAG_DIVFTREE, "cluster state should be delete in progress!");
-        container_entry->state.store(CLUSTER_DELETED, std::memory_order_release);
+        container_entry->InitiateDelete();
         bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(true, false));
     }
 
@@ -2807,7 +2823,7 @@ protected:
         SearchTask oldTask;
         oldTask.target = INVALID_VECTOR_ID;
 
-        while (!end_signal.load(std::memory_order_acquire) && !search_tasks.Empty()) {
+        while (!end_signal.load(std::memory_order_acquire) || !search_tasks.Empty()) {
             SearchTask nextTask;
             if (search_tasks.PopHead(nextTask)) {
                 bool exp = false;

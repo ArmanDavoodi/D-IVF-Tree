@@ -7,9 +7,9 @@
 # Configurable build options
 # ================================
 
-ENABLE_GDB       ?= 1# Enables GDB-friendly flags (-rdynamic, -fno-omit-frame-pointer)
+ENABLE_GDB       ?= 1# Enables -g3
 ENABLE_ASAN      ?= 1# Enables AddressSanitizer
-ENABLE_DEBUGINFO ?= 1# Enables -g3 and debug-friendly flags
+ENABLE_DEBUGINFO ?= 1# Enables -rdynamic, -fno-omit-frame-pointer and debug-friendly flags
 ENABLE_OPT       ?= 0# Enables optimization (-O3 vs -O0)
 
 # ================================

@@ -181,6 +181,7 @@ struct BufferVectorEntry {
      * The atomicity is only meant to synchronize reads with writes and not writes with writes!!
      */
     BufferVectorEntry(VectorID id);
+    ~BufferVectorEntry();
 
     /*
      * If self is a centroid, it is recomended to use the BufferVertex function!
@@ -205,6 +206,7 @@ struct BufferVertexEntry {
     std::unordered_map<Version, VersionedClusterPtr> liveVersions;
 
     BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin = 1);
+    ~BufferVertexEntry();
 
     inline BufferVertexEntry* ReadParentEntry(VectorLocation& currentLocation);
     DIVFTreeVertexInterface* ReadLatestVersion(bool pinCluster = true, bool needsHeaderLock = false);
@@ -217,6 +219,7 @@ struct BufferVertexEntry {
     void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster);
     /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
     void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion);
+    void InitiateDelete();
 
     void UnpinVersion(Version version, bool headerLocked=false);
     void PinVersion(Version version, bool headerLocked=false);
@@ -278,9 +281,9 @@ public:
     inline void UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation, bool pinNewUnpinOld = true);
     // inline void UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset);
 
-    /* have to unpin root using UnpinRoot function */
-    DIVFTreeVertexInterface* ReadAndPinRoot();
-    inline void UnpinRoot(DIVFTreeVertexInterface* root_vertex);
+    /* have to unpin root using FreeSnapshot function */
+    DIVFTreeVertexInterface* GetIndexSnapshot();
+    inline void FreeSnapshot(DIVFTreeVertexInterface* root_vertex);
     DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated = nullptr);
 
     /*

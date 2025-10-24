@@ -339,6 +339,10 @@ public:
         }
     }
 
+    inline LockMode CurrentMode() const {
+        return _mode.load(std::memory_order_acquire);
+    }
+
     /* better naming */
     bool LockWithBlockCheck(LockMode mode) {
         bool blocked = !(TryLock(mode));
