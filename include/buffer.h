@@ -168,7 +168,7 @@ union alignas(16) AtomicVectorLocation {
     }
 };
 
-struct BufferVectorEntry {
+struct alignas(16) BufferVectorEntry {
     const VectorID selfId;
     AtomicVectorLocation location;
 
@@ -183,6 +183,9 @@ struct BufferVectorEntry {
     BufferVectorEntry(VectorID id);
     ~BufferVectorEntry();
 
+    static void* operator new(std::size_t size);
+    static void operator delete(void* ptr) noexcept;
+
     /*
      * If self is a centroid, it is recomended to use the BufferVertex function!
      *  Also, if this is a centroid, it should be locked in X mode.
@@ -191,7 +194,7 @@ struct BufferVectorEntry {
     DIVFTreeVertexInterface* ReadAndPinParent(VectorLocation& currentLocation);
 };
 
-struct BufferVertexEntry {
+struct alignas(16) BufferVertexEntry {
     BufferVectorEntry centroidMeta;
     std::atomic<BufferVertexEntryState> state;
     SXSpinLock headerLock;
@@ -207,6 +210,9 @@ struct BufferVertexEntry {
 
     BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin = 1);
     ~BufferVertexEntry();
+
+    static void* operator new(std::size_t size);
+    static void operator delete(void* ptr) noexcept;
 
     inline BufferVertexEntry* ReadParentEntry(VectorLocation& currentLocation);
     DIVFTreeVertexInterface* ReadLatestVersion(bool pinCluster = true, bool needsHeaderLock = false);
@@ -284,7 +290,8 @@ public:
     /* have to unpin root using FreeSnapshot function */
     DIVFTreeVertexInterface* GetIndexSnapshot();
     inline void FreeSnapshot(DIVFTreeVertexInterface* root_vertex);
-    DIVFTreeVertexInterface* ReadAndPinVertex(VectorID vertexId, Version version, bool* outdated = nullptr);
+    RetStatus ReadAndPinVertex(VectorID vertexId, Version version, DIVFTreeVertexInterface*& vertex,
+                               bool* outdated = nullptr);
 
     /*
      * If we need to lock multiple clusters, then lower level clusters always take priority and

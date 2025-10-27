@@ -500,6 +500,11 @@ public:
                 } else {
                     CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(meta);
                     if (seen.find(std::make_pair(vmd[i].id, vmd[i].version)) != seen.end()) {
+                        VectorState state = vmd[i].state.load(std::memory_order_acquire);
+                        if (((state == VECTOR_STATE_VALID) || (state == VECTOR_STATE_MIGRATED)) &&
+                            (in_list.find(vmd[i].id) == in_list.end())) {
+                            in_list.insert({vmd[i].id, {i, Distance(query, &data[i * dim], dim, dtype)}});
+                        }
                         continue;
                     }
 
@@ -688,8 +693,9 @@ public:
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End");
 
         FatalAssert(threadSelf != nullptr, LOG_TAG_DIVFTREE, "threadself not inited!");
+        Thread* _self = threadSelf;
         threadSelf->DestroyDIVFThread();
-        delete threadSelf;
+        delete _self;
     }
 
     /* todo: for now since it is single node, the create_completion_notification here does not do anything and returning
@@ -1189,7 +1195,7 @@ protected:
             return;
         }
 
-        DIVFTreeVertex* cluster = static_cast<DIVFTreeVertex*>(entry->ReadLatestVersion());
+        DIVFTreeVertex* cluster = static_cast<DIVFTreeVertex*>(entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(cluster, LOG_TAG_DIVFTREE);
 
         if (cluster->cluster.header.num_deleted.load(std::memory_order_relaxed) == 0) {
@@ -2138,6 +2144,10 @@ protected:
                                                ReleaseBufferEntryFlags(false, false));
             return;
         }
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE, "MigrationCheck: cluster pinned: %p:" VECTORID_LOG_FMT, parents[1],
+                VECTORID_LOG(parents[1]->attr.centroid_id));
+#endif
         FatalAssert(
             (static_cast<CentroidMetaData*>(parents[1]->
                 cluster.MetaData(loc.detail.entryOffset, false, parents[1]->attr.block_size,
@@ -2161,11 +2171,20 @@ protected:
 
         parents[0] = static_cast<DIVFTreeVertex*>(entries[0]->centroidMeta.ReadAndPinParent(loc));
         if (parents[0] == nullptr) {
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE, "MigrationCheck: cluster unpinned: %p:" VECTORID_LOG_FMT,
+                parents[1], VECTORID_LOG(parents[1]->attr.centroid_id));
+#endif
             parents[1]->Unpin();
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
             return;
         }
+
+#ifdef MEMORY_DEBUG
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE, "MigrationCheck: cluster pinned: %p:" VECTORID_LOG_FMT, parents[0],
+                VECTORID_LOG(parents[0]->attr.centroid_id));
+#endif
 
         FatalAssert(
             static_cast<CentroidMetaData*>(parents[0]->
@@ -2192,7 +2211,7 @@ protected:
         std::vector<MigrationInfo> migration_batch[max_entries];
         for (uint8_t cn = 0; cn < max_entries; ++cn) {
             centroidData[cn] = parents[cn]->cluster.Data(loc.detail.entryOffset, false, parents[cn]->attr.block_size,
-                                                       parents[cn]->attr.cap, attr.dimension);
+                                                         parents[cn]->attr.cap, attr.dimension);
             visible_size[cn] = clusters[cn]->cluster.header.visible_size.load(std::memory_order_acquire);
             FatalAssert(visible_size[cn] > 0, LOG_TAG_DIVFTREE, "size should be greater than 0!");
             migration_batch[cn].reserve(visible_size[cn]);
@@ -2248,6 +2267,13 @@ protected:
                 std::sort(migration_batch[cn].begin(), migration_batch[cn].end());
             }
             seen.clear();
+#ifdef MEMORY_DEBUG
+            DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE, "MigrationCheck: cluster unpinned: %p:" VECTORID_LOG_FMT,
+                    parents[cn], VECTORID_LOG(parents[cn]->attr.centroid_id));
+#endif
+        }
+
+        for (uint8_t cn = 0; cn < max_entries; ++cn) {
             parents[cn]->Unpin();
         }
 
@@ -2459,9 +2485,9 @@ protected:
             return;
         }
 
-        DIVFTreeVertex* target_cluster = static_cast<DIVFTreeVertex*>(target_entry->ReadLatestVersion());
+        DIVFTreeVertex* target_cluster = static_cast<DIVFTreeVertex*>(target_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(target_cluster, LOG_TAG_DIVFTREE);
-        DIVFTreeVertex* parent_cluster = static_cast<DIVFTreeVertex*>(parent_entry->ReadLatestVersion());
+        DIVFTreeVertex* parent_cluster = static_cast<DIVFTreeVertex*>(parent_entry->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(parent_cluster, LOG_TAG_DIVFTREE);
 
         uint16_t target_num_deleted = target_cluster->cluster.header.num_deleted.load(std::memory_order_acquire);
@@ -2568,19 +2594,24 @@ protected:
         BufferManager* bufferMgr = BufferManager::GetInstance();
         FatalAssert(bufferMgr != nullptr, LOG_TAG_DIVFTREE, "BufferManager is not initialized.");
         bool outdated;
-        DIVFTreeVertex* vertex = nullptr;
-        while (vertex == nullptr) {
-            vertex = static_cast<DIVFTreeVertex*>(bufferMgr-> ReadAndPinVertex(id, version, &outdated));
+        DIVFTreeVertexInterface* vertex_tmp = nullptr;
+        while (vertex_tmp == nullptr) {
+            RetStatus rs = bufferMgr->ReadAndPinVertex(id, version, vertex_tmp, &outdated);
             /*
              * todo use stats to make sure this does not happen often! this can only happen when there was a split and
              * the new version is inserted into the parent but the clusterPtr is not yet updated.
              */
-            if (vertex == nullptr) {
-                DIVFTREE_YIELD();
+            if (vertex_tmp == nullptr) {
+                if (rs.stat == RetStatus::VERSION_NOT_APPLIED) {
+                    DIVFTREE_YIELD();
+                    continue;
+                }
+                return;
             }
         }
 
-        CHECK_NOT_NULLPTR(vertex, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(vertex_tmp, LOG_TAG_DIVFTREE);
+        DIVFTreeVertex* vertex = static_cast<DIVFTreeVertex*>(vertex_tmp);
         if (!outdated) {
             uint16_t deleted = vertex->cluster.header.num_deleted.load(std::memory_order_acquire);
             uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);

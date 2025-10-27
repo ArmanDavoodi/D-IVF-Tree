@@ -58,6 +58,10 @@ struct RetStatus {
         NO_HANDLE_FOUND_FOR_TARGET,
         ALREADY_HAS_A_HANDLE,
 
+        VERTEX_DELETED,
+        VERSION_NOT_APPLIED,
+        OUTDATED_VERSION_DELETED,
+
         FAIL
     } stat;
 
