@@ -74,7 +74,7 @@ size_t ReadNextBatch(FILE* input_file_ptr, divftree::VTYPE* buffer) {
 
     uint32_t offset = next_offset.fetch_add(BATCH_SIZE * DIMENSION * sizeof(divftree::VTYPE));
 
-    if (offset >= total_num_vectors) {
+    if (offset >= total_num_vectors * DIMENSION * sizeof(divftree::VTYPE)) {
         return 0;
     }
 
@@ -84,7 +84,7 @@ size_t ReadNextBatch(FILE* input_file_ptr, divftree::VTYPE* buffer) {
     }
 
     ret_code = fread(buffer, sizeof(divftree::VTYPE) * DIMENSION, BATCH_SIZE, input_file_ptr);
-    if (ret_code < BATCH_SIZE && offset < total_num_vectors) {
+    if (ret_code < BATCH_SIZE && offset < (total_num_vectors * DIMENSION * sizeof(divftree::VTYPE))) {
         if (feof(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected end of file!");
         else if (ferror(input_file_ptr))

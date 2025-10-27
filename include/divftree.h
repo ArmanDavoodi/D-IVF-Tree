@@ -993,7 +993,7 @@ protected:
     std::vector<Thread*> bg_compactors;
     BlockingQueue<CompactionTask> compaction_tasks;
     std::vector<Thread*> searchers;
-    BlockingQueue<SearchTask> search_tasks;
+    BlockingQueue<SearchTask*> search_tasks;
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -2669,13 +2669,16 @@ protected:
         }
 
         std::vector<SearchTask> tasks;
+        std::vector<SearchTask*> task_ptrs;
         uint64_t taskId = threadSelf->GetNextTaskID();
         std::atomic<bool>* sync_bools = new std::atomic<bool>[layers[level]->Size() * 2];
         tasks.reserve(layers[level]->Size());
+        task_ptrs.reserve(layers[level]->Size());
         for (size_t i = 0; i < layers[level]->Size(); ++i) {
             FatalAssert((*layers[level])[i].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
             tasks.emplace_back(taskId, (*layers[level])[i].id, (*layers[level])[i].version, query, span,
                                &sync_bools[i], &sync_bools[i + layers[level]->Size()]);
+            task_ptrs.emplace_back(&tasks.back());
         }
 #ifdef EXCESS_LOGING
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
@@ -2683,7 +2686,7 @@ protected:
             VectorToString(query, attr.dimension).ToCStr(), level-1, taskId);
 #endif
 
-        bool rs = search_tasks.BatchPush(&tasks[0], tasks.size());
+        bool rs = search_tasks.BatchPush(&task_ptrs[0], task_ptrs.size());
         UNUSED_VARIABLE(rs);
         FatalAssert(rs, LOG_TAG_DIVFTREE, "should not fail!");
 
@@ -2855,38 +2858,38 @@ protected:
         oldTask.target = INVALID_VECTOR_ID;
 
         while (!end_signal.load(std::memory_order_acquire) || !search_tasks.Empty()) {
-            SearchTask nextTask;
+            SearchTask* nextTask = nullptr;
             if (search_tasks.PopHead(nextTask)) {
                 bool exp = false;
-                if (!(nextTask.taken->compare_exchange_strong(exp, true))) {
+                if (!(nextTask->taken->compare_exchange_strong(exp, true))) {
                     continue;
                 }
-                CHECK_VECTORID_IS_VALID(nextTask.target, LOG_TAG_DIVFTREE);
+                CHECK_VECTORID_IS_VALID(nextTask->target, LOG_TAG_DIVFTREE);
 
-                if ((nextTask.master != oldTask.master) || (nextTask.taskId != oldTask.taskId) ||
+                if ((nextTask->master != oldTask.master) || (nextTask->taskId != oldTask.taskId) ||
                     (oldTask.target == INVALID_VECTOR_ID)) {
                     /* todo: we can add another bool pointer to this and when we change the neighbours, we set that
                        to true so that the user knows it can proceed with that list */
-                    nextTask.neighbours =
-                        new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator, nextTask.k);
+                    nextTask->neighbours =
+                        new SortedList<ANNVectorInfo, SimilarityComparator>(attr.similarityComparator, nextTask->k);
                     seen.clear();
                 } else {
                     CHECK_NOT_NULLPTR(oldTask.neighbours, LOG_TAG_DIVFTREE);
-                    nextTask.neighbours = oldTask.neighbours;
+                    nextTask->neighbours = oldTask.neighbours;
                 }
 #ifdef EXCESS_LOGING
             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-                    "BGSearch BEGIN: taskId=%lu", nextTask.taskId);
+                    "BGSearch BEGIN: taskId=%lu", nextTask->taskId);
 #endif
-                oldTask.CopyFrom(nextTask);
+                oldTask.CopyFrom(*nextTask);
 
-                SearchVertex(nextTask.target, nextTask.version, nextTask.query, nextTask.k,
-                             nextTask.neighbours, seen);
+                SearchVertex(nextTask->target, nextTask->version, nextTask->query, nextTask->k,
+                             nextTask->neighbours, seen);
 #ifdef EXCESS_LOGING
             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
-                    "BGSearch END: taskId=%lu", nextTask.taskId);
+                    "BGSearch END: taskId=%lu", nextTask->taskId);
 #endif
-                nextTask.done->store(true, std::memory_order_release);
+                nextTask->done->store(true, std::memory_order_release);
             }
         }
         self->DestroyDIVFThread();

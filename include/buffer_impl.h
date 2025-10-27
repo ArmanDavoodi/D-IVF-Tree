@@ -458,7 +458,6 @@ BufferManager::~BufferManager() {
     // std::align_val_t al = (std::align_val_t)16;
     for (BufferVectorEntry* entry : vectorDirectory) {
         if (entry != nullptr) {
-            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_BUFFER, "deleting %p", entry);
             delete entry;
             // operator delete(entry, al);
             entry = nullptr;
@@ -469,7 +468,6 @@ BufferManager::~BufferManager() {
     for (size_t level = MAX_TREE_HIGHT - 1; level != (size_t)(-1); --level) {
         for (BufferVertexEntry* entry : clusterDirectory[level]) {
             if (entry != nullptr) {
-                DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_BUFFER, "deleting %p", entry);
                 delete entry;
                 // operator delete(entry, al);
                 entry = nullptr;

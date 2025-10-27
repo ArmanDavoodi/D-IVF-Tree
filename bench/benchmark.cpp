@@ -171,7 +171,7 @@ void worker(divftree::Thread* self) {
         uint32_t old_size = build_num_inserted.fetch_add(insert_batch_size);
         insert_batch_size = std::min(insert_batch_size,
                                      build_size - old_size);
-        if (old_size > build_size || insert_batch_size == 0) {
+        if (old_size >= build_size || insert_batch_size == 0) {
             break;
         }
 
