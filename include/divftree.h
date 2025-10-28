@@ -75,14 +75,15 @@ struct SearchTask {
 
     std::atomic<size_t>* viewed;
     std::atomic<bool>* shared_data;
+    SearchTask** task_set;
 
     SearchTask() = default;
     SearchTask(uint64_t task_id, uint64_t nt, VectorID id, Version ver, const VTYPE* q,
                size_t span, std::atomic<bool>* tk, std::atomic<bool>* dn, std::atomic<size_t>* vd,
-               std::atomic<bool>* sd) :
+               std::atomic<bool>* sd, SearchTask** ts) :
         master(threadSelf->ID()), taskId(task_id), num_tasks(nt),
         target(id), version(ver), query(q), k(span),
-        taken(tk), done(dn), done_waiting(false), neighbours(nullptr), viewed(vd), shared_data(sd) {
+        taken(tk), done(dn), done_waiting(false), neighbours(nullptr), viewed(vd), shared_data(sd), task_set(ts) {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE);
         CHECK_NOT_NULLPTR(q, LOG_TAG_DIVFTREE);
         CHECK_NOT_NULLPTR(tk, LOG_TAG_DIVFTREE);
@@ -2687,17 +2688,16 @@ protected:
             return;
         }
 
-        std::vector<SearchTask*> task_ptrs;
         uint64_t taskId = threadSelf->GetNextTaskID();
+        SearchTask** task_ptrs = new SearchTask*[layers[level]->Size()];
         std::atomic<bool>* sync_bools = new std::atomic<bool>[layers[level]->Size() * 2];
         std::atomic<size_t>* viewed = new std::atomic<size_t>(0);
-        task_ptrs.reserve(layers[level]->Size());
         for (size_t i = 0; i < layers[level]->Size(); ++i) {
             FatalAssert((*layers[level])[i].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-            task_ptrs.emplace_back(
+            task_ptrs[i] =
                 new SearchTask(taskId, layers[level]->Size(), (*layers[level])[i].id, (*layers[level])[i].version,
-                               query, span, &sync_bools[i], &sync_bools[i + layers[level]->Size()], viewed, sync_bools)
-            );
+                               query, span, &sync_bools[i], &sync_bools[i + layers[level]->Size()], viewed, sync_bools,
+                               task_ptrs);
         }
 #ifdef EXCESS_LOGING
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
@@ -2705,11 +2705,11 @@ protected:
             VectorToString(query, attr.dimension).ToCStr(), level-1, taskId);
 #endif
 
-        bool rs = search_tasks.BatchPush(&task_ptrs[0], task_ptrs.size());
+        bool rs = search_tasks.BatchPush(task_ptrs, layers[level]->Size());
         UNUSED_VARIABLE(rs);
         FatalAssert(rs, LOG_TAG_DIVFTREE, "should not fail!");
 
-        for (size_t i = task_ptrs.size() - 1; i != UINT64_MAX; --i) {
+        for (size_t i = layers[level]->Size() - 1; i != UINT64_MAX; --i) {
             bool exp = false;
             if (!task_ptrs[i]->taken->compare_exchange_strong(exp, true)) {
                 continue;
@@ -2721,14 +2721,14 @@ protected:
 
         size_t num_done = 0;
         bool first_time = true;
-        while(num_done != task_ptrs.size()) {
+        while(num_done != layers[level]->Size()) {
             if (first_time) {
                 first_time = false;
             } else {
                 /* todo: is this too much and if so maybe we should use wait and notify instead or use YEILD */
                 usleep(1);
             }
-            for (size_t i = 0; i < task_ptrs.size(); ++i) {
+            for (size_t i = 0; i < layers[level]->Size(); ++i) {
                 if (task_ptrs[i]->done_waiting) {
                     continue;
                 }
@@ -2741,7 +2741,7 @@ protected:
 
         /* todo: check if I need a better algorithm for this */
         std::unordered_set<uintptr_t> lists;
-        for (size_t i = 0; i < task_ptrs.size(); ++i) {
+        for (size_t i = 0; i < layers[level]->Size(); ++i) {
             if (task_ptrs[i]->neighbours == nullptr) {
                 continue;
             }
@@ -2761,6 +2761,10 @@ protected:
         if (num_viewed == (layers[level]->Size() + 1)) {
             delete viewed;
             delete[] sync_bools;
+            for (size_t i = 0; i < layers[level]->Size(); ++i) {
+                delete task_ptrs[i];
+            }
+            delete[] task_ptrs;
         }
 
 #ifdef EXCESS_LOGING
@@ -2891,6 +2895,12 @@ protected:
                     if (num_viewed == (nextTask->num_tasks + 1)) {
                         delete nextTask->viewed;
                         delete[] nextTask->shared_data;
+                        size_t num_tasks = nextTask->num_tasks;
+                        SearchTask** task_set = nextTask->task_set;
+                        for (size_t i = 0; i < num_tasks; ++i) {
+                            delete task_set[i];
+                        }
+                        delete[] task_set;
                     }
                     continue;
                 }
@@ -2925,6 +2935,12 @@ protected:
                 if (num_viewed == (nextTask->num_tasks + 1)) {
                     delete nextTask->viewed;
                     delete[] nextTask->shared_data;
+                    size_t num_tasks = nextTask->num_tasks;
+                    SearchTask** task_set = nextTask->task_set;
+                    for (size_t i = 0; i < num_tasks; ++i) {
+                        delete task_set[i];
+                    }
+                    delete[] task_set;
                 }
             }
         }

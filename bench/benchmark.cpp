@@ -283,6 +283,11 @@ void worker(divftree::Thread* self) {
         printf("\n"); \
     } while(0)
 
+#define ExclusiveBenchNewLine() \
+    do { \
+        printf("\n"); \
+    } while(0)
+
 int main() {
     ReadConfigs();
     ParseConfigs();
@@ -320,7 +325,7 @@ int main() {
     }
 
     BenchLog("Start Build...");
-    auto now = std::chrono::system_clock::now();
+    auto start_time = std::chrono::high_resolution_clock::now();
     build_start.store(true, std::memory_order_release);
     build_start.notify_all();
 
@@ -330,7 +335,8 @@ int main() {
         num_ready = warmup_ready.load(std::memory_order_acquire);
     }
 
-    auto duration = now.time_since_epoch();
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     size_t build_time = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 
     BenchLog("Start Warmup...");
@@ -346,7 +352,7 @@ int main() {
     }
 
     BenchLog("Start Run...");
-    now = std::chrono::system_clock::now();
+    start_time = std::chrono::high_resolution_clock::now();
     run_start.store(true, std::memory_order_release);
     run_start.notify_all();
 
@@ -396,7 +402,8 @@ int main() {
         num_ready = run_done.load(std::memory_order_acquire);
     }
 
-    duration = now.time_since_epoch();
+    end_time = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     size_t total_run_time = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 
     BenchLog("Stopping all threads...");
@@ -417,30 +424,47 @@ int main() {
     if (dataset_finished.load(std::memory_order_acquire)) {
         ExclusiveBenchLog("Input dataset was finished during run!");
     }
-    ExclusiveBenchLog("___________________________________________");
-    ExclusiveBenchLog("Run Stats:");
 
-    BenchLog("Build Time: %lu(us)", build_time);
-    BenchLog("Final Run Time: %lu(us)", total_run_time);
+    ExclusiveBenchLog("\n___________________________________________\n");
+    ExclusiveBenchLog("Run Stats:\n");
 
+    BenchLog("Build Time: %lu(ms)", build_time);
+    BenchLog("Final Run Time: %lu(ms)", total_run_time);
+
+    ExclusiveBenchLog("------------------------");
+
+    build_time /= 1000;
+    total_run_time /= 1000;
+
+    BenchLog("Total queries: %lu", total_search + total_insert + total_delete);
     BenchLog("Total search queries: %lu", total_search);
     BenchLog("Total insert queries: %lu", total_insert);
     BenchLog("Total delete queries: %lu", total_delete);
 
-    BenchLog("Search QPS: %.2f", ((double)total_search) / (double)total_run_time);
-    BenchLog("Insert QPS: %.2f", ((double)total_insert) / (double)total_run_time);
-    BenchLog("Delete QPS: %.2f", ((double)total_delete) / (double)total_run_time);
-    BenchLog("Total QPS: %.2f",
-            ((double)(total_search + total_insert + total_delete)) / (double)total_run_time);
+    ExclusiveBenchNewLine();
 
+    BenchLog("Total errors: %lu", total_search_err + total_insert_err + total_delete_err);
     BenchLog("Total search errors: %lu", total_search_err);
     BenchLog("Total insert errors: %lu", total_insert_err);
     BenchLog("Total delete errors: %lu", total_delete_err);
+
+    ExclusiveBenchLog("------------------------");
+
+    BenchLog("Total QPS: %.2f",
+            ((double)(total_search + total_insert + total_delete)) / (double)total_run_time);
+    BenchLog("Search QPS: %.2f", ((double)total_search) / (double)total_run_time);
+    BenchLog("Insert QPS: %.2f", ((double)total_insert) / (double)total_run_time);
+    BenchLog("Delete QPS: %.2f", ((double)total_delete) / (double)total_run_time);
+
+    ExclusiveBenchNewLine();
+
+    BenchLog("Total EPS: %.2f",
+            ((double)(total_search_err + total_insert_err + total_delete_err)) / (double)total_run_time);
     BenchLog("Search EPS: %.2f", ((double)total_search_err) / (double)total_run_time);
     BenchLog("Insert EPS: %.2f", ((double)total_insert_err) / (double)total_run_time);
     BenchLog("Delete EPS: %.2f", ((double)total_delete_err) / (double)total_run_time);
-    BenchLog("Total EPS: %.2f",
-            ((double)(total_search_err + total_insert_err + total_delete_err)) / (double)total_run_time);
+
+    ExclusiveBenchLog("\n___________________________________________\n");
 
     delete[] search_query_vectors;
     search_query_vectors = nullptr;
