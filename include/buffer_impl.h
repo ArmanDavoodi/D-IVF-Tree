@@ -299,6 +299,11 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Ve
     FatalAssert(liveVersions.find(currentVersion) == liveVersions.end(), LOG_TAG_BUFFER,
                 "new version already exists!");
     FatalAssert(newCluster != nullptr, LOG_TAG_BUFFER, "Invalid cluster ptr!");
+    FatalAssert(newCluster->GetAttributes().centroid_id == centroidMeta.selfId, LOG_TAG_BUFFER, "mismatch id!");
+    FatalAssert(newCluster->GetAttributes().version == newVersion, LOG_TAG_BUFFER, "mismatch version!");
+    FatalAssert(centroidMeta.selfId != BufferManager::GetInstance()->GetCurrentRootId(), LOG_TAG_BUFFER,
+                "Cannot call this version of update cluster on root!");
+
     liveVersions[currentVersion] = VersionedClusterPtr(1 + nextVersionPin, 0, newCluster);
     nextVersionPin = 0;
     UnpinVersion(currentVersion - 1, true);
@@ -484,7 +489,7 @@ inline BufferVertexEntry* BufferManager::Init(uint64_t vertexMetaDataSize,
     uint64_t internalVertexSize = vertexMetaDataSize + Cluster::TotalBytes(false, internal_blk_size, internal_cap, dim);
     uint64_t leafVertexSize = vertexMetaDataSize + Cluster::TotalBytes(true, leaf_blk_size, leaf_cap, dim);
     bufferMgrInstance = new BufferManager(internalVertexSize, leafVertexSize);
-    BufferVertexEntry* root = bufferMgrInstance->CreateNewRootEntry();
+    BufferVertexEntry* root = bufferMgrInstance->CreateNewRootEntry(INVALID_VECTOR_ID);
     return root;
 }
 
@@ -527,30 +532,47 @@ void BufferManager::UpdateRoot(VectorID newRootId, Version newRootVersion, Buffe
     CHECK_VECTORID_IS_CENTROID(newRootId, LOG_TAG_BUFFER);
     CHECK_NOT_NULLPTR(oldRootEntry, LOG_TAG_BUFFER);
     threadSelf->SanityCheckLockHeldInModeByMe(&oldRootEntry->clusterLock, SX_EXCLUSIVE);
+    PinVertexVersion(newRootId, newRootVersion);
     bufferMgrLock.Lock(SX_EXCLUSIVE);
-    PinVertexVersion(newRootId, newRootVersion, false);
     FatalAssert(currentRootId.load(std::memory_order_relaxed) == oldRootEntry->centroidMeta.selfId,
                 LOG_TAG_BUFFER, "entry is not the root!");
     currentRootId.store(newRootId._id, std::memory_order_release);
+    currentRootId.notify_all();
     bufferMgrLock.Unlock(); /* unlock buffermanger before unpin to avoid recycling while its lock is held */
     oldRootEntry->UnpinVersion(oldRootEntry->currentVersion);
 }
 
-BufferVertexEntry* BufferManager::CreateNewRootEntry() {
+BufferVertexEntry* BufferManager::CreateNewRootEntry(VectorID expRootId) {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
-    bufferMgrLock.Lock(SX_EXCLUSIVE);
-    VectorID currentId = VectorID::AsID(currentRootId.load(std::memory_order_relaxed));
+    VectorID currentId = VectorID::AsID(currentRootId.load(std::memory_order_acquire));
     VectorID newId = INVALID_VECTOR_ID;
     newId._creator_node_id = 0;
     BufferVertexEntry* oldRootEntry = nullptr;
     if (currentId == INVALID_VECTOR_ID) {
         /* this is called during init */
+        FatalAssert(expRootId == INVALID_VECTOR_ID, LOG_TAG_BUFFER, "expRootId should be invalid during init!");
         newId._level = VectorID::LEAF_LEVEL;
+
+        bufferMgrLock.Lock(SX_EXCLUSIVE);
     } else {
+        CHECK_VECTORID_IS_VALID(expRootId, LOG_TAG_BUFFER);
+        CHECK_VECTORID_IS_CENTROID(expRootId, LOG_TAG_BUFFER);
+        if (currentId != expRootId) {
+            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_BUFFER, "mismatch root id!");
+            currentId = VectorID::AsID(currentRootId.load(std::memory_order_acquire));
+            while (currentId != expRootId) {
+                currentRootId.wait(currentId._id);
+                currentId = VectorID::AsID(currentRootId.load(std::memory_order_acquire));
+            }
+        }
+
+        bufferMgrLock.Lock(SX_EXCLUSIVE);
+
         oldRootEntry = GetVertexEntry(currentId, false);
         CHECK_NOT_NULLPTR(oldRootEntry, LOG_TAG_BUFFER);
         threadSelf->SanityCheckLockHeldInModeByMe(&oldRootEntry->clusterLock, SX_EXCLUSIVE);
         FatalAssert(oldRootEntry->centroidMeta.selfId == currentId, LOG_TAG_BUFFER, "id mismatch!");
+        FatalAssert(currentId == currentRootId.load(std::memory_order_relaxed), LOG_TAG_BUFFER, "id mismatch!");
         newId._level = currentId._level + 1;
     }
     FatalAssert(MAX_TREE_HIGHT > newId._level && newId._level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
@@ -568,6 +590,7 @@ BufferVertexEntry* BufferManager::CreateNewRootEntry() {
     /* todo: should we pin the version here since we have already pinned it twice in the constructor! */
     // newRoot->PinVersion(newRoot->currentVersion, true);
     currentRootId.store(newId._id, std::memory_order_release);
+    currentRootId.notify_all();
     if (oldRootEntry != nullptr) {
         /* Unpin once due to not being root anymore */
         oldRootEntry->UnpinVersion(oldRootEntry->currentVersion);
@@ -688,9 +711,9 @@ inline BufferVectorEntry* BufferManager::GetVectorEntry(VectorID id) {
     return entry;
 }
 
-inline void BufferManager::PinVertexVersion(VectorID vertexId, Version version, bool needLock) {
+inline void BufferManager::PinVertexVersion(VectorID vertexId, Version version) {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
-    BufferVertexEntry* entry = GetVertexEntry(vertexId, needLock);
+    BufferVertexEntry* entry = GetVertexEntry(vertexId, true);
     FatalAssert(entry != nullptr, LOG_TAG_BUFFER, "VertexID not found in buffer. VertexID="
                 VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
 
@@ -814,7 +837,7 @@ inline void BufferManager::UpdateVectorLocation(VectorID vectorId, VectorLocatio
 //     }
 // }
 
-DIVFTreeVertexInterface* BufferManager::GetIndexSnapshot() {
+DIVFTreeVertexInterface* BufferManager::ReadAndPinRoot() {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
     while (true) {
         BufferVertexEntry* entry = GetRootEntry();
@@ -834,28 +857,18 @@ DIVFTreeVertexInterface* BufferManager::GetIndexSnapshot() {
             continue;
         }
 
-        uint64_t oldVersionPin = it->second.versionPin.fetch_add(1);
-        if (oldVersionPin == 0) {
-            it->second.versionPin.fetch_sub(1);
-            entry->headerLock.Unlock();
-            continue;
-        }
+        uint64_t oldPin = it->second.clusterPtr.pin.fetch_add(1);
+        UNUSED_VARIABLE(oldPin);
         DIVFTreeVertexInterface* vertex = it->second.clusterPtr.clusterPtr;
 #ifdef MEMORY_DEBUG
-        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster version pinned -> ID:" VECTORID_LOG_FMT
+        DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster pinned(root) -> ID:" VECTORID_LOG_FMT
                 ", Version:%u, pinCnt=%lu", vertex, VECTORID_LOG(entry->centroidMeta.selfId),
-                entry->currentVersion, oldVersionPin + 1);
+                entry->currentVersion, oldPin + 1);
 #endif
         entry->headerLock.Unlock();
         CHECK_NOT_NULLPTR(vertex, LOG_TAG_BUFFER);
         return vertex;
     }
-}
-
-inline void BufferManager::FreeSnapshot(DIVFTreeVertexInterface* root_vertex) {
-    CHECK_NOT_NULLPTR(root_vertex, LOG_TAG_BUFFER);
-    DIVFTreeVertexAttributes root_attr = root_vertex->GetAttributes();
-    UnpinVertexVersion(root_attr.centroid_id, root_attr.version);
 }
 
 RetStatus BufferManager::ReadAndPinVertex(VectorID vertexId, Version version,

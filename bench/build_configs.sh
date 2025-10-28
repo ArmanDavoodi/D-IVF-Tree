@@ -7,7 +7,7 @@ CONF_FILE="bench/run.conf"
 
 VAR_LOG_OUTPUT_PATH=$ROOT/bench/out/logs/
 
-VAR_CLUSTERING="SimpleDivide"
+VAR_CLUSTERING="RoundRobin"
 # VAR_LEAF_SIZE=(128 1024)
 # VAR_INTERNAL_SIZE=(128 1024)
 VAR_LEAF_SIZE=(2 8)

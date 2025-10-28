@@ -30,7 +30,7 @@ public:
         divftree::DIVFTreeAttributes attr;
         attr.core.dimension = dim;
         attr.core.distanceAlg = divftree::DistanceType::L2;
-        attr.core.clusteringAlg = divftree::ClusteringType::SimpleDivide;
+        attr.core.clusteringAlg = divftree::ClusteringType::RoundRobin;
         attr.internal_max_size = KI_MAX;
         attr.internal_min_size = KI_MIN;
         attr.leaf_max_size = KL_MAX;

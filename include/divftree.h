@@ -61,6 +61,7 @@ struct CompactionTask {
 struct SearchTask {
     DIVFThreadID master;
     uint64_t taskId;
+    uint64_t num_tasks;
     VectorID target;
     Version version;
     const VTYPE* query;
@@ -68,15 +69,20 @@ struct SearchTask {
 
     std::atomic<bool>* taken;
     std::atomic<bool>* done;
+
     bool done_waiting;
     SortedList<ANNVectorInfo, SimilarityComparator>* neighbours;
 
+    std::atomic<size_t>* viewed;
+    std::atomic<bool>* shared_data;
+
     SearchTask() = default;
-    SearchTask(uint64_t task_id, VectorID id, Version ver, const VTYPE* q, size_t span, std::atomic<bool>* tk,
-               std::atomic<bool>* dn) :
-        master(threadSelf->ID()), taskId(task_id),
+    SearchTask(uint64_t task_id, uint64_t nt, VectorID id, Version ver, const VTYPE* q,
+               size_t span, std::atomic<bool>* tk, std::atomic<bool>* dn, std::atomic<size_t>* vd,
+               std::atomic<bool>* sd) :
+        master(threadSelf->ID()), taskId(task_id), num_tasks(nt),
         target(id), version(ver), query(q), k(span),
-        taken(tk), done(dn), done_waiting(false), neighbours(nullptr) {
+        taken(tk), done(dn), done_waiting(false), neighbours(nullptr), viewed(vd), shared_data(sd) {
         CHECK_VECTORID_IS_VALID(id, LOG_TAG_DIVFTREE);
         CHECK_NOT_NULLPTR(q, LOG_TAG_DIVFTREE);
         CHECK_NOT_NULLPTR(tk, LOG_TAG_DIVFTREE);
@@ -348,8 +354,10 @@ public:
                     LOG_TAG_DIVFTREE_VERTEX, "excpected state is migrated is migrated if and only "
                     "if final state is valid. this can only happen when a migration fails and "
                     "we want to revert our state back to valid");
-        uint16_t size = cluster.header.visible_size.load(std::memory_order_acquire);
-        FatalAssert(targetOffset < size, LOG_TAG_DIVFTREE_VERTEX, "offset out of range!");
+        SANITY_CHECK(
+            uint16_t size = cluster.header.visible_size.load(std::memory_order_acquire);
+            FatalAssert(targetOffset < size, LOG_TAG_DIVFTREE_VERTEX, "offset out of range!");
+        );
 
         Address meta = cluster.MetaData(targetOffset, attr.centroid_id.IsLeaf(),
                                         attr.block_size, attr.cap, attr.index->GetAttributes().dimension);
@@ -733,13 +741,13 @@ public:
         do {
             while (true) {
                 DIVFTreeVertex* root =
-                    static_cast<DIVFTreeVertex*>(bufferMgr->GetIndexSnapshot());
+                    static_cast<DIVFTreeVertex*>(bufferMgr->ReadAndPinRoot());
                 CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
                 if (root->attr.centroid_id.IsLeaf()) {
                     target_leaf = root->attr.centroid_id;
                     target_version = root->attr.version;
-                    bufferMgr->FreeSnapshot(root);
+                    root->Unpin();
                     break;
                 }
 
@@ -756,7 +764,7 @@ public:
                 rs = ANNSearch(vec, 1, search_span, 1,
                                (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::LEAF_LEVEL,
                                layers, root);
-                bufferMgr->FreeSnapshot(root);
+                root->Unpin();
 
                 if (rs.IsOK()) {
                     FatalAssert(layers[VectorID::LEAF_LEVEL]->Size() == 1, LOG_TAG_DIVFTREE,
@@ -868,7 +876,7 @@ public:
 
         while (real_size.load(std::memory_order_acquire) > 0) {
             DIVFTreeVertex* root =
-                static_cast<DIVFTreeVertex*>(bufferMgr->GetIndexSnapshot());
+                static_cast<DIVFTreeVertex*>(bufferMgr->ReadAndPinRoot());
             CHECK_NOT_NULLPTR(root, LOG_TAG_DIVFTREE);
 
             layers.reserve(root->attr.centroid_id._level + 1);
@@ -880,7 +888,7 @@ public:
                                                                         root->attr.version));
             rs = ANNSearch(query, k, internal_node_search_span, leaf_node_search_span,
                            (uint8_t)(root->attr.centroid_id._level), (uint8_t)VectorID::VECTOR_LEVEL, layers, root);
-            bufferMgr->FreeSnapshot(root);
+            root->Unpin();
 
 #ifdef EXCESS_LOGING
         if (rs.IsOK()) {
@@ -1134,7 +1142,6 @@ protected:
                 container_entry->currentVersion, current, current->ToString(true).ToCStr(),
                 compacted, compacted->ToString(true).ToCStr());
 #endif
-
         container_entry->UpdateClusterPtr(compacted);
         current = nullptr; // this is to make sure that we no longer access the current!
 
@@ -1211,7 +1218,7 @@ protected:
         bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(true, true));
     }
 
-    inline void SimpleDivideClustering(const DIVFTreeVertex* base, const ConstVectorBatch& batch,
+    inline void RoundRobinClustering(const DIVFTreeVertex* base, const ConstVectorBatch& batch,
                                        BufferVertexEntry**& entries, DIVFTreeVertex**& clusters, VectorBatch& centroids,
                                        uint16_t marked_for_update = INVALID_OFFSET) {
         FatalAssert(base->attr.index == this, LOG_TAG_DIVFTREE, "index mismatch!");
@@ -1351,8 +1358,8 @@ protected:
                            uint16_t marked_for_update = INVALID_OFFSET) {
         switch (attr.clusteringAlg)
         {
-        case ClusteringType::SimpleDivide:
-            SimpleDivideClustering(base, batch, entries, clusters, centroids, marked_for_update);
+        case ClusteringType::RoundRobin:
+            RoundRobinClustering(base, batch, entries, clusters, centroids, marked_for_update);
             break;
         default:
             DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE,
@@ -1360,13 +1367,13 @@ protected:
         }
     }
 
-    inline BufferVertexEntry* ExpandTree() {
+    inline BufferVertexEntry* ExpandTree(VectorID expRootId) {
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
         /* todo: remove */
         VectorID oldRootId = bufferMgr->GetCurrentRootId();
         UNUSED_VARIABLE(oldRootId);
-        BufferVertexEntry* new_root = bufferMgr->CreateNewRootEntry();
+        BufferVertexEntry* new_root = bufferMgr->CreateNewRootEntry(expRootId);
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "Expanding old root id: " VECTORID_LOG_FMT ", new root id: "
                 VECTORID_LOG_FMT, VECTORID_LOG(oldRootId), VECTORID_LOG(new_root->centroidMeta.selfId));
@@ -1444,7 +1451,7 @@ protected:
                 /* changing the root and location are not done atomically together hence this assert may fail */
                 // FatalAssert(container_entry->centroidMeta.selfId == bufferMgr->GetCurrentRootId(), LOG_TAG_DIVFTREE,
                 //             "null parent but we are not root!");
-                parent = ExpandTree();
+                parent = ExpandTree(container_entry->centroidMeta.selfId);
             } else {
                 FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
                         "null parent with valid location!");
@@ -2134,8 +2141,22 @@ protected:
 
         clusters[1] = static_cast<DIVFTreeVertex*>(entries[1]->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(clusters[1], LOG_TAG_DIVFTREE);
+        visible_size[1] = clusters[1]->cluster.header.visible_size.load(std::memory_order_acquire);
+        if (visible_size[1] == 0) {
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags(false, false));
+            return;
+        }
+
         clusters[0] = static_cast<DIVFTreeVertex*>(entries[0]->ReadLatestVersion(false));
         CHECK_NOT_NULLPTR(clusters[0], LOG_TAG_DIVFTREE);
+        visible_size[0] = clusters[0]->cluster.header.visible_size.load(std::memory_order_acquire);
+        if (visible_size[0] == 0) {
+            bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
+                                               ReleaseBufferEntryFlags(false, false));
+            return;
+        }
+
 
         VectorLocation loc;
         parents[1] = static_cast<DIVFTreeVertex*>(entries[1]->centroidMeta.ReadAndPinParent(loc));
@@ -2212,7 +2233,6 @@ protected:
         for (uint8_t cn = 0; cn < max_entries; ++cn) {
             centroidData[cn] = parents[cn]->cluster.Data(loc.detail.entryOffset, false, parents[cn]->attr.block_size,
                                                          parents[cn]->attr.cap, attr.dimension);
-            visible_size[cn] = clusters[cn]->cluster.header.visible_size.load(std::memory_order_acquire);
             FatalAssert(visible_size[cn] > 0, LOG_TAG_DIVFTREE, "size should be greater than 0!");
             migration_batch[cn].reserve(visible_size[cn]);
         }
@@ -2380,8 +2400,9 @@ protected:
         batch.id = new VectorID[totalSize];
         batch.data = new VTYPE[totalSize * attr.dimension];
         batch.version = nullptr;
+        uint16_t* offsets = new uint16_t[totalSize];
         bool is_leaf = srcId.IsLeaf();
-        if (is_leaf) {
+        if (!is_leaf) {
             batch.version = new Version[totalSize];
         }
 
@@ -2393,24 +2414,24 @@ protected:
                     LOG_TAG_NOT_IMPLEMENTED, "cannot handle more than 1 block!");
         uint16_t i = 0;
         for (uint16_t offset = 0; (offset < reservedSize) && (i < totalSize); ++offset) {
+            VectorState expected = VECTOR_STATE_VALID;
             if (is_leaf) {
-                /* todo: use new API for changestate */
                 VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
-                if (vmd[offset].state.load(std::memory_order_relaxed) == VECTOR_STATE_VALID) {
-                    vmd[offset].state.store(VECTOR_STATE_MIGRATED, std::memory_order_release);
+                if (srcCluster->ChangeVectorState(&vmd[offset], expected, VECTOR_STATE_MIGRATED).IsOK()) {
                     memcpy(&data[offset * attr.dimension], &batch.data[i * attr.dimension],
                            sizeof(VTYPE) * attr.dimension);
                     batch.id[i] = vmd[offset].id;
+                    offsets[i] = offset;
                     ++i;
                 }
             } else {
                 CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
-                if (vmd[offset].state.load(std::memory_order_relaxed) == VECTOR_STATE_VALID) {
-                    vmd[offset].state.store(VECTOR_STATE_MIGRATED, std::memory_order_release);
+                if (srcCluster->ChangeVectorState(&vmd[offset], expected, VECTOR_STATE_MIGRATED).IsOK()) {
                     memcpy(&data[offset * attr.dimension], &batch.data[i * attr.dimension],
                            sizeof(VTYPE) * attr.dimension);
                     batch.id[i] = vmd[offset].id;
                     batch.version[i] = vmd[offset].version;
+                    offsets[i] = offset;
                     ++i;
                 }
             }
@@ -2430,28 +2451,25 @@ protected:
                 delete[] batch.version;
             }
             delete[] batch.id;
+            delete[] offsets;
             return rs;
         } else {
             /* todo: add the task of checking the src to merge check */
         }
 
-        i = 0;
-        for (uint16_t offset = 0; offset < reservedSize; ++offset) {
-            FatalAssert(i < totalSize, LOG_TAG_DIVFTREE, "more elements than excpected!");
+        for (uint16_t i = 0; i < totalSize; ++i) {
             if (is_leaf) {
                 VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
-                if ((vmd[offset].id == batch.id[i]) &&
-                    (vmd[offset].state.load(std::memory_order_relaxed) == VECTOR_STATE_MIGRATED)) {
-                    vmd[offset].state.store(VECTOR_STATE_VALID, std::memory_order_release);
-                    ++i;
-                }
+                FatalAssert((vmd[offsets[i]].id == batch.id[i]) &&
+                            (vmd[offsets[i]].state.load(std::memory_order_relaxed) == VECTOR_STATE_MIGRATED),
+                            LOG_TAG_DIVFTREE, "mismatch!");
+                vmd[offsets[i]].state.store(VECTOR_STATE_VALID, std::memory_order_release);
             } else {
                 CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
-                if ((vmd[offset].id == batch.id[i]) &&
-                    (vmd[offset].state.load(std::memory_order_relaxed) == VECTOR_STATE_MIGRATED)) {
-                    vmd[offset].state.store(VECTOR_STATE_VALID, std::memory_order_release);
-                    ++i;
-                }
+                FatalAssert((vmd[offsets[i]].id == batch.id[i]) &&
+                            (vmd[offsets[i]].state.load(std::memory_order_relaxed) == VECTOR_STATE_MIGRATED),
+                            LOG_TAG_DIVFTREE, "mismatch!");
+                vmd[offsets[i]].state.store(VECTOR_STATE_VALID, std::memory_order_release);
             }
         }
 
@@ -2461,7 +2479,8 @@ protected:
         if (is_leaf) {
             delete[] batch.version;
         }
-        delete batch.id;
+        delete[] batch.id;
+        delete[] offsets;
 
         return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
     }
@@ -2668,17 +2687,17 @@ protected:
             return;
         }
 
-        std::vector<SearchTask> tasks;
         std::vector<SearchTask*> task_ptrs;
         uint64_t taskId = threadSelf->GetNextTaskID();
         std::atomic<bool>* sync_bools = new std::atomic<bool>[layers[level]->Size() * 2];
-        tasks.reserve(layers[level]->Size());
+        std::atomic<size_t>* viewed = new std::atomic<size_t>(0);
         task_ptrs.reserve(layers[level]->Size());
         for (size_t i = 0; i < layers[level]->Size(); ++i) {
             FatalAssert((*layers[level])[i].id._level == (uint64_t)level, LOG_TAG_DIVFTREE, "mismatch level!");
-            tasks.emplace_back(taskId, (*layers[level])[i].id, (*layers[level])[i].version, query, span,
-                               &sync_bools[i], &sync_bools[i + layers[level]->Size()]);
-            task_ptrs.emplace_back(&tasks.back());
+            task_ptrs.emplace_back(
+                new SearchTask(taskId, layers[level]->Size(), (*layers[level])[i].id, (*layers[level])[i].version,
+                               query, span, &sync_bools[i], &sync_bools[i + layers[level]->Size()], viewed, sync_bools)
+            );
         }
 #ifdef EXCESS_LOGING
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
@@ -2690,54 +2709,59 @@ protected:
         UNUSED_VARIABLE(rs);
         FatalAssert(rs, LOG_TAG_DIVFTREE, "should not fail!");
 
-        for (size_t i = tasks.size() - 1; i != UINT64_MAX; --i) {
+        for (size_t i = task_ptrs.size() - 1; i != UINT64_MAX; --i) {
             bool exp = false;
-            if (!tasks[i].taken->compare_exchange_strong(exp, true)) {
+            if (!task_ptrs[i]->taken->compare_exchange_strong(exp, true)) {
                 continue;
             }
 
-            SearchVertex(tasks[i].target, tasks[i].version, query, span, layers[level - 1], seen);
-            tasks[i].done->store(true, std::memory_order_relaxed);
+            SearchVertex(task_ptrs[i]->target, task_ptrs[i]->version, query, span, layers[level - 1], seen);
+            task_ptrs[i]->done->store(true, std::memory_order_relaxed);
         }
 
         size_t num_done = 0;
         bool first_time = true;
-        while(num_done != tasks.size()) {
+        while(num_done != task_ptrs.size()) {
             if (first_time) {
                 first_time = false;
             } else {
                 /* todo: is this too much and if so maybe we should use wait and notify instead or use YEILD */
                 usleep(1);
             }
-            for (size_t i = 0; i < tasks.size(); ++i) {
-                if (tasks[i].done_waiting) {
+            for (size_t i = 0; i < task_ptrs.size(); ++i) {
+                if (task_ptrs[i]->done_waiting) {
                     continue;
                 }
-                if (tasks[i].done->load(std::memory_order_acquire)) {
+                if (task_ptrs[i]->done->load(std::memory_order_acquire)) {
                     ++num_done;
-                    tasks[i].done_waiting = true;
+                    task_ptrs[i]->done_waiting = true;
                 }
             }
         }
 
         /* todo: check if I need a better algorithm for this */
         std::unordered_set<uintptr_t> lists;
-        for (size_t i = 0; i < tasks.size(); ++i) {
-            if (tasks[i].neighbours == nullptr) {
+        for (size_t i = 0; i < task_ptrs.size(); ++i) {
+            if (task_ptrs[i]->neighbours == nullptr) {
                 continue;
             }
-            if (lists.find(reinterpret_cast<uintptr_t>(tasks[i].neighbours)) != lists.end()) {
-                tasks[i].neighbours = nullptr;
+            if (lists.find(reinterpret_cast<uintptr_t>(task_ptrs[i]->neighbours)) != lists.end()) {
+                task_ptrs[i]->neighbours = nullptr;
                 continue;
             }
 
-            lists.insert(reinterpret_cast<uintptr_t>(tasks[i].neighbours));
-            layers[level - 1]->MergeWith(*tasks[i].neighbours, span, false);
-            delete tasks[i].neighbours;
-            tasks[i].neighbours = nullptr;
+            lists.insert(reinterpret_cast<uintptr_t>(task_ptrs[i]->neighbours));
+            layers[level - 1]->MergeWith(*task_ptrs[i]->neighbours, span, false);
+            delete task_ptrs[i]->neighbours;
+            task_ptrs[i]->neighbours = nullptr;
         }
 
-        delete[] sync_bools;
+        uint8_t num_viewed = viewed->fetch_add(1) + 1;
+        FatalAssert(num_viewed <= (layers[level]->Size() + 1), LOG_TAG_DIVFTREE, "too many views!");
+        if (num_viewed == (layers[level]->Size() + 1)) {
+            delete viewed;
+            delete[] sync_bools;
+        }
 
 #ifdef EXCESS_LOGING
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
@@ -2862,6 +2886,12 @@ protected:
             if (search_tasks.PopHead(nextTask)) {
                 bool exp = false;
                 if (!(nextTask->taken->compare_exchange_strong(exp, true))) {
+                    uint8_t num_viewed = nextTask->viewed->fetch_add(1) + 1;
+                    FatalAssert(num_viewed <= (nextTask->num_tasks + 1), LOG_TAG_DIVFTREE, "too many views!");
+                    if (num_viewed == (nextTask->num_tasks + 1)) {
+                        delete nextTask->viewed;
+                        delete[] nextTask->shared_data;
+                    }
                     continue;
                 }
                 CHECK_VECTORID_IS_VALID(nextTask->target, LOG_TAG_DIVFTREE);
@@ -2890,6 +2920,12 @@ protected:
                     "BGSearch END: taskId=%lu", nextTask->taskId);
 #endif
                 nextTask->done->store(true, std::memory_order_release);
+                uint8_t num_viewed = nextTask->viewed->fetch_add(1) + 1;
+                FatalAssert(num_viewed <= (nextTask->num_tasks + 1), LOG_TAG_DIVFTREE, "too many views!");
+                if (num_viewed == (nextTask->num_tasks + 1)) {
+                    delete nextTask->viewed;
+                    delete[] nextTask->shared_data;
+                }
             }
         }
         self->DestroyDIVFThread();

@@ -261,7 +261,7 @@ public:
     void Recycle(DIVFTreeVertexInterface* memory);
 
     void UpdateRoot(VectorID newRootId, Version newRootVersion, BufferVertexEntry* oldRootEntry);
-    BufferVertexEntry* CreateNewRootEntry();
+    BufferVertexEntry* CreateNewRootEntry(VectorID expRootId);
     void BatchCreateBufferEntry(uint16_t num_entries, uint8_t level, BufferVertexEntry** entries,
                                 DIVFTreeVertexInterface** clusters = nullptr, VectorID* ids = nullptr,
                                 Version* versions = nullptr);
@@ -271,7 +271,7 @@ public:
     VectorID GetCurrentRootIdAndVersion(Version& version);
 
     inline BufferVectorEntry* GetVectorEntry(VectorID id);
-    inline void PinVertexVersion(VectorID vertexId, Version version, bool needLock = true);
+    inline void PinVertexVersion(VectorID vertexId, Version version);
     inline void UnpinVertexVersion(VectorID vertexId, Version version);
 
     inline VectorLocation LoadCurrentVectorLocation(VectorID vectorId);
@@ -287,11 +287,9 @@ public:
     inline void UpdateVectorLocation(VectorID vectorId, VectorLocation newLocation, bool pinNewUnpinOld = true);
     // inline void UpdateVectorLocationOffset(VectorID vectorId, uint16_t newOffset);
 
-    /* have to unpin root using FreeSnapshot function */
-    DIVFTreeVertexInterface* GetIndexSnapshot();
-    inline void FreeSnapshot(DIVFTreeVertexInterface* root_vertex);
     RetStatus ReadAndPinVertex(VectorID vertexId, Version version, DIVFTreeVertexInterface*& vertex,
                                bool* outdated = nullptr);
+    DIVFTreeVertexInterface* ReadAndPinRoot();
 
     /*
      * If we need to lock multiple clusters, then lower level clusters always take priority and
