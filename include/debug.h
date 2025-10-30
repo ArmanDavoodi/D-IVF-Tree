@@ -55,6 +55,7 @@ enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_MEMORY_BIT,
     LOG_TAG_LOCK_BIT,
     LOG_TAG_THREAD_BIT,
+    LOG_TAG_HANG_DETECTOR_BIT,
     LOG_TAG_NOT_IMPLEMENTED_BIT,
     LOG_TAG_TEST_BIT,
     NUM_TAGS
@@ -71,6 +72,7 @@ enum LOG_TAG_BITS : uint64_t {
 // this is used for all thread locks so do not use it for logs regarding locking and unlocking as it will mess with the tag filter
 #define LOG_TAG_LOCK (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_LOCK_BIT))
 #define LOG_TAG_THREAD (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_THREAD_BIT))
+#define LOG_TAG_HANG_DETECTOR (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_HANG_DETECTOR_BIT))
 #define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
 #define LOG_TAG_TEST (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_TEST_BIT))
 
@@ -391,6 +393,8 @@ inline const char* tagtostr(uint64_t tag)
         return "    Thread     ";
     case LOG_TAG_NOT_IMPLEMENTED:
         return "Not Implemented";
+    case LOG_TAG_HANG_DETECTOR:
+        return " Hang Detector ";
     case LOG_TAG_TEST:
         return "     Test      ";
     default:

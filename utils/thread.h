@@ -6,7 +6,9 @@
 #include <thread>
 #include <cstdint>
 #include <unordered_set>
- #include <random>
+#include <random>
+#include <atomic>
+#include <mutex>
 
 #include "debug.h"
 
@@ -103,6 +105,12 @@ public:
         FatalAssert(_done.load(std::memory_order_relaxed), LOG_TAG_THREAD, "thread should be in the initial state");
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Initing thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         threadSelf = this;
+
+#ifdef HANG_DETECTION
+        all_threads_lock.lock();
+        all_threads.push_back(this);
+        all_threads_lock.unlock();
+#endif
         _done.store(false, std::memory_order_release);
     }
 
@@ -118,6 +126,17 @@ public:
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_THREAD, "Destroying thread %p - ID:%lu - parent:%lu", this, _id, _parent_id);
         threadSelf = nullptr;
         _safty_net.store(true, std::memory_order_release);
+#ifdef HANG_DETECTION
+        all_threads_lock.lock();
+        for (size_t i = 0; i < all_threads.size(); ++i) {
+            if (all_threads[i] == this) {
+                all_threads[i] = all_threads.back();
+                all_threads.pop_back();
+                break;
+            }
+        }
+        all_threads_lock.unlock();
+#endif
         _done.store(true, std::memory_order_release);
         _done.notify_all();
         _safty_net.store(false, std::memory_order_release);
@@ -191,7 +210,6 @@ public:
     }
 
     inline DIVFThreadID ID() const {
-        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
         return _id;
     }
 
@@ -342,6 +360,27 @@ public:
 #endif
     }
 
+    inline void LoopIncrement() {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+#ifdef HANG_DETECTION
+        _iteration_sn.fetch_add(1);
+#endif
+    }
+
+    inline bool CheckHang() {
+#ifdef HANG_DETECTION
+        uint64_t current_sn = _iteration_sn.load(std::memory_order_acquire);
+        if (current_sn == last_iteration_sn) {
+            return true;
+        } else {
+            last_iteration_sn = current_sn;
+            return false;
+        }
+#else
+        return false;
+#endif
+    }
+
     /* todo: check if it works better than a random number generator */
     // inline bool PeriodicBinary(size_t target, size_t base = 100) {
     //     FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
@@ -398,6 +437,10 @@ public:
      * probablity of us failing to get a good cluster after 21 retries is less than 1%.
      */
     inline static constexpr uint64_t MAX_RETRY = 21;
+#ifdef HANG_DETECTION
+    static inline std::vector<Thread*> all_threads;
+    static inline std::mutex all_threads_lock;
+#endif
 
 protected:
     static inline std::atomic<DIVFThreadID> nextId = 0;
@@ -414,6 +457,10 @@ protected:
     std::uniform_int_distribution<uint32_t> _uniform_dist;
     uint64_t _next_task_id;
 
+#ifdef HANG_DETECTION
+    std::atomic<uint64_t> _iteration_sn = 0;
+    uint64_t last_iteration_sn = 0;
+#endif
     // for randomized algs
     // size_t rand_num = 0;
 #ifdef LOCK_DEBUG

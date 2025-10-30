@@ -1015,6 +1015,11 @@ protected:
     DIVFTreeAttributes attr;
     std::atomic<uint64_t> real_size;
     std::atomic<bool> end_signal;
+#ifdef HANG_DETECTION
+    std::atomic<bool> end_bghang_detector = false;
+    static inline constexpr uint64_t BG_HANG_DETECTOR_SLEEP_MS = 60000; /* 60 seconds */
+    Thread* bg_hang_detector = nullptr;
+#endif
 
     std::vector<Thread*> bg_migrators;
     BlockingQueue<MigrationCheckTask> migration_tasks;
@@ -2477,7 +2482,7 @@ protected:
             (*srcEntry)->state.store(CLUSTER_DELETE_IN_PROGRESS, std::memory_order_release);
             PruneEmptyVertexAndRelease(*srcEntry);
             delete[] batch.data;
-            if (is_leaf) {
+            if (!is_leaf) {
                 delete[] batch.version;
             }
             delete[] batch.id;
@@ -2506,7 +2511,7 @@ protected:
         bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                            ReleaseBufferEntryFlags(false, false));
         delete[] batch.data;
-        if (is_leaf) {
+        if (!is_leaf) {
             delete[] batch.version;
         }
         delete[] batch.id;
@@ -2916,6 +2921,7 @@ protected:
 
         while (!end_signal.load(std::memory_order_acquire) || !search_tasks.Empty()) {
             SearchTask* nextTask = nullptr;
+            self->LoopIncrement();
             if (search_tasks.PopHead(nextTask)) {
                 bool exp = false;
                 if (!(nextTask->taken->compare_exchange_strong(exp, true))) {
@@ -2984,6 +2990,7 @@ protected:
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
         while (!end_signal.load(std::memory_order_acquire)) {
+            self->LoopIncrement();
             MigrationCheckTask nextTask;
             if (migration_tasks.TryPopHead(nextTask)) {
 #ifdef EXCESS_LOGING
@@ -3017,6 +3024,7 @@ protected:
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
         while (!end_signal.load(std::memory_order_acquire)) {
+            self->LoopIncrement();
             MergeTask nextTask;
             if (merge_tasks.PopHead(nextTask)) {
 #ifdef EXCESS_LOGING
@@ -3038,6 +3046,7 @@ protected:
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
         while (!end_signal.load(std::memory_order_acquire)) {
+            self->LoopIncrement();
             CompactionTask nextTask;
             if (compaction_tasks.PopHead(nextTask)) {
 #ifdef EXCESS_LOGING
@@ -3050,6 +3059,32 @@ protected:
         }
         self->DestroyDIVFThread();
     }
+
+#ifdef HANG_DETECTION
+    inline void BGHangDetector(Thread* self) {
+        CHECK_NOT_NULLPTR(self, LOG_TAG_HANG_DETECTOR);
+        self->InitDIVFThread();
+
+        while (!end_bghang_detector.load(std::memory_order_acquire)) {
+            msleep(BG_HANG_DETECTOR_SLEEP_MS);
+            Thread::all_threads_lock.lock();
+            uint64_t num_threads = Thread::all_threads.size();
+            self->LoopIncrement();
+            DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_HANG_DETECTOR,
+                    "BGHangDetector checking %lu threads", num_threads);
+            for (auto& thread : Thread::all_threads) {
+                FatalAssert(thread != nullptr, LOG_TAG_HANG_DETECTOR, "null thread found!");
+                if (thread->CheckHang()) {
+                    DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_HANG_DETECTOR,
+                            "Detected hang in thread id %lu",
+                            thread->ID());
+                }
+            }
+            Thread::all_threads_lock.unlock();
+        }
+        self->DestroyDIVFThread();
+    }
+#endif
 
     inline void StartBGThreads() {
         searchers.reserve(attr.num_searchers);
@@ -3075,6 +3110,11 @@ protected:
             bg_compactors.emplace_back(new Thread(attr.random_base_perc));
             bg_compactors.back()->StartMemberFunction(&DIVFTree::BGCompaction, this);
         }
+
+#ifdef HANG_DETECTION
+        bg_hang_detector = new Thread(attr.random_base_perc);
+        bg_hang_detector->StartMemberFunction(&DIVFTree::BGHangDetector, this);
+#endif
     }
 
     inline void DestroyBGThreads() {
@@ -3095,6 +3135,11 @@ protected:
         for (size_t i = 0; i < attr.num_searchers; ++i) {
             delete searchers[i];
         }
+
+#ifdef HANG_DETECTION
+        end_bghang_detector.store(true, std::memory_order_release);
+        delete bg_hang_detector;
+#endif
     }
 
 TESTABLE;

@@ -162,6 +162,7 @@ void worker(divftree::Thread* self) {
     uint32_t insert_batch_size =
         std::max(1u, build_size / ((uint32_t)num_threads * (index_attr.leaf_max_size / 10 + 1)));
     while(build_num_inserted.load(std::memory_order_acquire) < build_size) {
+        self->LoopIncrement();
         insert_batch_size = std::min(insert_batch_size,
                             build_size - build_num_inserted.load(std::memory_order_acquire));
         if (insert_batch_size == 0) {
@@ -191,6 +192,7 @@ void worker(divftree::Thread* self) {
     }
 
     while(!warmup_finished.load(std::memory_order_acquire)) {
+        self->LoopIncrement();
         rs = Search(neighbours);
     }
 
@@ -211,6 +213,7 @@ void worker(divftree::Thread* self) {
     uint64_t current_insert_err = 0;
     uint64_t current_delete_err = 0;
     while(!run_finished.load(std::memory_order_acquire)) {
+        self->LoopIncrement();
         if(!self->UniformBinary(write_ratio)) {
             rs = Search(neighbours);
             if (rs.IsOK()) {

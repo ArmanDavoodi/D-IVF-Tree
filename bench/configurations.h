@@ -6,6 +6,9 @@
 #define SMALLNORMAL 3
 #define HUGENORMAL 4
 
+// Hang Detector.+Message: Detected hang in thread id [^0][0-9]*
+#define HANG_DETECTION
+
 #if defined(DATASET)
     #if ((DATASET == BIGANN100M) || (DATASET == BIGANN1B))
     #include "bench/datasets/bigann/configurations.h"
