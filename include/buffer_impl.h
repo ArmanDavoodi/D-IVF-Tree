@@ -957,13 +957,12 @@ BufferVertexEntry* BufferManager::ReadBufferEntry(VectorID vertexId, LockMode mo
         }
     }
 
-    state = entry->state.load();
-    if (state == CLUSTER_DELETED) {
-        entry->clusterLock.Unlock();
-        return nullptr;
-    }
+    while ((state = entry->state.load(std::memory_order_acquire)) != CLUSTER_STABLE) {
+        if (state == CLUSTER_DELETED) {
+            entry->clusterLock.Unlock();
+            return nullptr;
+        }
 
-    if (state != CLUSTER_STABLE) {
         if (blocked != nullptr) {
             *blocked = true;
         }
@@ -977,13 +976,7 @@ BufferVertexEntry* BufferManager::ReadBufferEntry(VectorID vertexId, LockMode mo
         }
     }
 
-    state = entry->state.load();
-    if (state == CLUSTER_DELETED) {
-        entry->clusterLock.Unlock();
-        return nullptr;
-    }
-
-    FatalAssert((mode != SX_EXCLUSIVE) || (state == CLUSTER_STABLE), LOG_TAG_BUFFER,
+    FatalAssert(/* (mode != SX_EXCLUSIVE) ||  */(state == CLUSTER_STABLE), LOG_TAG_BUFFER,
                 "BufferEntry state is not stable! VertexID=" VECTORID_LOG_FMT, VECTORID_LOG(vertexId));
     return entry;
 }

@@ -20,24 +20,29 @@ double mean;
 double stddev;
 double alpha;
 
-#define UINT8 0
-#define UINT32 1
-#define UINT64 2
-#define FLOAT 3
-#define DOUBLE 4
+#define UINT8 1
+#define UINT32 2
+#define UINT64 3
+#define FLOAT 4
+#define DOUBLE 5
 
 #if defined(VECTOR_TYPE)
     #if VECTOR_TYPE == UINT8
         using VTYPE = uint8_t;
+        #pragma message("TYPE = UINT8")
     #elif VECTOR_TYPE == UINT32
         using VTYPE = uint32_t;
+        #pragma message("TYPE = UINT32")
     #elif VECTOR_TYPE == UINT64
         using VTYPE = uint64_t;
+        #pragma message("TYPE = UINT64")
         #define USE64_BIT
     #elif VECTOR_TYPE == FLOAT
         using VTYPE = float;
+        #pragma message("TYPE = FLOAT")
     #elif VECTOR_TYPE == DOUBLE
         using VTYPE = double;
+        #pragma message("TYPE = DOUBLE")
         #define USE64_BIT
     #else
         #error UNDEFINED VECTOR_TYPE!

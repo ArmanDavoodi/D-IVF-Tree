@@ -200,8 +200,8 @@ public:
                 ", Version:%u, unpinCnt=%lu", this, VECTORID_LOG(attr.centroid_id), attr.version, curr_cnt);
 #endif
         if (curr_cnt == 0) {
-            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT
-                    ", ver:%u, addr:%p", VECTORID_LOG(attr.centroid_id), attr.version, this);
+            // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Unpin and delete vertex " VECTORID_LOG_FMT
+            //         ", ver:%u, addr:%p", VECTORID_LOG(attr.centroid_id), attr.version, this);
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
             this->~DIVFTreeVertex();
             BufferManager::GetInstance()->Recycle(this);
@@ -218,17 +218,17 @@ public:
                     "The cluster was unpinned more times than it was pinned. pinCount=%lu, unpinCount=%lu",
                     pinCount, unpinCount.load());
         uint64_t newPin = unpinCount.fetch_sub(pinCount) - pinCount;
-        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Mark vertex " VECTORID_LOG_FMT
-            " ver:%u, addr=%p, for recycle with pin count %lu", VECTORID_LOG(attr.centroid_id),
-            attr.version, this, pinCount);
+        // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Mark vertex " VECTORID_LOG_FMT
+        //     " ver:%u, addr=%p, for recycle with pin count %lu", VECTORID_LOG(attr.centroid_id),
+        //     attr.version, this, pinCount);
 #ifdef MEMORY_DEBUG
         DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster marked for recycke -> ID:" VECTORID_LOG_FMT
                 ", Version:%u, pinCount=%lu, unpinCnt=%lu", this, VECTORID_LOG(attr.centroid_id), attr.version,
                 pinCount, newPin);
 #endif
         if (newPin == 0) {
-            DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT ", ver:%u, addr:%p",
-                 VECTORID_LOG(attr.centroid_id), attr.version, this);
+            // DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE_VERTEX, "Delete vertex " VECTORID_LOG_FMT ", ver:%u, addr:%p",
+            //      VECTORID_LOG(attr.centroid_id), attr.version, this);
             /* todo: we need to handle all the children(unpining their versions and stuff) in the destructor */
             this->~DIVFTreeVertex();
             BufferManager::GetInstance()->Recycle(this);
@@ -476,11 +476,11 @@ public:
         Address meta = cluster.MetaData(0, attr.centroid_id.IsLeaf(), attr.block_size, attr.cap, dim);
         uint16_t old_size = 0;
         uint16_t curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
-        std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash> in_list;
+        // std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash> in_list;
         std::unordered_set<VectorID, VectorIDHash> in_cluster;
         in_cluster.reserve(curr_size);
-        in_list.reserve(curr_size);
-        while(curr_size != old_size) {
+        // in_list.reserve(curr_size);
+        // while(curr_size != old_size) {
             /* this will overflow and i will get greater than size when it gets to 0 */
             uint16_t last_seen = old_size - 1;
             for (uint16_t i = curr_size - 1; i != last_seen; --i) {
@@ -508,65 +508,79 @@ public:
                     }
                 } else {
                     CentroidMetaData* vmd = reinterpret_cast<CentroidMetaData*>(meta);
+                    VectorState state = vmd[i].state.load(std::memory_order_acquire);
+                    if ((state == VECTOR_STATE_VALID) || (state == VECTOR_STATE_MIGRATED) ||
+                        (state == VECTOR_STATE_INVALID)) {
+                        in_cluster.emplace(vmd[i].id);
+                    }
+
                     if (seen.find(std::make_pair(vmd[i].id, vmd[i].version)) != seen.end()) {
-                        VectorState state = vmd[i].state.load(std::memory_order_acquire);
-                        if (((state == VECTOR_STATE_VALID) || (state == VECTOR_STATE_MIGRATED)) &&
-                            (in_list.find(vmd[i].id) == in_list.end())) {
-                            in_list.insert({vmd[i].id, {i, Distance(query, &data[i * dim], dim, dtype)}});
+                        if ((state == VECTOR_STATE_OUTDATED) &&
+                            (in_cluster.find(vmd[i].id) == in_cluster.end())) {
+                            in_cluster.emplace(vmd[i].id);
                         }
                         continue;
                     }
 
                     std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash>::iterator emplace_res;
                     std::unordered_map<VectorID, std::pair<uint16_t, DTYPE>, VectorIDHash>::iterator check;
-                    switch (vmd[i].state.load(std::memory_order_acquire)) {
+                    switch (state) {
+                    case VECTOR_STATE_OUTDATED:
+                        if (in_cluster.find(vmd[i].id) != in_cluster.end()) {
+                            break;
+                        }
+                        in_cluster.emplace(vmd[i].id);
                     case VECTOR_STATE_VALID:
                     case VECTOR_STATE_MIGRATED:
-                        check = in_list.find(vmd[i].id);
-                        if (check != in_list.end()) { /* todo: we can handle this case much more efficiently! */
-                            /* a vector was outdated in a previous pass */
-                            FatalAssert((vmd[check->second.first].id == vmd[i].id) &&
-                                        (vmd[check->second.first].state.load(std::memory_order_acquire) ==
-                                        VECTOR_STATE_OUTDATED) && (vmd[check->second.first].version < vmd[i].version),
-                                        LOG_TAG_DIVFTREE_VERTEX,
-                                        "the one that we have seen before should be outdated!");
-                            ANNVectorInfo outdated(check->second.second, vmd[check->second.first].id,
-                                                   vmd[check->second.first].version);
-                            auto it = neighbours->Find(outdated);
-                            FatalAssert((it != neighbours->end()),
-                                        LOG_TAG_DIVFTREE_VERTEX, "Could not find the outdated version!");
-                            neighbours->Erase(it);
-                            check->second.first = i;
-                            check->second.second = Distance(query, &data[i * dim], dim, dtype);
-                            emplace_res = check;
-                        } else {
-                            emplace_res = in_list.insert({new_vector.id,
-                                                         {i, Distance(query, &data[i * dim], dim, dtype)}}).first;
-                        }
-                        new_vector = ANNVectorInfo(emplace_res->second.second, vmd[i].id, vmd[i].version);
+                        // check = in_list.find(vmd[i].id);
+                        // if (check != in_list.end()) { /* todo: we can handle this case much more efficiently! */
+                        //     /* a vector was outdated in a previous pass */
+                        //     SANITY_CHECK(
+                        //         VectorState oldState = vmd[check->second.first].state.load(std::memory_order_acquire);
+                        //         FatalAssert((vmd[check->second.first].id == vmd[i].id) &&
+                        //                     ((oldState == VECTOR_STATE_OUTDATED) ||
+                        //                      (oldState == VECTOR_STATE_MIGRATED)) &&
+                        //                     (vmd[check->second.first].version < vmd[i].version),
+                        //                     LOG_TAG_DIVFTREE_VERTEX,
+                        //                     "the one that we have seen before should be outdated/migrated!");
+                        //     );
+                        //     ANNVectorInfo outdated(check->second.second, vmd[check->second.first].id,
+                        //                            vmd[check->second.first].version);
+                        //     auto it = neighbours->Find(outdated);
+                        //     FatalAssert((it != neighbours->end()),
+                        //                 LOG_TAG_DIVFTREE_VERTEX, "Could not find the outdated version!");
+                        //     neighbours->Erase(it);
+                        //     check->second.first = i;
+                        //     check->second.second = Distance(query, &data[i * dim], dim, dtype);
+                        //     emplace_res = check;
+                        // } else {
+                        //     emplace_res = in_list.insert({new_vector.id,
+                        //                                  {i, Distance(query, &data[i * dim], dim, dtype)}}).first;
+                        // }
+                        new_vector = ANNVectorInfo(Distance(query, &data[i * dim], dim, dtype),
+                                                   vmd[i].id, vmd[i].version);
                         neighbours->Insert(new_vector);
-                        in_cluster.emplace(new_vector.id);
                         seen.emplace(new_vector.id, new_vector.version);
                         if (neighbours->Size() > k) {
-                            auto to_be_deleted = std::prev(neighbours->end());
-                            if (new_vector == *to_be_deleted) {
-                                in_list.erase(emplace_res);
-                            } else {
-                                auto it = in_list.find(new_vector.id);
-                                if (it != in_list.end()) {
-                                    in_list.erase(it);
-                                }
-                            }
-                            neighbours->Erase(to_be_deleted);
+                            // auto to_be_deleted = std::prev(neighbours->end());
+                            // if (new_vector == *to_be_deleted) {
+                            //     in_list.erase(emplace_res);
+                            // } else {
+                            //     auto it = in_list.find(new_vector.id);
+                            //     if (it != in_list.end()) {
+                            //         in_list.erase(it);
+                            //     }
+                            // }
+                            // neighbours->Erase(to_be_deleted);
+                            neighbours->PopBack();
                         }
                         break;
-                    case VECTOR_STATE_OUTDATED:
-                        if (in_cluster.find(vmd[i].id) == in_cluster.end()) {
-                            old_size = curr_size;
-                        }
-                        break;
+                    // case VECTOR_STATE_OUTDATED:
+                        // if (in_cluster.find(vmd[i].id) == in_cluster.end()) {
+                        //     old_size = curr_size;
+                        // }
+                        // break;
                     case VECTOR_STATE_INVALID:
-                        in_cluster.emplace(vmd[i].id);
                         break;
                     default:
                         DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_DIVFTREE_VERTEX, "invalid state");
@@ -574,14 +588,21 @@ public:
                 }
             }
 
-            if (old_size == curr_size) {
-                curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
-                FatalAssert(curr_size > old_size, LOG_TAG_DIVFTREE_VERTEX,
-                            "if we have seen an outdated vector our size should have increased!");
-            } else {
-                old_size = curr_size;
-            }
-        }
+            /* todo: find out the reason why this assertion fails! although I am going to change the algorithm,
+            this can cause a lot of issues later if it is something serious! */
+            // if (old_size == curr_size) {
+            //     curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
+            //     // while (curr_size == old_size) {
+            //     //     DIVFTREE_YIELD();
+            //     //     curr_size = cluster.header.visible_size.load(std::memory_order_acquire);
+            //     // }
+            //     FatalAssert(curr_size > old_size, LOG_TAG_DIVFTREE_VERTEX,
+            //                 "if we have seen an outdated vector our size should have increased!");
+            //     in_cluster.clear();
+            // } else {
+            //     old_size = curr_size;
+            // }
+        // }
     }
 
     inline Cluster& GetCluster() override {
@@ -2064,21 +2085,21 @@ protected:
             }
             BufferVertexEntry* src_entry_cpy = *src_entry;
             *src_entry = nullptr;
-            SANITY_CHECK(
-                if (batch.version != nullptr) {
-                    for (uint16_t i = 0; i < batch.size; ++i) {
-                        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "Migrated (" VECTORID_LOG_FMT ", ver:%u) from "
-                                VECTORID_LOG_FMT " to " VECTORID_LOG_FMT,
-                                VECTORID_LOG(batch.id[i]), batch.version[i], VECTORID_LOG(src_id), VECTORID_LOG(dest_id));
-                    }
-                } else {
-                    for (uint16_t i = 0; i < batch.size; ++i) {
-                        DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "Migrated (" VECTORID_LOG_FMT ") from "
-                                VECTORID_LOG_FMT " to " VECTORID_LOG_FMT,
-                                VECTORID_LOG(batch.id[i]), VECTORID_LOG(src_id), VECTORID_LOG(dest_id));
-                    }
-                }
-            )
+            // SANITY_CHECK(
+            //     if (batch.version != nullptr) {
+            //         for (uint16_t i = 0; i < batch.size; ++i) {
+            //             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "Migrated (" VECTORID_LOG_FMT ", ver:%u) from "
+            //                     VECTORID_LOG_FMT " to " VECTORID_LOG_FMT,
+            //                     VECTORID_LOG(batch.id[i]), batch.version[i], VECTORID_LOG(src_id), VECTORID_LOG(dest_id));
+            //         }
+            //     } else {
+            //         for (uint16_t i = 0; i < batch.size; ++i) {
+            //             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "Migrated (" VECTORID_LOG_FMT ") from "
+            //                     VECTORID_LOG_FMT " to " VECTORID_LOG_FMT,
+            //                     VECTORID_LOG(batch.id[i]), VECTORID_LOG(src_id), VECTORID_LOG(dest_id));
+            //         }
+            //     }
+            // )
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
             PruneIfNeededAndRelease(src_entry_cpy);
@@ -2418,6 +2439,10 @@ protected:
             VectorState expected = VECTOR_STATE_VALID;
             if (is_leaf) {
                 VectorMetaData* vmd = static_cast<VectorMetaData*>(meta);
+                if (vmd[offset].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID) {
+                    continue;
+                }
+
                 if (srcCluster->ChangeVectorState(&vmd[offset], expected, VECTOR_STATE_MIGRATED).IsOK()) {
                     memcpy(&data[offset * attr.dimension], &batch.data[i * attr.dimension],
                            sizeof(VTYPE) * attr.dimension);
@@ -2427,6 +2452,10 @@ protected:
                 }
             } else {
                 CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
+                if (vmd[offset].state.load(std::memory_order_acquire) != VECTOR_STATE_VALID) {
+                    continue;
+                }
+
                 if (srcCluster->ChangeVectorState(&vmd[offset], expected, VECTOR_STATE_MIGRATED).IsOK()) {
                     memcpy(&data[offset * attr.dimension], &batch.data[i * attr.dimension],
                            sizeof(VTYPE) * attr.dimension);
@@ -2890,12 +2919,12 @@ protected:
             if (search_tasks.PopHead(nextTask)) {
                 bool exp = false;
                 if (!(nextTask->taken->compare_exchange_strong(exp, true))) {
+                    size_t num_tasks = nextTask->num_tasks;
                     uint8_t num_viewed = nextTask->viewed->fetch_add(1) + 1;
-                    FatalAssert(num_viewed <= (nextTask->num_tasks + 1), LOG_TAG_DIVFTREE, "too many views!");
-                    if (num_viewed == (nextTask->num_tasks + 1)) {
+                    FatalAssert(num_viewed <= (num_tasks + 1), LOG_TAG_DIVFTREE, "too many views!");
+                    if (num_viewed == (num_tasks + 1)) {
                         delete nextTask->viewed;
                         delete[] nextTask->shared_data;
-                        size_t num_tasks = nextTask->num_tasks;
                         SearchTask** task_set = nextTask->task_set;
                         for (size_t i = 0; i < num_tasks; ++i) {
                             delete task_set[i];
@@ -2930,12 +2959,12 @@ protected:
                     "BGSearch END: taskId=%lu", nextTask->taskId);
 #endif
                 nextTask->done->store(true, std::memory_order_release);
+                size_t num_tasks = nextTask->num_tasks;
                 uint8_t num_viewed = nextTask->viewed->fetch_add(1) + 1;
-                FatalAssert(num_viewed <= (nextTask->num_tasks + 1), LOG_TAG_DIVFTREE, "too many views!");
-                if (num_viewed == (nextTask->num_tasks + 1)) {
+                FatalAssert(num_viewed <= (num_tasks + 1), LOG_TAG_DIVFTREE, "too many views!");
+                if (num_viewed == (num_tasks + 1)) {
                     delete nextTask->viewed;
                     delete[] nextTask->shared_data;
-                    size_t num_tasks = nextTask->num_tasks;
                     SearchTask** task_set = nextTask->task_set;
                     for (size_t i = 0; i < num_tasks; ++i) {
                         delete task_set[i];
