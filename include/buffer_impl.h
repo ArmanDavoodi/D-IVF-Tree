@@ -155,7 +155,8 @@ DIVFTreeVertexInterface* BufferVectorEntry::ReadAndPinParent(VectorLocation& cur
 }
 
 BufferVertexEntry::BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin) :
-    centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0), nextVersionPin(0) {
+    centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0), nextVersionPin(0), hasCompactionTask(false),
+    hasMergeTask(false) {
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vertex entry should be
         16 byte aligned as well */
     FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
@@ -1168,6 +1169,161 @@ RetStatus BufferManager::CheckIfUpdateHasGoneThrough(VectorID target, bool& upda
     }
     return RetStatus::Success();
 }
+
+bool BufferManager::AddMigrationTaskIfNotExists(VectorID first, VectorID second, BufferVertexEntry* firstEntry) {
+    CHECK_VECTORID_IS_VALID(first, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(first, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_VALID(second, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(second, LOG_TAG_BUFFER);
+    FatalAssert(first != second, LOG_TAG_BUFFER, "first and second cannot be the same!");
+
+    if (first > second) {
+        std::swap(first, second);
+    }
+
+    if (firstEntry != nullptr) {
+        FatalAssert(firstEntry->centroidMeta.selfId == first, LOG_TAG_BUFFER,
+                    "firstEntry does not correspond to first id!");
+    } else {
+        bufferMgrLock.Lock(SX_SHARED);
+        firstEntry = GetVertexEntry(first, false);
+        if (firstEntry == nullptr) {
+            FatalAssert(false, LOG_TAG_BUFFER, "one of the entries does not exist!");
+            bufferMgrLock.Unlock();
+            return false;
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    firstEntry->headerLock.Lock(SX_EXCLUSIVE);
+    auto it = firstEntry->migrationTasks.find(second);
+    if (it != firstEntry->migrationTasks.end()) {
+        firstEntry->headerLock.Unlock();
+        return false;
+    }
+
+    firstEntry->migrationTasks.insert(second);
+    firstEntry->headerLock.Unlock();
+    return true;
+}
+
+void BufferManager::RemoveMigrationTask(VectorID first, VectorID second, BufferVertexEntry* firstEntry) {
+    CHECK_VECTORID_IS_VALID(first, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(first, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_VALID(second, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(second, LOG_TAG_BUFFER);
+    FatalAssert(first != second, LOG_TAG_BUFFER, "first and second cannot be the same!");
+
+    if (first > second) {
+        std::swap(first, second);
+    }
+
+    if (firstEntry != nullptr) {
+        FatalAssert(firstEntry->centroidMeta.selfId == first, LOG_TAG_BUFFER,
+                    "firstEntry does not correspond to first id!");
+    } else {
+        bufferMgrLock.Lock(SX_SHARED);
+        firstEntry = GetVertexEntry(first, false);
+        if (firstEntry == nullptr) {
+            FatalAssert(false, LOG_TAG_BUFFER, "one of the entries does not exist!");
+            bufferMgrLock.Unlock();
+            return;
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    firstEntry->headerLock.Lock(SX_EXCLUSIVE);
+    auto it = firstEntry->migrationTasks.find(second);
+    FatalAssert(it != firstEntry->migrationTasks.end(), LOG_TAG_BUFFER,
+                "the migration task to be removed does not exist!");
+    firstEntry->migrationTasks.erase(it);
+    firstEntry->headerLock.Unlock();
+}
+
+bool BufferManager::AddCompactionTaskIfNotExists(VectorID id, BufferVertexEntry* entry) {
+    CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_BUFFER);
+
+    if (entry != nullptr) {
+        FatalAssert(entry->centroidMeta.selfId == id, LOG_TAG_BUFFER,
+                    "entry does not correspond to id!");
+    } else {
+        bufferMgrLock.Lock(SX_SHARED);
+        entry = GetVertexEntry(id, false);
+        if (entry == nullptr) {
+            FatalAssert(false, LOG_TAG_BUFFER, "one of the entries does not exist!");
+            bufferMgrLock.Unlock();
+            return false;
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    return !(entry->hasCompactionTask.exchange(true));
+}
+
+void BufferManager::RemoveCompactionTask(VectorID id, BufferVertexEntry* entry) {
+    CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_BUFFER);
+
+    if (entry != nullptr) {
+        FatalAssert(entry->centroidMeta.selfId == id, LOG_TAG_BUFFER,
+                    "entry does not correspond to id!");
+    } else {
+        bufferMgrLock.Lock(SX_SHARED);
+        entry = GetVertexEntry(id, false);
+        if (entry == nullptr) {
+            FatalAssert(false, LOG_TAG_BUFFER, "one of the entries does not exist!");
+            bufferMgrLock.Unlock();
+            return;
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    entry->hasCompactionTask.store(false, std::memory_order_release);
+}
+
+bool BufferManager::AddMergeTaskIfNotExists(VectorID id, BufferVertexEntry* entry) {
+    CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_BUFFER);
+
+    if (entry != nullptr) {
+        FatalAssert(entry->centroidMeta.selfId == id, LOG_TAG_BUFFER,
+                    "entry does not correspond to id!");
+    } else {
+        bufferMgrLock.Lock(SX_SHARED);
+        entry = GetVertexEntry(id, false);
+        if (entry == nullptr) {
+            FatalAssert(false, LOG_TAG_BUFFER, "one of the entries does not exist!");
+            bufferMgrLock.Unlock();
+            return false;
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    return !(entry->hasMergeTask.exchange(true));
+}
+
+void BufferManager::RemoveMergeTask(VectorID id, BufferVertexEntry* entry) {
+    CHECK_VECTORID_IS_VALID(id, LOG_TAG_BUFFER);
+    CHECK_VECTORID_IS_CENTROID(id, LOG_TAG_BUFFER);
+
+    if (entry != nullptr) {
+        FatalAssert(entry->centroidMeta.selfId == id, LOG_TAG_BUFFER,
+                    "entry does not correspond to id!");
+    } else {
+        bufferMgrLock.Lock(SX_SHARED);
+        entry = GetVertexEntry(id, false);
+        if (entry == nullptr) {
+            FatalAssert(false, LOG_TAG_BUFFER, "one of the entries does not exist!");
+            bufferMgrLock.Unlock();
+            return;
+        }
+        bufferMgrLock.Unlock();
+    }
+
+    entry->hasMergeTask.store(false, std::memory_order_release);
+}
+
 
 VectorID BufferManager::GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclude,
                                                    bool need_lock, uint64_t* num_retries) {

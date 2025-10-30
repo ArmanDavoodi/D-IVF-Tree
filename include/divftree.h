@@ -1233,6 +1233,7 @@ protected:
         CHECK_NOT_NULLPTR(cluster, LOG_TAG_DIVFTREE);
 
         if (cluster->cluster.header.num_deleted.load(std::memory_order_relaxed) == 0) {
+            bufferMgr->RemoveCompactionTask(target, entry);
             bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(false, false));
             return;
         }
@@ -1242,6 +1243,7 @@ protected:
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "BGCompaction triggered for " VECTORID_LOG_FMT,
                 VECTORID_LOG(target));
         (void)CompactAndInsert(entry, dummy);
+        bufferMgr->RemoveCompactionTask(target, entry);
         bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(true, true));
     }
 
@@ -1776,14 +1778,20 @@ protected:
             uint16_t reserved = container->cluster.header.reserved_size.load(std::memory_order_acquire);
             if ((reserved - deleted) >= 1) {
                 if ((reserved - deleted) < container->attr.min_size) {
-                    bool res = merge_tasks.Push(MergeTask{container_entry->centroidMeta.selfId});
-                    UNUSED_VARIABLE(res);
-                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                    if (bufferMgr->AddMergeTaskIfNotExists(container_entry->centroidMeta.selfId,
+                                                           container_entry)) {
+                        bool res = merge_tasks.Push(MergeTask{container_entry->centroidMeta.selfId});
+                        UNUSED_VARIABLE(res);
+                        FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                    }
                 } else if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
                                              (double)deleted / (double)reserved)))) {
-                    bool res = compaction_tasks.Push(CompactionTask{container_entry->centroidMeta.selfId});
-                    UNUSED_VARIABLE(res);
-                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                    if (bufferMgr->AddCompactionTaskIfNotExists(container_entry->centroidMeta.selfId,
+                                                                container_entry)) {
+                        bool res = compaction_tasks.Push(CompactionTask{container_entry->centroidMeta.selfId});
+                        UNUSED_VARIABLE(res);
+                        FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                    }
                 }
                 bufferMgr->ReleaseBufferEntry(container_entry, ReleaseBufferEntryFlags(false, false));
                 return;
@@ -2078,15 +2086,19 @@ protected:
             uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) - batch.size;
             uint16_t reserved = src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire);
             if ((reserved - num_deleted) < src_cluster->attr.min_size) {
-                bool res = merge_tasks.Push(MergeTask{src_id});
-                UNUSED_VARIABLE(res);
-                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                if (bufferMgr->AddMergeTaskIfNotExists(src_id, *src_entry)) {
+                    bool res = merge_tasks.Push(MergeTask{src_id});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                }
             } else if ((num_deleted > 0) &&
                        (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
                                                   ((double)num_deleted / (double)reserved))))) {
-                bool res = compaction_tasks.Push(CompactionTask{src_id});
-                UNUSED_VARIABLE(res);
-                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                if (bufferMgr->AddCompactionTaskIfNotExists(src_id, *src_entry)) {
+                    bool res = compaction_tasks.Push(CompactionTask{src_id});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                }
             }
             BufferVertexEntry* src_entry_cpy = *src_entry;
             *src_entry = nullptr;
@@ -2369,6 +2381,7 @@ protected:
         if (srcId < destId) {
             rs = ReadAndCheckVersion(srcId, srcVersion, entries, max_entries, num_entries, SX_EXCLUSIVE);
             if (!rs.IsOK()) {
+                bufferMgr->RemoveMergeTask(srcId);
                 return rs;
             }
             srcEntry = &entries[max_entries - num_entries];
@@ -2382,6 +2395,7 @@ protected:
             /* size should not be 0 because the one who 0ed the size will also delete the cluster! */
             totalSize = reservedSize - srcCluster->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if (totalSize >= srcCluster->attr.min_size) {
+                bufferMgr->RemoveMergeTask(srcId, *srcEntry);
                 bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                    ReleaseBufferEntryFlags(false, false));
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
@@ -2389,18 +2403,21 @@ protected:
 
             rs = ReadAndCheckVersion(destId, destVersion, entries, max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
+                bufferMgr->RemoveMergeTask(srcId, *srcEntry);
                 return rs;
             }
             destEntry = &entries[max_entries - num_entries];
         } else {
             rs = ReadAndCheckVersion(destId, destVersion, entries, max_entries, num_entries, SX_SHARED);
             if (!rs.IsOK()) {
+                bufferMgr->RemoveMergeTask(srcId);
                 return rs;
             }
             destEntry = &entries[max_entries - num_entries];
 
             rs = ReadAndCheckVersion(srcId, srcVersion, entries, max_entries, num_entries, SX_EXCLUSIVE);
             if (!rs.IsOK()) {
+                bufferMgr->RemoveMergeTask(srcId);
                 return rs;
             }
 
@@ -2415,6 +2432,7 @@ protected:
             /* size should not be 0 because the one who 0ed the size will also delete the cluster! */
             totalSize = reservedSize - srcCluster->cluster.header.num_deleted.load(std::memory_order_relaxed);
             if (totalSize >= srcCluster->attr.min_size) {
+                bufferMgr->RemoveMergeTask(srcId, *srcEntry);
                 bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                    ReleaseBufferEntryFlags(false, false));
                 return RetStatus{.stat=RetStatus::SRC_HAS_TOO_MANY_VECTORS, .message=nullptr};
@@ -2480,6 +2498,7 @@ protected:
                     VECTORID_LOG(srcId), VECTORID_LOG(destId));
             srcCluster->cluster.header.num_deleted.store(reservedSize, std::memory_order_release);
             (*srcEntry)->state.store(CLUSTER_DELETE_IN_PROGRESS, std::memory_order_release);
+            /* no need to unset the merge flag here as the entry is deleted */
             PruneEmptyVertexAndRelease(*srcEntry);
             delete[] batch.data;
             if (!is_leaf) {
@@ -2535,6 +2554,7 @@ protected:
         VectorLocation target_loc;
         BufferVertexEntry* parent_entry = target_entry->ReadParentEntry(target_loc);
         if (parent_entry == nullptr) {
+            bufferMgr->RemoveMergeTask(target, target_entry);
             bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
             return;
         }
@@ -2547,6 +2567,7 @@ protected:
         uint16_t target_num_deleted = target_cluster->cluster.header.num_deleted.load(std::memory_order_acquire);
         uint16_t target_size = target_cluster->cluster.header.visible_size.load(std::memory_order_acquire);
         if (target_size - target_num_deleted == 0) {
+            bufferMgr->RemoveMergeTask(target, target_entry);
             bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
             bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
             return;
@@ -2556,6 +2577,7 @@ protected:
         bool res = ComputeCentroid(target_cluster->cluster, target_cluster->attr.block_size, target_cluster->attr.cap,
                                    target.IsLeaf(), nullptr, 0, attr.dimension, attr.distanceAlg, target_centroid);
         if (!res) {
+            bufferMgr->RemoveMergeTask(target, target_entry);
             bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
             bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
             return;
@@ -2601,7 +2623,14 @@ protected:
 
         /* todo: change in multi node */
         if (best_id != INVALID_VECTOR_ID) {
-            Merge(target, target_ver, best_id, best_version);
+            RetStatus rs = Merge(target, target_ver, best_id, best_version);
+            if (!rs.IsOK() && (rs.stat == RetStatus::DEST_UPDATED)) {
+                bool res = merge_tasks.Push(MergeTask{target});
+                UNUSED_VARIABLE(res);
+                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+            }
+        } else {
+            bufferMgr->RemoveMergeTask(target, target_entry);
         }
     }
 
@@ -2671,9 +2700,11 @@ protected:
             uint16_t reserved = vertex->cluster.header.reserved_size.load(std::memory_order_acquire);
             if ((deleted > 0) && (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
                                     (double)deleted / (double)reserved)))) {
-                bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
-                UNUSED_VARIABLE(res);
-                FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                if (bufferMgr->AddCompactionTaskIfNotExists(vertex->attr.centroid_id)) {
+                    bool res = compaction_tasks.Push(CompactionTask{vertex->attr.centroid_id});
+                    UNUSED_VARIABLE(res);
+                    FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
+                }
             }
         }
 #ifdef EXCESS_LOGING
@@ -2858,7 +2889,8 @@ protected:
                     }
                 }
 
-                if ((secondId != INVALID_VECTOR_ID) && (firstId != INVALID_VECTOR_ID)) {
+                if ((secondId != INVALID_VECTOR_ID) && (firstId != INVALID_VECTOR_ID) &&
+                    bufferMgr->AddMigrationTaskIfNotExists(firstId, secondId)) {
                     bool res = migration_tasks.Push(MigrationCheckTask{.first=firstId, .second=secondId});
                     UNUSED_VARIABLE(res);
                     FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
@@ -2999,6 +3031,7 @@ protected:
                     VECTORID_LOG(nextTask.first), VECTORID_LOG(nextTask.second));
 #endif
                 MigrationCheck(nextTask.first, nextTask.second);
+                bufferMgr->RemoveMigrationTask(nextTask.first, nextTask.second);
             } else {
                 auto ids = bufferMgr->GetTwoRandomCentroidIdAtNonRootLayer();
                 if ((ids.first != INVALID_VECTOR_ID) && (ids.second != INVALID_VECTOR_ID)) {
@@ -3023,6 +3056,7 @@ protected:
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
 
+        VectorID oldTarget = INVALID_VECTOR_ID;
         while (!end_signal.load(std::memory_order_acquire)) {
             self->LoopIncrement();
             MergeTask nextTask;
@@ -3032,7 +3066,13 @@ protected:
                         "BGMerge task " VECTORID_LOG_FMT,
                         VECTORID_LOG(nextTask.target));
 #endif
+                if (oldTarget == nextTask.target) {
+                    msleep(1);
+                }
+                oldTarget = nextTask.target;
                 MergeCheck(nextTask.target);
+            } else {
+                oldTarget = INVALID_VECTOR_ID;
             }
         }
         self->DestroyDIVFThread();

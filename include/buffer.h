@@ -202,6 +202,11 @@ struct alignas(16) BufferVertexEntry {
     CondVar condVar;
     Version currentVersion;
     uint64_t nextVersionPin;
+
+    std::atomic<bool> hasCompactionTask;
+    std::atomic<bool> hasMergeTask;
+
+    std::unordered_set<VectorID, VectorIDHash> migrationTasks;
     /*
      * liveVersions can only be updated if parent is locked(any mode),
      * self is locked in X mode, and headerLock is locked in X mode
@@ -311,6 +316,13 @@ public:
     void SignalUpdateHandleIfNeeded(VectorID target);
     RetStatus WaitForUpdateToGoThrough(VectorID target);
     RetStatus CheckIfUpdateHasGoneThrough(VectorID target, bool& updated);
+
+    bool AddMigrationTaskIfNotExists(VectorID first, VectorID second, BufferVertexEntry* firstEntry = nullptr);
+    void RemoveMigrationTask(VectorID first, VectorID second, BufferVertexEntry* firstEntry = nullptr);
+    bool AddCompactionTaskIfNotExists(VectorID id, BufferVertexEntry* entry = nullptr);
+    void RemoveCompactionTask(VectorID id, BufferVertexEntry* entry = nullptr);
+    bool AddMergeTaskIfNotExists(VectorID id, BufferVertexEntry* entry = nullptr);
+    void RemoveMergeTask(VectorID id, BufferVertexEntry* entry = nullptr);
 
     VectorID GetRandomCentroidIdAtLayer(uint8_t level, VectorID exclude = INVALID_VECTOR_ID,
                                         bool need_lock = true, uint64_t* num_retries = nullptr);
