@@ -18,5 +18,10 @@ inline uint32_t build_size;
 inline uint32_t warmup_time;
 inline uint32_t run_time;
 inline uint32_t throughput_report_time;
+inline bool show_runtime_report_for_build_and_warmup;
+
+inline bool collect_build_stats;
+inline bool collect_warmup_stats;
+inline bool collect_run_stats;
 
 #endif

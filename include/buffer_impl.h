@@ -459,8 +459,6 @@ BufferManager::~BufferManager() {
         }
     }
 
-    sleep(10);
-
     // std::align_val_t al = (std::align_val_t)16;
     for (BufferVectorEntry* entry : vectorDirectory) {
         if (entry != nullptr) {

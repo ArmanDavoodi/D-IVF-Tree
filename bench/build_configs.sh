@@ -58,6 +58,11 @@ VAR_RUN_TIME_SEC=300 #real test used for stat collection
 
 # VAR_RUNTIME_THROUGHPUT_REPORT_SEC=0 #use 0 to disable
 VAR_RUNTIME_THROUGHPUT_REPORT_SEC=5 #use 0 to disable
+VAR_SHOW_RUNTIME_REPORT_FOR_BUILD_AND_WARMUP=1 #1 to show throughput report during build and warmup phases
+
+VAR_COLLECT_BUILD_STATS=1 #1 to collect and print stats after build phase
+VAR_COLLECT_WARMUP_STATS=1 #1 to collect and print stats after warmup phase
+VAR_COLLECT_RUN_STATS=1 #1 to collect and print stats after run phase
 
 #create the config file if it does not exists and clean it if it does
 echo > $CONF_FILE
@@ -106,5 +111,10 @@ echo "warmup-time:$VAR_WARMUP_TIME_SEC" >> $CONF_FILE
 echo "run-time:$VAR_RUN_TIME_SEC" >> $CONF_FILE
 
 echo "throughput-report-time:$VAR_RUNTIME_THROUGHPUT_REPORT_SEC" >> $CONF_FILE
+echo "show-runtime-report-for-build-and-warmup:$VAR_SHOW_RUNTIME_REPORT_FOR_BUILD_AND_WARMUP" >> $CONF_FILE
+
+echo "collect-build-stats:$VAR_COLLECT_BUILD_STATS" >> $CONF_FILE
+echo "collect-warmup-stats:$VAR_COLLECT_WARMUP_STATS" >> $CONF_FILE
+echo "collect-run-stats:$VAR_COLLECT_RUN_STATS" >> $CONF_FILE
 
 cd $CURDIR

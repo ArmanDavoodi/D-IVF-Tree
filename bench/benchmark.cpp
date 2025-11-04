@@ -191,9 +191,29 @@ void worker(divftree::Thread* self) {
         ready = warmup_start.load(std::memory_order_acquire);
     }
 
+    uint64_t current_search = 0;
+    uint64_t current_search_err = 0;
     while(!warmup_finished.load(std::memory_order_acquire)) {
         self->LoopIncrement();
         rs = Search(neighbours);
+        if (show_runtime_report_for_build_and_warmup) {
+            if (rs.IsOK()) {
+                FlushIncrement(current_search, search_queries);
+            } else {
+                FlushIncrement(current_search_err, search_errors);
+            }
+        }
+    }
+
+    if (show_runtime_report_for_build_and_warmup) {
+        if (current_search != 0) {
+            search_queries.fetch_add(current_search);
+            current_search = 0;
+        }
+        if (current_search_err != 0) {
+            search_errors.fetch_add(current_search_err);
+            current_search_err = 0;
+        }
     }
 
     num_ready = run_ready.fetch_add(1);
@@ -206,10 +226,10 @@ void worker(divftree::Thread* self) {
         ready = run_start.load(std::memory_order_acquire);
     }
 
-    uint64_t current_search = 0;
+    current_search = 0;
     uint64_t current_insert = 0;
     uint64_t current_delete = 0;
-    uint64_t current_search_err = 0;
+    current_search_err = 0;
     uint64_t current_insert_err = 0;
     uint64_t current_delete_err = 0;
     while(!run_finished.load(std::memory_order_acquire)) {
@@ -299,6 +319,10 @@ int main() {
     CloseFile(file);
     LoadQueryVectors();
 
+    if (collect_build_stats) {
+        index_attr.collect_stats = true;
+    }
+
     BenchLog("Starting benchmark for %s(type:%s, dimension:%hu, distance:%s) "
            "with %lu threads for build-size:%u, warmup-time:%u(s), and run-time:%u(s) with %u percent writes "
            "and search span of %hhu and %hhu and default k of %hhu for leaf and internal vertices.",
@@ -309,6 +333,7 @@ int main() {
     BenchLog("Initing the index with the attributes: %s", index_attr.ToString().ToCStr());
 
     vector_index = new divftree::DIVFTree(index_attr);
+    divftree::String build_stats, warmup_stats, run_stats;
 
     std::vector<divftree::Thread*> threads(num_threads);
     for (size_t i = 0; i < num_threads; ++i) {
@@ -333,8 +358,20 @@ int main() {
     build_start.notify_all();
 
     num_ready = warmup_ready.load(std::memory_order_acquire);
+    uint32_t last_report_time = 0;
+    uint32_t last_num_inserted = 0;
     while (num_ready != num_threads) {
-        warmup_ready.wait(num_ready);
+        if (show_runtime_report_for_build_and_warmup) {
+            divftree::sleep(throughput_report_time);
+            last_report_time += throughput_report_time;
+            uint32_t curr_num_inserted = build_num_inserted.load(std::memory_order_acquire);
+            ExclusiveBenchLog("[%u s]: Build Phase Report: Inserted %u, Total: %u/%u -> %.2f%% ", last_report_time,
+                              curr_num_inserted - last_num_inserted, curr_num_inserted, build_size,
+                              ((double)curr_num_inserted * 100.0) / (double)build_size);
+            last_num_inserted = curr_num_inserted;
+        } else {
+            warmup_ready.wait(num_ready);
+        }
         num_ready = warmup_ready.load(std::memory_order_acquire);
     }
 
@@ -342,16 +379,62 @@ int main() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     size_t build_time = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 
+    if (collect_build_stats) {
+        if (!collect_warmup_stats) {
+            vector_index->StopStatsCollection();
+            sleep(1); // make sure all stats are collected
+        }
+        build_stats = vector_index->GetStatistics("Build", true);
+    } else if (collect_warmup_stats) {
+        vector_index->StartStatsCollection();
+    }
+
     BenchLog("Start Warmup...");
     warmup_start.store(true, std::memory_order_release);
     warmup_start.notify_all();
-    divftree::sleep(warmup_time);
+
+    if (show_runtime_report_for_build_and_warmup) {
+        uint32_t time_to_wait = throughput_report_time;
+        size_t last_rps = 0, last_reps = 0;
+        for (uint32_t total_wait_time = 0; total_wait_time < warmup_time; total_wait_time += time_to_wait) {
+            divftree::sleep(time_to_wait);
+            size_t cur_rps = search_queries.load(std::memory_order_acquire);
+            size_t cur_reps = search_errors.load(std::memory_order_acquire);
+
+            ExclusiveBenchLog("[%u s]: Warmup Phase Report: RPS: %.2f | REPS: %.2f",
+                              total_wait_time + time_to_wait,
+                              (double)(cur_rps - last_rps) / (double)time_to_wait,
+                              (double)(cur_reps - last_reps) / (double)time_to_wait);
+            last_rps = cur_rps;
+            last_reps = cur_reps;
+            if ((total_wait_time + time_to_wait > run_time)) {
+                time_to_wait = run_time - total_wait_time;
+            }
+        }
+    } else {
+        divftree::sleep(warmup_time);
+    }
 
     warmup_finished.store(true, std::memory_order_release);
     num_ready = run_ready.load(std::memory_order_acquire);
     while (num_ready != num_threads) {
         run_ready.wait(num_ready);
         num_ready = run_ready.load(std::memory_order_acquire);
+    }
+
+    if (collect_warmup_stats) {
+        if (!collect_run_stats) {
+            vector_index->StopStatsCollection();
+            sleep(1); // make sure all stats are collected
+        }
+        warmup_stats = vector_index->GetStatistics("Warmup", true);
+    } else if (collect_run_stats) {
+        vector_index->StartStatsCollection();
+    }
+
+    if (show_runtime_report_for_build_and_warmup) {
+        search_queries.store(0, std::memory_order_release);
+        search_errors.store(0, std::memory_order_release);
     }
 
     BenchLog("Start Run...");
@@ -409,6 +492,12 @@ int main() {
     duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     size_t total_run_time = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 
+    if (collect_run_stats) {
+        vector_index->StopStatsCollection();
+        sleep(1); // make sure all stats are collected
+        run_stats = vector_index->GetStatistics("Run", true);
+    }
+
     BenchLog("Stopping all threads...");
     for (size_t i = 0; i < num_threads; ++i) {
         threads[i]->Join();
@@ -426,6 +515,18 @@ int main() {
 
     if (dataset_finished.load(std::memory_order_acquire)) {
         ExclusiveBenchLog("Input dataset was finished during run!");
+    }
+
+    if (collect_build_stats) {
+        ExclusiveBenchLog("%s", build_stats.ToCStr());
+    }
+
+    if (collect_warmup_stats) {
+        ExclusiveBenchLog("%s", warmup_stats.ToCStr());
+    }
+
+    if (collect_run_stats) {
+        ExclusiveBenchLog("%s", run_stats.ToCStr());
     }
 
     ExclusiveBenchLog("\n___________________________________________\n");

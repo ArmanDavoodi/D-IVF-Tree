@@ -698,6 +698,31 @@ public:
                                                            attr.dimension);
         }
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Create DIVFTree Index Start");
+#ifdef ENABLE_STAT_COLLECTION
+        if (attr.collect_stats) {
+            StartStatsCollection();
+        } else {
+            StopStatsCollection();
+        }
+
+        bg_migration_iterations = new std::atomic<uint64_t>[attr.num_migrators];
+        bg_migration_tasks_completed = new std::atomic<uint64_t>[attr.num_migrators];
+        bg_migration_num_migrated_vectors = new std::atomic<uint64_t>[attr.num_migrators];
+
+        bg_merge_iterations = new std::atomic<uint64_t>[attr.num_mergers];
+        bg_merge_tasks_completed = new std::atomic<uint64_t>[attr.num_mergers];
+        bg_merge_num_merged_clusters = new std::atomic<uint64_t>[attr.num_mergers];
+
+        bg_compaction_iterations = new std::atomic<uint64_t>[attr.num_compactors];
+        bg_compaction_tasks_completed = new std::atomic<uint64_t>[attr.num_compactors];
+        bg_compaction_num_compacted_clusters = new std::atomic<uint64_t>[attr.num_compactors];
+
+        total_bg_search_tasks = 0;
+        bg_search_iterations = new std::atomic<uint64_t>[attr.num_searchers];
+        bg_search_tasks_completed = new std::atomic<uint64_t>[attr.num_searchers];
+
+        ClearStats(true);
+#endif
         VectorID root_id;
         BufferVertexEntry* root_entry =
             BufferManager::Init(sizeof(DIVFTreeVertex) - ALLIGNED_SIZE(sizeof(ClusterHeader)),
@@ -715,9 +740,26 @@ public:
 
     ~DIVFTree() override {
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index Start");
+
+        StopStatsCollection();
+
         end_signal.store(true, std::memory_order_release);
 
         DestroyBGThreads();
+
+#ifdef ENABLE_STAT_COLLECTION
+        delete[] bg_migration_iterations;
+        delete[] bg_migration_tasks_completed;
+        delete[] bg_migration_num_migrated_vectors;
+        delete[] bg_merge_iterations;
+        delete[] bg_merge_tasks_completed;
+        delete[] bg_merge_num_merged_clusters;
+        delete[] bg_compaction_iterations;
+        delete[] bg_compaction_tasks_completed;
+        delete[] bg_compaction_num_compacted_clusters;
+        delete[] bg_search_iterations;
+        delete[] bg_search_tasks_completed;
+#endif
 
         BufferManager::GetInstance()->Shutdown();
         DIVFLOG(LOG_LEVEL_LOG, LOG_TAG_DIVFTREE, "Shutdown DIVFTree Index End");
@@ -943,6 +985,311 @@ public:
         return attr;
     }
 
+    inline void EndBGThreads() override {
+        end_signal.store(true, std::memory_order_release);
+        for (size_t i = 0; i < attr.num_compactors; ++i) {
+            CHECK_NOT_NULLPTR(bg_compactors[i], LOG_TAG_DIVFTREE);
+            bg_compactors[i]->WaitForThreadToFinish();
+        }
+
+        for (size_t i = 0; i < attr.num_mergers; ++i) {
+            CHECK_NOT_NULLPTR(bg_mergers[i], LOG_TAG_DIVFTREE);
+            bg_mergers[i]->WaitForThreadToFinish();
+        }
+
+        for (size_t i = 0; i < attr.num_migrators; ++i) {
+            CHECK_NOT_NULLPTR(bg_migrators[i], LOG_TAG_DIVFTREE);
+            bg_migrators[i]->WaitForThreadToFinish();
+        }
+
+        for (size_t i = 0; i < attr.num_searchers; ++i) {
+            CHECK_NOT_NULLPTR(searchers[i], LOG_TAG_DIVFTREE);
+            searchers[i]->WaitForThreadToFinish();
+        }
+
+#ifdef HANG_DETECTION
+        end_bghang_detector.store(true, std::memory_order_release);
+        CHECK_NOT_NULLPTR(bg_hang_detector, LOG_TAG_DIVFTREE);
+        bg_hang_detector->WaitForThreadToFinish();
+#endif
+    }
+
+    inline String GetStatistics(std::string title_extention = "", bool clear_stats = false) override {
+#ifdef ENABLE_STAT_COLLECTION
+        stats_lock.Lock(SX_EXCLUSIVE);
+        String out("\n************************ %s%sStatistics ************************\n\n",
+                   title_extention.empty() ? "" : " ", title_extention.c_str());
+        uint64_t total_bg_migration_tasks_completed = 0;
+        uint64_t total_bg_migration_num_migrated_vectors = 0;
+        uint64_t total_bg_merge_tasks_completed = 0;
+        uint64_t total_bg_merge_num_merged_clusters = 0;
+        uint64_t total_bg_compaction_tasks_completed = 0;
+        uint64_t total_bg_compaction_num_compacted_clusters = 0;
+        uint64_t total_bg_search_tasks_completed = 0;
+
+        uint64_t* bg_migration_iterations_cpy = nullptr;
+        uint64_t* bg_migration_tasks_completed_cpy = nullptr;
+        uint64_t* bg_migration_num_migrated_vectors_cpy = nullptr;
+        uint64_t* bg_merge_iterations_cpy = nullptr;
+        uint64_t* bg_merge_tasks_completed_cpy = nullptr;
+        uint64_t* bg_merge_num_merged_clusters_cpy = nullptr;
+        uint64_t* bg_compaction_iterations_cpy = nullptr;
+        uint64_t* bg_compaction_tasks_completed_cpy = nullptr;
+        uint64_t* bg_compaction_num_compacted_clusters_cpy = nullptr;
+        uint64_t* bg_search_iterations_cpy = nullptr;
+        uint64_t* bg_search_tasks_completed_cpy = nullptr;
+
+        if (attr.num_migrators > 0) {
+            CHECK_NOT_NULLPTR(bg_migration_tasks_completed, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_migration_num_migrated_vectors, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_migration_iterations, LOG_TAG_DIVFTREE);
+            FatalAssert(bg_migrators.size() == attr.num_migrators, LOG_TAG_DIVFTREE,
+                        "bg_migrators size mismatch with attr.num_migrators");
+
+            bg_migration_tasks_completed_cpy = new uint64_t[attr.num_migrators];
+            bg_migration_num_migrated_vectors_cpy = new uint64_t[attr.num_migrators];
+            bg_migration_iterations_cpy = new uint64_t[attr.num_migrators];
+
+            for (size_t i = 0; i < attr.num_migrators; ++i) {
+                uint64_t tasks_completed = bg_migration_tasks_completed[i].load(std::memory_order_acquire);
+                uint64_t num_migrated_vectors = bg_migration_num_migrated_vectors[i].load(std::memory_order_acquire);
+                uint64_t iterations = bg_migration_iterations[i].load(std::memory_order_acquire);
+
+                bg_migration_tasks_completed_cpy[i] = tasks_completed;
+                bg_migration_num_migrated_vectors_cpy[i] = num_migrated_vectors;
+                bg_migration_iterations_cpy[i] = iterations;
+                total_bg_migration_tasks_completed += tasks_completed;
+                total_bg_migration_num_migrated_vectors += num_migrated_vectors;
+            }
+
+            out += String("BGMigration: num_bg_threads=%lu, tasks_completed=%lu, num_migrated_vectors=%lu:\n",
+                          attr.num_migrators, total_bg_migration_tasks_completed,
+                          total_bg_migration_num_migrated_vectors);
+
+            for (size_t i = 0; i < attr.num_migrators; ++i) {
+                double task_completed_to_total =
+                    (total_bg_migration_tasks_completed == 0) ? 0 :
+                                                                (bg_migration_tasks_completed_cpy[i] * 100) /
+                                                                (double)total_bg_migration_tasks_completed;
+                double num_migrated_vectors_to_total =
+                    (total_bg_migration_num_migrated_vectors == 0) ? 0 :
+                                                                    (bg_migration_num_migrated_vectors_cpy[i] * 100) /
+                                                                    (double)total_bg_migration_num_migrated_vectors;
+                uint64_t num_migrated_vectors_per_total_checks = 0;
+                double active_tasks_to_total = 0;
+                if (bg_migration_iterations_cpy[i] > 0) {
+                    num_migrated_vectors_per_total_checks =
+                        bg_migration_num_migrated_vectors_cpy[i] / bg_migration_iterations_cpy[i];
+                    active_tasks_to_total =
+                        (bg_migration_tasks_completed_cpy[i] * 100) /
+                        (double)bg_migration_iterations_cpy[i];
+                }
+                out += String("\t* Migrator Thread %lu: tasks_completed=%lu, num_migrated_vectors=%lu, iterations=%lu |"
+                              " task_completed_to_total=%.2f%%, num_migrated_vectors_to_total=%.2f%% | "
+                              " num_migrated_vectors_per_total_checks=%lu, "
+                              "active_tasks_to_total=%.2f%%\n",
+                              bg_migrators[i]->ID(), bg_migration_tasks_completed_cpy[i],
+                              bg_migration_num_migrated_vectors_cpy[i], bg_migration_iterations_cpy[i],
+                              task_completed_to_total, num_migrated_vectors_to_total,
+                              num_migrated_vectors_per_total_checks, active_tasks_to_total);
+            }
+
+            delete[] bg_migration_iterations_cpy;
+            delete[] bg_migration_tasks_completed_cpy;
+            delete[] bg_migration_num_migrated_vectors_cpy;
+        } else {
+            out += String("No Background Migration Tasks!\n");
+        }
+
+        out += String("\n");
+
+        if (attr.num_mergers > 0) {
+            CHECK_NOT_NULLPTR(bg_merge_tasks_completed, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_merge_num_merged_clusters, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_merge_iterations, LOG_TAG_DIVFTREE);
+            FatalAssert(bg_mergers.size() == attr.num_mergers, LOG_TAG_DIVFTREE,
+                        "bg_mergers size mismatch with attr.num_mergers");
+
+            bg_merge_tasks_completed_cpy = new uint64_t[attr.num_mergers];
+            bg_merge_num_merged_clusters_cpy = new uint64_t[attr.num_mergers];
+            bg_merge_iterations_cpy = new uint64_t[attr.num_mergers];
+
+            for (size_t i = 0; i < attr.num_mergers; ++i) {
+                uint64_t tasks_completed = bg_merge_tasks_completed[i].load(std::memory_order_acquire);
+                uint64_t num_merged_clusters = bg_merge_num_merged_clusters[i].load(std::memory_order_acquire);
+                uint64_t iterations = bg_merge_iterations[i].load(std::memory_order_acquire);
+
+                bg_merge_tasks_completed_cpy[i] = tasks_completed;
+                bg_merge_num_merged_clusters_cpy[i] = num_merged_clusters;
+                bg_merge_iterations_cpy[i] = iterations;
+                total_bg_merge_tasks_completed += tasks_completed;
+                total_bg_merge_num_merged_clusters += num_merged_clusters;
+            }
+
+            out += String("BGMerge: num_bg_threads=%lu, tasks_completed=%lu, num_merged_clusters=%lu, "
+                          "merge_trigger_rate=%.2f%%:\n",
+                          attr.num_mergers, total_bg_merge_tasks_completed,
+                          total_bg_merge_num_merged_clusters,
+                          total_bg_merge_tasks_completed == 0 ? 0 : (total_bg_merge_num_merged_clusters * 100) /
+                                                                    (double)total_bg_merge_tasks_completed);
+
+            for (size_t i = 0; i < attr.num_mergers; ++i) {
+                double task_completed_to_total = (total_bg_merge_tasks_completed == 0) ? 0 :
+                                                            (bg_merge_tasks_completed_cpy[i] * 100) /
+                                                            (double)total_bg_merge_tasks_completed;
+                double merge_trigger_rate = bg_merge_tasks_completed_cpy[i] == 0 ?
+                    0 : (bg_merge_num_merged_clusters_cpy[i] * 100) / (double)bg_merge_tasks_completed_cpy[i];
+                double valid_iterations = bg_merge_iterations_cpy[i] == 0 ?
+                    0 : (bg_merge_tasks_completed_cpy[i] * 100) / (double)bg_merge_iterations_cpy[i];
+
+                out += String("\t* Merger Thread %lu: tasks_completed=%lu, num_merged_clusters=%lu, iterations=%lu |"
+                              " task_completed_to_total=%.2f%% | merge_trigger_rate=%.2f%%, "
+                              "valid_iterations=%.2f%%\n",
+                              bg_mergers[i]->ID(), bg_merge_tasks_completed_cpy[i],
+                              bg_merge_num_merged_clusters_cpy[i], bg_merge_iterations_cpy[i],
+                              task_completed_to_total, merge_trigger_rate, valid_iterations);
+            }
+
+            delete[] bg_merge_iterations_cpy;
+            delete[] bg_merge_tasks_completed_cpy;
+            delete[] bg_merge_num_merged_clusters_cpy;
+        } else {
+            out += String("No Background Merge Tasks!\n");
+        }
+
+        out += String("\n");
+
+        if (attr.num_compactors > 0) {
+            CHECK_NOT_NULLPTR(bg_compaction_tasks_completed, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_compaction_num_compacted_clusters, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_compaction_iterations, LOG_TAG_DIVFTREE);
+            FatalAssert(bg_compactors.size() == attr.num_compactors, LOG_TAG_DIVFTREE,
+                        "bg_compactors size mismatch with attr.num_compactors");
+
+            bg_compaction_tasks_completed_cpy = new uint64_t[attr.num_compactors];
+            bg_compaction_num_compacted_clusters_cpy = new uint64_t[attr.num_compactors];
+            bg_compaction_iterations_cpy = new uint64_t[attr.num_compactors];
+
+            for (size_t i = 0; i < attr.num_compactors; ++i) {
+                uint64_t tasks_completed = bg_compaction_tasks_completed[i].load(std::memory_order_acquire);
+                uint64_t num_compacted_clusters = bg_compaction_num_compacted_clusters[i].load(std::memory_order_acquire);
+                uint64_t iterations = bg_compaction_iterations[i].load(std::memory_order_acquire);
+
+                bg_compaction_tasks_completed_cpy[i] = tasks_completed;
+                bg_compaction_num_compacted_clusters_cpy[i] = num_compacted_clusters;
+                bg_compaction_iterations_cpy[i] = iterations;
+                total_bg_compaction_tasks_completed += tasks_completed;
+                total_bg_compaction_num_compacted_clusters += num_compacted_clusters;
+            }
+
+            out += String("BGCompaction: num_bg_threads=%lu, tasks_completed=%lu, num_compacted_clusters=%lu, "
+                          "compaction_trigger_rate=%.2f%%:\n",
+                          attr.num_compactors, total_bg_compaction_tasks_completed,
+                          total_bg_compaction_num_compacted_clusters,
+                          total_bg_compaction_tasks_completed == 0 ?
+                            0 : (total_bg_compaction_num_compacted_clusters * 100) /
+                                (double)total_bg_compaction_tasks_completed);
+
+            for (size_t i = 0; i < attr.num_compactors; ++i) {
+                double task_completed_to_total =
+                    total_bg_compaction_tasks_completed == 0 ? 0 :
+                                                                (bg_compaction_tasks_completed_cpy[i] * 100) /
+                                                                (double)total_bg_compaction_tasks_completed;
+                double compaction_trigger_rate = bg_compaction_tasks_completed_cpy[i] == 0 ?
+                    0 : (bg_compaction_num_compacted_clusters_cpy[i] * 100) /
+                        (double)bg_compaction_tasks_completed_cpy[i];
+                double valid_iterations = bg_compaction_iterations_cpy[i] == 0 ?
+                    0 : (bg_compaction_tasks_completed_cpy[i] * 100) /
+                        (double)bg_compaction_iterations_cpy[i];
+                out += String("\t* Compactor Thread %lu: tasks_completed=%lu, num_compacted_clusters=%lu, iterations=%lu |"
+                              " task_completed_to_total=%.2f%% | compaction_trigger_rate=%.2f%%, "
+                              "valid_iterations=%.2f%%\n",
+                              bg_compactors[i]->ID(), bg_compaction_tasks_completed_cpy[i],
+                              bg_compaction_num_compacted_clusters_cpy[i], bg_compaction_iterations_cpy[i],
+                              task_completed_to_total, compaction_trigger_rate, valid_iterations);
+            }
+
+            delete[] bg_compaction_tasks_completed_cpy;
+            delete[] bg_compaction_num_compacted_clusters_cpy;
+            delete[] bg_compaction_iterations_cpy;
+        } else {
+            out += String("No Background Compaction Tasks!\n");
+        }
+
+        if (attr.num_searchers > 0) {
+            CHECK_NOT_NULLPTR(bg_search_iterations, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_search_tasks_completed, LOG_TAG_DIVFTREE);
+            FatalAssert(searchers.size() == attr.num_searchers, LOG_TAG_DIVFTREE,
+                        "searchers size mismatch with attr.num_searchers");
+
+            bg_search_tasks_completed_cpy = new uint64_t[attr.num_searchers];
+            bg_search_iterations_cpy = new uint64_t[attr.num_searchers];
+
+            for (size_t i = 0; i < attr.num_searchers; ++i) {
+                uint64_t tasks_completed = bg_search_tasks_completed[i].load(std::memory_order_acquire);
+                uint64_t iterations = bg_search_iterations[i].load(std::memory_order_acquire);
+
+                bg_search_tasks_completed_cpy[i] = tasks_completed;
+                bg_search_iterations_cpy[i] = iterations;
+                total_bg_search_tasks_completed += tasks_completed;
+            }
+
+            uint64_t tasks_created = total_bg_search_tasks.load(std::memory_order_acquire);
+
+            out += String("AsyncSearch: num_bg_threads=%lu, tasks_completed=%lu, tasks_created=%lu, task_completed_to_total=%.2f%%:\n",
+                          attr.num_searchers, total_bg_search_tasks_completed, tasks_created,
+                          tasks_created == 0 ? 0 : (total_bg_search_tasks_completed * 100) / (double)tasks_created);
+
+            for (size_t i = 0; i < attr.num_searchers; ++i) {
+                double task_completed_to_total = tasks_created == 0 ? 0 :
+                                                            (bg_search_tasks_completed_cpy[i] * 100) /
+                                                            (double)tasks_created;
+                double valid_iterations = bg_search_iterations_cpy[i] == 0 ? 0 :
+                    (bg_search_tasks_completed_cpy[i] * 100) / (double)bg_search_iterations_cpy[i];
+                out += String("\t* Searcher Thread %lu: tasks_completed=%lu, iterations=%lu |"
+                              " task_completed_to_total=%.2f%% | valid_iterations=%.2f%%\n",
+                              searchers[i]->ID(), bg_search_tasks_completed_cpy[i],
+                              bg_search_iterations_cpy[i], task_completed_to_total, valid_iterations);
+            }
+
+            delete[] bg_search_tasks_completed_cpy;
+            delete[] bg_search_iterations_cpy;
+        } else {
+            out += String("No Background Search Tasks!\n");
+        }
+
+        out += String("\n");
+
+
+        out += String("************************************************************\n");
+
+        if (clear_stats) {
+            ClearStats(false);
+        }
+        stats_lock.Unlock();
+        return out;
+#else
+        return String("\n************************ Statistics collection is disabled! ************************\n");
+#endif
+    }
+
+    inline void StartStatsCollection() override {
+#ifdef ENABLE_STAT_COLLECTION
+        collect_stats.store(true, std::memory_order_release);
+#endif
+    }
+
+    inline void StopStatsCollection() override {
+#ifdef ENABLE_STAT_COLLECTION
+        collect_stats.store(false, std::memory_order_release);
+#endif
+    }
+
+    inline void ClearStats() override {
+        ClearStats(true);
+    }
+
+
     // inline String ToString(bool detailed = false) const override {
     //     String out("{Attr=<Dim=%hu, ClusteringAlg=%s, DistanceAlg=%s, "
     //                "LeafMinSize=%hu, LeafMaxSize=%hu, InternalMinSize=%hu, InternalMaxSize=%hu, "
@@ -1029,6 +1376,166 @@ protected:
     BlockingQueue<CompactionTask> compaction_tasks;
     std::vector<Thread*> searchers;
     BlockingQueue<SearchTask*> search_tasks;
+
+#ifdef ENABLE_STAT_COLLECTION
+    std::atomic<bool> collect_stats = true;
+    SXSpinLock stats_lock;
+
+    std::atomic<uint64_t>* bg_migration_iterations = nullptr;
+    std::atomic<uint64_t>* bg_migration_tasks_completed = nullptr;
+    std::atomic<uint64_t>* bg_migration_num_migrated_vectors = nullptr;
+
+    std::atomic<uint64_t>* bg_merge_iterations = nullptr;
+    std::atomic<uint64_t>* bg_merge_tasks_completed = nullptr;
+    std::atomic<uint64_t>* bg_merge_num_merged_clusters = nullptr;
+
+    std::atomic<uint64_t>* bg_compaction_iterations = nullptr;
+    std::atomic<uint64_t>* bg_compaction_tasks_completed = nullptr;
+    std::atomic<uint64_t>* bg_compaction_num_compacted_clusters = nullptr;
+
+    std::atomic<uint64_t> total_bg_search_tasks = 0;
+    std::atomic<uint64_t>* bg_search_iterations = nullptr;
+    std::atomic<uint64_t>* bg_search_tasks_completed = nullptr;
+
+#ifdef COLLECT_LATENCY_STATS
+#endif
+#endif
+
+    inline void ClearStats(bool need_lock) {
+#ifdef ENABLE_STAT_COLLECTION
+        if (need_lock) {
+            stats_lock.Lock(SX_EXCLUSIVE);
+        }
+        threadSelf->SanityCheckLockHeldInModeByMe(&stats_lock, SX_EXCLUSIVE);
+
+        if (attr.num_migrators > 0) {
+            CHECK_NOT_NULLPTR(bg_migration_iterations, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_migration_tasks_completed, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_migration_num_migrated_vectors, LOG_TAG_DIVFTREE);
+            for (size_t i = 0; i < attr.num_migrators; ++i) {
+                bg_migration_iterations[i].store(0, std::memory_order_release);
+                bg_migration_tasks_completed[i].store(0, std::memory_order_release);
+                bg_migration_num_migrated_vectors[i].store(0, std::memory_order_release);
+            }
+        }
+
+        if (attr.num_mergers > 0) {
+            CHECK_NOT_NULLPTR(bg_merge_iterations, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_merge_tasks_completed, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_merge_num_merged_clusters, LOG_TAG_DIVFTREE);
+            for (size_t i = 0; i < attr.num_mergers; ++i) {
+                bg_merge_iterations[i].store(0, std::memory_order_release);
+                bg_merge_tasks_completed[i].store(0, std::memory_order_release);
+                bg_merge_num_merged_clusters[i].store(0, std::memory_order_release);
+            }
+        }
+
+        if (attr.num_compactors > 0) {
+            CHECK_NOT_NULLPTR(bg_compaction_iterations, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_compaction_tasks_completed, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_compaction_num_compacted_clusters, LOG_TAG_DIVFTREE);
+            for (size_t i = 0; i < attr.num_compactors; ++i) {
+                bg_compaction_iterations[i].store(0, std::memory_order_release);
+                bg_compaction_tasks_completed[i].store(0, std::memory_order_release);
+                bg_compaction_num_compacted_clusters[i].store(0, std::memory_order_release);
+            }
+        }
+
+        if (attr.num_searchers > 0) {
+            CHECK_NOT_NULLPTR(bg_search_iterations, LOG_TAG_DIVFTREE);
+            CHECK_NOT_NULLPTR(bg_search_tasks_completed, LOG_TAG_DIVFTREE);
+            for (size_t i = 0; i < attr.num_searchers; ++i) {
+                bg_search_iterations[i].store(0, std::memory_order_release);
+                bg_search_tasks_completed[i].store(0, std::memory_order_release);
+            }
+        }
+        total_bg_search_tasks.store(0, std::memory_order_release);
+        if (need_lock) {
+            stats_lock.Unlock();
+        }
+#endif
+    }
+
+    void BGMigrationStatsUpdate(uint64_t thread_index, bool completed_task, uint64_t num_migrated_vectors) {
+#ifdef ENABLE_STAT_COLLECTION
+        CHECK_NOT_NULLPTR(bg_migration_iterations, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_migration_tasks_completed, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_migration_num_migrated_vectors, LOG_TAG_DIVFTREE);
+        if (collect_stats.load(std::memory_order_acquire)) {
+            stats_lock.Lock(SX_SHARED);
+            bg_migration_iterations[thread_index].fetch_add(1, std::memory_order_release);
+            if (completed_task) {
+                bg_migration_tasks_completed[thread_index].fetch_add(1, std::memory_order_release);
+            }
+             bg_migration_num_migrated_vectors[thread_index].fetch_add(num_migrated_vectors,
+                                                                       std::memory_order_release);
+            stats_lock.Unlock();
+        }
+#endif
+    }
+
+    void BGMergeStatsUpdate(uint64_t thread_index, bool completed_task, bool cluster_merged) {
+#ifdef ENABLE_STAT_COLLECTION
+        CHECK_NOT_NULLPTR(bg_merge_iterations, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_merge_tasks_completed, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_merge_num_merged_clusters, LOG_TAG_DIVFTREE);
+        if (collect_stats.load(std::memory_order_acquire)) {
+            stats_lock.Lock(SX_SHARED);
+            bg_merge_iterations[thread_index].fetch_add(1, std::memory_order_release);
+            if (completed_task) {
+                bg_merge_tasks_completed[thread_index].fetch_add(1, std::memory_order_release);
+                if (cluster_merged) {
+                    bg_merge_num_merged_clusters[thread_index].fetch_add(1, std::memory_order_release);
+                }
+            }
+            stats_lock.Unlock();
+        }
+#endif
+    }
+
+    void BGCompactionStatsUpdate(uint64_t thread_index, bool completed_task, bool cluster_compacted) {
+#ifdef ENABLE_STAT_COLLECTION
+        CHECK_NOT_NULLPTR(bg_compaction_iterations, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_compaction_tasks_completed, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_compaction_num_compacted_clusters, LOG_TAG_DIVFTREE);
+        if (collect_stats.load(std::memory_order_acquire)) {
+            stats_lock.Lock(SX_SHARED);
+            bg_compaction_iterations[thread_index].fetch_add(1, std::memory_order_release);
+            if (completed_task) {
+                bg_compaction_tasks_completed[thread_index].fetch_add(1, std::memory_order_release);
+                if (cluster_compacted) {
+                    bg_compaction_num_compacted_clusters[thread_index].fetch_add(1, std::memory_order_release);
+                }
+            }
+            stats_lock.Unlock();
+        }
+#endif
+    }
+
+    void BGSearchStatsUpdate(uint64_t thread_index, bool completed_task) {
+#ifdef ENABLE_STAT_COLLECTION
+        CHECK_NOT_NULLPTR(bg_search_iterations, LOG_TAG_DIVFTREE);
+        CHECK_NOT_NULLPTR(bg_search_tasks_completed, LOG_TAG_DIVFTREE);
+        if (collect_stats.load(std::memory_order_acquire)) {
+            stats_lock.Lock(SX_SHARED);
+            bg_search_iterations[thread_index].fetch_add(1, std::memory_order_release);
+            if (completed_task) {
+                bg_search_tasks_completed[thread_index].fetch_add(1, std::memory_order_release);
+            }
+            stats_lock.Unlock();
+        }
+#endif
+    }
+
+    void BGSearchStatsUpdateCreatedTask(uint64_t num_tasks) {
+#ifdef ENABLE_STAT_COLLECTION
+        if (collect_stats.load(std::memory_order_acquire)) {
+            stats_lock.Lock(SX_SHARED);
+            total_bg_search_tasks.fetch_add(num_tasks,  std::memory_order_release);
+            stats_lock.Unlock();
+        }
+#endif
+    }
 
     RetStatus CompactAndInsert(BufferVertexEntry* container_entry, const ConstVectorBatch& batch,
                                uint16_t marked_for_update = INVALID_OFFSET) {
@@ -1217,7 +1724,7 @@ protected:
         return RetStatus::Success();
     }
 
-    inline void CompactionCheck(VectorID target) {
+    inline bool CompactionCheck(VectorID target) {
         CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(target, LOG_TAG_DIVFTREE);
 
@@ -1226,7 +1733,7 @@ protected:
 
         BufferVertexEntry* entry = bufferMgr->ReadBufferEntry(target, SX_EXCLUSIVE);
         if (entry == nullptr) {
-            return;
+            return false;
         }
 
         DIVFTreeVertex* cluster = static_cast<DIVFTreeVertex*>(entry->ReadLatestVersion(false));
@@ -1235,16 +1742,18 @@ protected:
         if (cluster->cluster.header.num_deleted.load(std::memory_order_relaxed) == 0) {
             bufferMgr->RemoveCompactionTask(target, entry);
             bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(false, false));
-            return;
+            return false;
         }
 
         entry->state.store(CLUSTER_FULL, std::memory_order_release);
         VectorBatch dummy;
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "BGCompaction triggered for " VECTORID_LOG_FMT,
                 VECTORID_LOG(target));
-        (void)CompactAndInsert(entry, dummy);
+        RetStatus rs = CompactAndInsert(entry, dummy);
         bufferMgr->RemoveCompactionTask(target, entry);
         bufferMgr->ReleaseBufferEntry(entry, ReleaseBufferEntryFlags(true, true));
+
+        return rs.IsOK();
     }
 
     inline void RoundRobinClustering(const DIVFTreeVertex* base, const ConstVectorBatch& batch,
@@ -1908,7 +2417,7 @@ protected:
     /* todo: need to refactor */
     RetStatus Migrate(std::vector<MigrationInfo> targetBatch,
                       VectorID src_id, VectorID dest_id,
-                      Version src_ver, Version dest_ver) {
+                      Version src_ver, Version dest_ver, uint64_t& num_migrated) {
         CHECK_VECTORID_IS_VALID(src_id, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(src_id, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_VALID(dest_id, LOG_TAG_DIVFTREE);
@@ -2085,6 +2594,7 @@ protected:
         } else {
             uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) - batch.size;
             uint16_t reserved = src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire);
+            num_migrated += batch.size;
             if ((reserved - num_deleted) < src_cluster->attr.min_size) {
                 if (bufferMgr->AddMergeTaskIfNotExists(src_id, *src_entry)) {
                     bool res = merge_tasks.Push(MergeTask{src_id});
@@ -2134,7 +2644,7 @@ protected:
         return rs;
     }
 
-    void MigrationCheck(VectorID first_cluster, VectorID second_cluster) {
+    uint64_t MigrationCheck(VectorID first_cluster, VectorID second_cluster) {
         CHECK_VECTORID_IS_VALID(first_cluster, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(first_cluster, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_VALID(second_cluster, LOG_TAG_DIVFTREE);
@@ -2164,14 +2674,14 @@ protected:
 
         entries[1] = bufferMgr->ReadBufferEntry(ids[1], SX_SHARED);
         if (entries[1] == nullptr) {
-            return;
+            return 0;
         }
         ++num_entries;
         entries[0] = bufferMgr->ReadBufferEntry(ids[0], SX_SHARED);
         if (entries[0] == nullptr) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
-            return;
+            return 0;
         }
         ++num_entries;
 
@@ -2184,7 +2694,7 @@ protected:
         if (visible_size[1] == 0) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
-            return;
+            return 0;
         }
 
         clusters[0] = static_cast<DIVFTreeVertex*>(entries[0]->ReadLatestVersion(false));
@@ -2193,7 +2703,7 @@ protected:
         if (visible_size[0] == 0) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
-            return;
+            return 0;
         }
 
 
@@ -2202,7 +2712,7 @@ protected:
         if (parents[1] == nullptr) {
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
-            return;
+            return 0;
         }
 #ifdef MEMORY_DEBUG
         DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE, "MigrationCheck: cluster pinned: %p:" VECTORID_LOG_FMT, parents[1],
@@ -2225,7 +2735,7 @@ protected:
         //     parents[1]->Unpin();
         //     bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
         //                                        ReleaseBufferEntryFlags(false, false));
-        //     return;
+        //     return 0;
 
         // }
 
@@ -2238,7 +2748,7 @@ protected:
             parents[1]->Unpin();
             bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                                ReleaseBufferEntryFlags(false, false));
-            return;
+            return 0;
         }
 
 #ifdef MEMORY_DEBUG
@@ -2264,7 +2774,7 @@ protected:
         //     parents[0]->Unpin();
         //     bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
         //                                        ReleaseBufferEntryFlags(false, false));
-        //     return;
+        //     return 0;
 
         // }
 
@@ -2340,13 +2850,15 @@ protected:
                                            ReleaseBufferEntryFlags(false, false));
 
         /* todo: have to change for multi ndoe setup */
+        uint64_t num_migrated = 0;
         if (threadSelf->UniformBinary(attr.random_base_perc / 2)) {
-            Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1]);
-            Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0]);
+            Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1], num_migrated);
+            Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0], num_migrated);
         } else {
-            Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0]);
-            Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1]);
+            Migrate(migration_batch[1], ids[1], ids[0], versions[1], versions[0], num_migrated);
+            Migrate(migration_batch[0], ids[0], ids[1], versions[0], versions[1], num_migrated);
         }
+        return num_migrated;
     }
 
     /* todo: need to refactor */
@@ -2539,7 +3051,7 @@ protected:
         return RetStatus{.stat=RetStatus::DEST_UPDATED, .message=nullptr};
     }
 
-    void MergeCheck(VectorID target) {
+    bool MergeCheck(VectorID target) {
         CHECK_VECTORID_IS_VALID(target, LOG_TAG_DIVFTREE);
         CHECK_VECTORID_IS_CENTROID(target, LOG_TAG_DIVFTREE);
 
@@ -2547,7 +3059,7 @@ protected:
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_DIVFTREE);
         BufferVertexEntry* target_entry = bufferMgr->ReadBufferEntry(target, SX_SHARED);
         if (target_entry == nullptr) {
-            return;
+            return false;
         }
         Version target_ver = target_entry->currentVersion;
 
@@ -2556,7 +3068,7 @@ protected:
         if (parent_entry == nullptr) {
             bufferMgr->RemoveMergeTask(target, target_entry);
             bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
-            return;
+            return false;
         }
 
         DIVFTreeVertex* target_cluster = static_cast<DIVFTreeVertex*>(target_entry->ReadLatestVersion(false));
@@ -2570,7 +3082,7 @@ protected:
             bufferMgr->RemoveMergeTask(target, target_entry);
             bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
             bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
-            return;
+            return false;
         }
 
         VTYPE target_centroid[attr.dimension];
@@ -2580,7 +3092,7 @@ protected:
             bufferMgr->RemoveMergeTask(target, target_entry);
             bufferMgr->ReleaseBufferEntry(parent_entry, ReleaseBufferEntryFlags(false, false));
             bufferMgr->ReleaseBufferEntry(target_entry, ReleaseBufferEntryFlags(false, false));
-            return;
+            return false;
         }
 
         FatalAssert(parent_cluster->cluster.NumBlocks(parent_cluster->attr.block_size, parent_cluster->attr.cap) == 1,
@@ -2629,8 +3141,11 @@ protected:
                 UNUSED_VARIABLE(res);
                 FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
             }
+
+            return rs.IsOK();
         } else {
             bufferMgr->RemoveMergeTask(target, target_entry);
+            return false;
         }
     }
 
@@ -2770,6 +3285,7 @@ protected:
             VectorToString(query, attr.dimension).ToCStr(), level-1, taskId);
 #endif
 
+        BGSearchStatsUpdateCreatedTask(layers[level]->Size());
         bool rs = search_tasks.BatchPush(task_ptrs, layers[level]->Size());
         UNUSED_VARIABLE(rs);
         FatalAssert(rs, LOG_TAG_DIVFTREE, "should not fail!");
@@ -2939,7 +3455,7 @@ protected:
         return RetStatus::Success();
     }
 
-    inline void AsyncSearch(Thread* self) {
+    inline void AsyncSearch(Thread* self, uint64_t idx) {
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
         self->InitDIVFThread();
 
@@ -3009,12 +3525,16 @@ protected:
                     }
                     delete[] task_set;
                 }
+
+                BGSearchStatsUpdate(idx, true);
+            } else {
+                BGSearchStatsUpdate(idx, false);
             }
         }
         self->DestroyDIVFThread();
     }
 
-    inline void BGMigration(Thread* self) {
+    inline void BGMigration(Thread* self, uint64_t idx) {
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
         self->InitDIVFThread();
 
@@ -3024,14 +3544,16 @@ protected:
         while (!end_signal.load(std::memory_order_acquire)) {
             self->LoopIncrement();
             MigrationCheckTask nextTask;
+            uint64_t num_migrated = 0;
             if (migration_tasks.TryPopHead(nextTask)) {
 #ifdef EXCESS_LOGING
             DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE,
                     "BGMigration existing task: 1) " VECTORID_LOG_FMT " 2) " VECTORID_LOG_FMT,
                     VECTORID_LOG(nextTask.first), VECTORID_LOG(nextTask.second));
 #endif
-                MigrationCheck(nextTask.first, nextTask.second);
+                num_migrated = MigrationCheck(nextTask.first, nextTask.second);
                 bufferMgr->RemoveMigrationTask(nextTask.first, nextTask.second);
+                BGMigrationStatsUpdate(idx, true, num_migrated);
             } else {
                 auto ids = bufferMgr->GetTwoRandomCentroidIdAtNonRootLayer();
                 if ((ids.first != INVALID_VECTOR_ID) && (ids.second != INVALID_VECTOR_ID)) {
@@ -3040,16 +3562,18 @@ protected:
                             "BGMigration new task: 1) " VECTORID_LOG_FMT " 2) " VECTORID_LOG_FMT,
                             VECTORID_LOG(ids.first), VECTORID_LOG(ids.second));
 #endif
-                    MigrationCheck(ids.first, ids.second);
+                    num_migrated = MigrationCheck(ids.first, ids.second);
                 } else {
+                    num_migrated = 0;
                     usleep(1);
                 }
+                BGMigrationStatsUpdate(idx, false, num_migrated);
             }
         }
         self->DestroyDIVFThread();
     }
 
-    inline void BGMerge(Thread* self) {
+    inline void BGMerge(Thread* self, uint64_t idx) {
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
         self->InitDIVFThread();
 
@@ -3070,15 +3594,17 @@ protected:
                     msleep(1);
                 }
                 oldTarget = nextTask.target;
-                MergeCheck(nextTask.target);
+                bool succ = MergeCheck(nextTask.target);
+                BGMergeStatsUpdate(idx, true, succ);
             } else {
                 oldTarget = INVALID_VECTOR_ID;
+                BGMergeStatsUpdate(idx, false, false);
             }
         }
         self->DestroyDIVFThread();
     }
 
-    inline void BGCompaction(Thread* self) {
+    inline void BGCompaction(Thread* self, uint64_t idx) {
         CHECK_NOT_NULLPTR(self, LOG_TAG_DIVFTREE);
         self->InitDIVFThread();
 
@@ -3094,7 +3620,10 @@ protected:
                         "BGCompaction task " VECTORID_LOG_FMT,
                         VECTORID_LOG(nextTask.target));
 #endif
-                CompactionCheck(nextTask.target);
+                bool succ = CompactionCheck(nextTask.target);
+                BGCompactionStatsUpdate(idx, true, succ);
+            } else {
+                BGCompactionStatsUpdate(idx, false, false);
             }
         }
         self->DestroyDIVFThread();
@@ -3130,25 +3659,25 @@ protected:
         searchers.reserve(attr.num_searchers);
         for (size_t i = 0; i < attr.num_searchers; ++i) {
             searchers.emplace_back(new Thread(attr.random_base_perc));
-            searchers.back()->StartMemberFunction(&DIVFTree::AsyncSearch, this);
+            searchers.back()->StartMemberFunction(&DIVFTree::AsyncSearch, this, i);
         }
 
         bg_migrators.reserve(attr.num_migrators);
         for (size_t i = 0; i < attr.num_migrators; ++i) {
             bg_migrators.emplace_back(new Thread(attr.random_base_perc));
-            bg_migrators.back()->StartMemberFunction(&DIVFTree::BGMigration, this);
+            bg_migrators.back()->StartMemberFunction(&DIVFTree::BGMigration, this, i);
         }
 
         bg_mergers.reserve(attr.num_mergers);
         for (size_t i = 0; i < attr.num_mergers; ++i) {
             bg_mergers.emplace_back(new Thread(attr.random_base_perc));
-            bg_mergers.back()->StartMemberFunction(&DIVFTree::BGMerge, this);
+            bg_mergers.back()->StartMemberFunction(&DIVFTree::BGMerge, this, i);
         }
 
         bg_compactors.reserve(attr.num_compactors);
         for (size_t i = 0; i < attr.num_compactors; ++i) {
             bg_compactors.emplace_back(new Thread(attr.random_base_perc));
-            bg_compactors.back()->StartMemberFunction(&DIVFTree::BGCompaction, this);
+            bg_compactors.back()->StartMemberFunction(&DIVFTree::BGCompaction, this, i);
         }
 
 #ifdef HANG_DETECTION

@@ -72,6 +72,8 @@ struct DIVFTreeAttributes {
 
     uint32_t random_base_perc;
 
+    bool collect_stats;
+
     String ToString() const {
         return String("{"
             "clusteringAlg:%s, "
@@ -92,12 +94,13 @@ struct DIVFTreeAttributes {
             "num_compactors:%lu, "
             "migration_check_triger_rate:%u, "
             "migration_check_triger_single_rate:%u, "
-            "random_base_perc:%u"
+            "random_base_perc:%u, "
+            "collect_stats:%s"
         "}", CLUSTERING_TYPE_NAME[(int8_t)clusteringAlg], DISTANCE_TYPE_NAME[(int8_t)distanceAlg],
         leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, (use_block_bytes ? "T" : "F"),
         leaf_blck_bytes, leaf_blck_size, internal_blck_bytes, internal_blck_size, split_internal, split_leaf,
         dimension, num_searchers, num_migrators, num_mergers, num_compactors, migration_check_triger_rate,
-        migration_check_triger_single_rate, random_base_perc);
+        migration_check_triger_single_rate, random_base_perc, (collect_stats ? "T" : "F"));
     }
 };
 
@@ -145,6 +148,14 @@ public:
 
     virtual size_t Size() const = 0;
     virtual const DIVFTreeAttributes& GetAttributes() const = 0;
+
+    virtual void EndBGThreads() = 0;
+
+    virtual String GetStatistics(std::string title_extention = "", bool clear_stats = false) = 0;
+    virtual void StartStatsCollection() = 0;
+    virtual void StopStatsCollection() = 0;
+    virtual void ClearStats() = 0;
+
     // virtual String ToString() = 0;
 };
 

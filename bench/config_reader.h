@@ -400,6 +400,44 @@ void ParseConfigs() {
     } else {
         throughput_report_time = 0;
     }
+
+    if (throughput_report_time > 0) {
+        vit = var_configs.find("show-runtime-report-for-build-and-warmup");
+        if (vit != var_configs.end()) {
+            if (!parseBool(vit->second, show_runtime_report_for_build_and_warmup)) {
+                throw std::runtime_error("Invalid show runtime report for build and warmup!");
+            }
+        } else {
+            throw std::runtime_error("Show runtime report for build and warmup not provided!");
+        }
+    }
+
+    vit = var_configs.find("collect-build-stats");
+    if (vit != var_configs.end()) {
+        if (!parseBool(vit->second, collect_build_stats)) {
+            throw std::runtime_error("Invalid collect build stats!");
+        }
+    } else {
+        throw std::runtime_error("Collect build stats not provided!");
+    }
+
+    vit = var_configs.find("collect-warmup-stats");
+    if (vit != var_configs.end()) {
+        if (!parseBool(vit->second, collect_warmup_stats)) {
+            throw std::runtime_error("Invalid collect warmup stats!");
+        }
+    } else {
+        throw std::runtime_error("Collect warmup stats not provided!");
+    }
+
+    vit = var_configs.find("collect-run-stats");
+    if (vit != var_configs.end()) {
+        if (!parseBool(vit->second, collect_run_stats)) {
+            throw std::runtime_error("Invalid collect run stats!");
+        }
+    } else {
+        throw std::runtime_error("Collect run stats not provided!");
+    }
 }
 
 #endif
