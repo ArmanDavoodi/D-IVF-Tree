@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include <cmath>
 
 inline divftree::DIVFTree* vector_index = nullptr;
 inline std::atomic<bool> dataset_finished = false;
@@ -15,6 +16,12 @@ inline std::atomic<size_t> delete_queries = 0;
 inline std::atomic<size_t> search_errors = 0;
 inline std::atomic<size_t> insert_errors = 0;
 inline std::atomic<size_t> delete_errors = 0;
+
+inline divftree::SXSpinLock distance_lock;
+inline DISTANCE_TYPE sum_search_distance = 0;
+inline DISTANCE_TYPE avg_search_distance = 0;
+inline uint64_t num_returned_neighbours = 0;
+inline uint64_t num_total_returned_neighbours = 0;
 
 inline std::atomic<uint32_t> build_ready = 0;
 inline std::atomic<uint32_t> build_num_inserted = 0;
@@ -122,6 +129,19 @@ divftree::RetStatus Search(std::vector<divftree::ANNVectorInfo>& neighbours) {
                                                     divftree::SortType::Unsorted, neighbours);
     if (!rs.IsOK()) {
         DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_TEST, "Error during search: %s", rs.Msg());
+    } else if (neighbours.empty()) {
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_TEST, "No neighbours found during search!");
+        rs = divftree::RetStatus::Fail(nullptr);
+    } else if (collect_avg_distances) {
+        DISTANCE_TYPE total_distance = 0;
+        for (const auto& neighbour : neighbours) {
+            total_distance += std::sqrt(neighbour.distance_to_query);
+        }
+        distance_lock.Lock(divftree::SX_EXCLUSIVE);
+        num_returned_neighbours += neighbours.size();
+        sum_search_distance += total_distance;
+        distance_lock.Unlock();
+
     }
     return rs;
 }
@@ -401,10 +421,22 @@ int main() {
             size_t cur_rps = search_queries.load(std::memory_order_acquire);
             size_t cur_reps = search_errors.load(std::memory_order_acquire);
 
-            ExclusiveBenchLog("[%u s]: Warmup Phase Report: RPS: %.2f | REPS: %.2f",
+            if (collect_avg_distances) {
+                distance_lock.Lock(divftree::SX_EXCLUSIVE);
+                ExclusiveBenchLog("[%u s]: Warmup Phase Report: RPS: %.2f | Avg Distance: " DTYPE_FMT " | REPS: %.2f",
+                                total_wait_time + time_to_wait,
+                                (double)(cur_rps - last_rps) / (double)time_to_wait,
+                                sum_search_distance / (DISTANCE_TYPE)num_returned_neighbours,
+                                (double)(cur_reps - last_reps) / (double)time_to_wait);
+                sum_search_distance = 0;
+                num_returned_neighbours = 0;
+                distance_lock.Unlock();
+            } else {
+                ExclusiveBenchLog("[%u s]: Warmup Phase Report: RPS: %.2f | REPS: %.2f",
                               total_wait_time + time_to_wait,
                               (double)(cur_rps - last_rps) / (double)time_to_wait,
                               (double)(cur_reps - last_reps) / (double)time_to_wait);
+            }
             last_rps = cur_rps;
             last_reps = cur_reps;
             if ((total_wait_time + time_to_wait > run_time)) {
@@ -435,6 +467,12 @@ int main() {
     if (show_runtime_report_for_build_and_warmup) {
         search_queries.store(0, std::memory_order_release);
         search_errors.store(0, std::memory_order_release);
+        if (collect_avg_distances) {
+            distance_lock.Lock(divftree::SX_EXCLUSIVE);
+            sum_search_distance = 0;
+            num_returned_neighbours = 0;
+            distance_lock.Unlock();
+        }
     }
 
     BenchLog("Start Run...");
@@ -459,16 +497,39 @@ int main() {
             size_t total_qps = cur_rps + cur_ips + cur_dps - (last_rps + last_ips + last_dps);
             size_t total_eps = cur_reps + cur_ieps + cur_deps - (last_reps + last_ieps + last_deps);
 
-            ExclusiveBenchLog("[%u s]: QPS: %.2f - RPS: %.2f - IPS: %.2f - DPS: %.2f | "
-                              "EPS: %.2f - REPS: %.2f - IEPS: %.2f - DEPS: %.2f",
-                              total_wait_time + time_to_wait, (double)total_qps / (double)time_to_wait,
-                              (double)(cur_rps - last_rps) / (double)time_to_wait,
-                              (double)(cur_ips - last_ips) / (double)time_to_wait,
-                              (double)(cur_dps - last_dps) / (double)time_to_wait,
-                              (double)total_eps / (double)time_to_wait,
-                              (double)(cur_reps - last_reps) / (double)time_to_wait,
-                              (double)(cur_ieps - last_ieps) / (double)time_to_wait,
-                              (double)(cur_deps - last_deps) / (double)time_to_wait);
+            if (collect_avg_distances) {
+                distance_lock.Lock(divftree::SX_EXCLUSIVE);
+                avg_search_distance += sum_search_distance;
+                num_total_returned_neighbours += num_returned_neighbours;
+
+                ExclusiveBenchLog("[%u s]: QPS: %.2f - RPS: %.2f - IPS: %.2f - DPS: %.2f | "
+                                  "Avg Distance: " DTYPE_FMT " | "
+                                  "EPS: %.2f - REPS: %.2f - IEPS: %.2f - DEPS: %.2f",
+                                  total_wait_time + time_to_wait, (double)total_qps / (double)time_to_wait,
+                                  (double)(cur_rps - last_rps) / (double)time_to_wait,
+                                  (double)(cur_ips - last_ips) / (double)time_to_wait,
+                                  (double)(cur_dps - last_dps) / (double)time_to_wait,
+                                  sum_search_distance / (DISTANCE_TYPE)num_returned_neighbours,
+                                  (double)total_eps / (double)time_to_wait,
+                                  (double)(cur_reps - last_reps) / (double)time_to_wait,
+                                  (double)(cur_ieps - last_ieps) / (double)time_to_wait,
+                                  (double)(cur_deps - last_deps) / (double)time_to_wait);
+
+                sum_search_distance = 0;
+                num_returned_neighbours = 0;
+                distance_lock.Unlock();
+            } else {
+                ExclusiveBenchLog("[%u s]: QPS: %.2f - RPS: %.2f - IPS: %.2f - DPS: %.2f | "
+                                "EPS: %.2f - REPS: %.2f - IEPS: %.2f - DEPS: %.2f",
+                                total_wait_time + time_to_wait, (double)total_qps / (double)time_to_wait,
+                                (double)(cur_rps - last_rps) / (double)time_to_wait,
+                                (double)(cur_ips - last_ips) / (double)time_to_wait,
+                                (double)(cur_dps - last_dps) / (double)time_to_wait,
+                                (double)total_eps / (double)time_to_wait,
+                                (double)(cur_reps - last_reps) / (double)time_to_wait,
+                                (double)(cur_ieps - last_ieps) / (double)time_to_wait,
+                                (double)(cur_deps - last_deps) / (double)time_to_wait);
+            }
             last_rps = cur_rps;
             last_ips = cur_ips;
             last_dps = cur_dps;
@@ -505,6 +566,18 @@ int main() {
         threads[i] = nullptr;
     }
     delete vector_index;
+
+    if (collect_avg_distances) {
+        avg_search_distance += sum_search_distance;
+        num_total_returned_neighbours += num_returned_neighbours;
+
+        if (num_total_returned_neighbours > 0) {
+            avg_search_distance /= (DISTANCE_TYPE)num_total_returned_neighbours;
+        } else if (avg_search_distance > 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_TEST, "Error: no neighbours returned but avg distance is not 0!");
+            avg_search_distance = 0;
+        }
+    }
 
     size_t total_search = search_queries.load(std::memory_order_acquire);
     size_t total_insert = insert_queries.load(std::memory_order_acquire);
@@ -567,6 +640,12 @@ int main() {
     BenchLog("Search EPS: %.2f", ((double)total_search_err) / (double)total_run_time);
     BenchLog("Insert EPS: %.2f", ((double)total_insert_err) / (double)total_run_time);
     BenchLog("Delete EPS: %.2f", ((double)total_delete_err) / (double)total_run_time);
+
+    if (collect_avg_distances) {
+        ExclusiveBenchLog("------------------------");
+
+        BenchLog("Average Search Distance: " DTYPE_FMT, avg_search_distance);
+    }
 
     ExclusiveBenchLog("\n___________________________________________\n");
 

@@ -64,6 +64,8 @@ VAR_COLLECT_BUILD_STATS=1 #1 to collect and print stats after build phase
 VAR_COLLECT_WARMUP_STATS=1 #1 to collect and print stats after warmup phase
 VAR_COLLECT_RUN_STATS=1 #1 to collect and print stats after run phase
 
+VAR_COLLECT_AVG_DISTANCES=1 #1 to collect and print average distances during searches
+
 #create the config file if it does not exists and clean it if it does
 echo > $CONF_FILE
 
@@ -116,5 +118,7 @@ echo "show-runtime-report-for-build-and-warmup:$VAR_SHOW_RUNTIME_REPORT_FOR_BUIL
 echo "collect-build-stats:$VAR_COLLECT_BUILD_STATS" >> $CONF_FILE
 echo "collect-warmup-stats:$VAR_COLLECT_WARMUP_STATS" >> $CONF_FILE
 echo "collect-run-stats:$VAR_COLLECT_RUN_STATS" >> $CONF_FILE
+
+echo "collect-avg-distances:$VAR_COLLECT_AVG_DISTANCES" >> $CONF_FILE
 
 cd $CURDIR

@@ -52,6 +52,7 @@ struct RetStatus {
         DEST_UPDATED,
         SRC_DELETED,
         SRC_HAS_TOO_MANY_VECTORS,
+        SRC_EMPTY,
 
         TREE_HIGHT_TOO_LOW,
 
@@ -61,6 +62,8 @@ struct RetStatus {
         VERTEX_DELETED,
         VERSION_NOT_APPLIED,
         OUTDATED_VERSION_DELETED,
+
+        EMPTY_MIGRATION_BATCH,
 
         FAIL
     } stat;

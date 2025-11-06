@@ -24,4 +24,6 @@ inline bool collect_build_stats;
 inline bool collect_warmup_stats;
 inline bool collect_run_stats;
 
+inline bool collect_avg_distances;
+
 #endif

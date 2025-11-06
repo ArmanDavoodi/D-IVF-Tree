@@ -438,6 +438,15 @@ void ParseConfigs() {
     } else {
         throw std::runtime_error("Collect run stats not provided!");
     }
+
+    vit = var_configs.find("collect-avg-distances");
+    if (vit != var_configs.end()) {
+        if (!parseBool(vit->second, collect_avg_distances)) {
+            throw std::runtime_error("Invalid collect average distances!");
+        }
+    } else {
+        throw std::runtime_error("Collect average distances not provided!");
+    }
 }
 
 #endif
