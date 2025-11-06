@@ -108,10 +108,18 @@ union alignas(16) VectorLocation {
     }
 
     inline bool operator==(const VectorLocation& other) {
+        FatalAssert((raw == other.raw) == (detail.containerId == other.detail.containerId &&
+                                        detail.containerVersion == other.detail.containerVersion &&
+                                        detail.entryOffset == other.detail.entryOffset),
+                    LOG_TAG_BASIC, "VectorLocation comparison operator inconsistency");
         return raw == other.raw;
     }
 
     inline bool operator!=(const VectorLocation& other) {
+        FatalAssert((raw == other.raw) == (detail.containerId == other.detail.containerId &&
+                                        detail.containerVersion == other.detail.containerVersion &&
+                                        detail.entryOffset == other.detail.entryOffset),
+                    LOG_TAG_BASIC, "VectorLocation comparison operator inconsistency");
         return raw != other.raw;
     }
 
@@ -125,7 +133,12 @@ union alignas(16) VectorLocation {
     constexpr VectorLocation(const VectorLocation& other) : raw(other.raw) {}
     constexpr VectorLocation(VectorLocation&& other) : raw(other.raw) {}
 
-    constexpr VectorLocation(VectorID cid, Version cv, uint16_t eo) : detail(cid, cv, eo) {}
+    constexpr VectorLocation(VectorID cid, Version cv, uint16_t eo) {
+        raw = 0;
+        detail.containerId = cid;
+        detail.containerVersion = cv;
+        detail.entryOffset = eo;
+    }
 };
 
 constexpr VectorLocation INVALID_VECTOR_LOCATION = VectorLocation(INVALID_VECTOR_ID, 0, UINT16_MAX);

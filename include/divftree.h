@@ -2666,6 +2666,16 @@ protected:
             }
         }
 
+        /* todo: loop on all instead of yield on one */
+        for (size_t i = 0; i < batch.size; ++i) {
+            VectorLocation cur_loc;
+            while ((cur_loc = bufferMgr->LoadCurrentVectorLocation(batch.id[i])) !=
+                   VectorLocation(src_id, src_ver, migrated_offsets[i])) {
+                /* wait until the location is updated to the expected one */
+                DIVFTREE_YIELD();
+            }
+        }
+
         /* todo: we may be able to avoid this extra copy */
         if (batch.size > 0) {
             rs = BatchInsertInto((*dest_entry), batch, true, INVALID_OFFSET, dest_id < src_id);
@@ -3101,6 +3111,11 @@ protected:
                     batch.id[i] = vmd[offset].id;
                     offsets[i] = offset;
                     ++i;
+                    SANITY_CHECK(
+                        VectorLocation loc = bufferMgr->LoadCurrentVectorLocation(vmd[offset].id);
+                        FatalAssert(loc == VectorLocation(srcId, srcVersion, offset),
+                                    LOG_TAG_DIVFTREE, "location mismatch!");
+                    )
                 }
             } else {
                 CentroidMetaData* vmd = static_cast<CentroidMetaData*>(meta);
@@ -3115,10 +3130,30 @@ protected:
                     batch.version[i] = vmd[offset].version;
                     offsets[i] = offset;
                     ++i;
+                    SANITY_CHECK(
+                        VectorLocation loc = bufferMgr->LoadCurrentVectorLocation(vmd[offset].id);
+                        /* if the vertex is just created, it is possible that loadCurrent returns invalid! */
+                        FatalAssert(loc == INVALID_VECTOR_LOCATION || loc == VectorLocation(srcId, srcVersion, offset),
+                                    LOG_TAG_DIVFTREE, "location mismatch!");
+                    )
                 }
             }
         }
         FatalAssert(i == totalSize, LOG_TAG_DIVFTREE, "fewer elements than excpected!");
+
+        if (!is_leaf) {
+            /* todo: loop on all instead of yield on one */
+            for (size_t i = 0; i < batch.size; ++i) {
+                VectorLocation cur_loc;
+                while ((cur_loc = bufferMgr->LoadCurrentVectorLocation(batch.id[i])) !=
+                        VectorLocation(srcId, srcVersion, offsets[i])) {
+                    /* wait until the location is updated to the expected one */
+                    FatalAssert(cur_loc == INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+                                "the vector location should be invalid here!");
+                    DIVFTREE_YIELD();
+                }
+            }
+        }
 
         rs = BatchInsertInto((*destEntry), batch, true, INVALID_OFFSET, destId < srcId);
         (*destEntry) = nullptr;

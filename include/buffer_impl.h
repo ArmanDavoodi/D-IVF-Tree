@@ -795,6 +795,20 @@ inline void BufferManager::UpdateVectorLocation(VectorID vectorId, VectorLocatio
         entry->location.Store(newLocation);
     }
 
+    SANITY_CHECK(
+        if (oldLocation != INVALID_VECTOR_LOCATION) {
+            BufferVertexEntry* old_parent = GetVertexEntry(oldLocation.detail.containerId);
+            CHECK_NOT_NULLPTR(old_parent, LOG_TAG_BUFFER);
+            threadSelf->SanityCheckLockHeldByMe(&old_parent->clusterLock);
+        }
+
+        if (newLocation != INVALID_VECTOR_LOCATION) {
+            BufferVertexEntry* new_parent = GetVertexEntry(newLocation.detail.containerId);
+            CHECK_NOT_NULLPTR(new_parent, LOG_TAG_BUFFER);
+            threadSelf->SanityCheckLockHeldByMe(&new_parent->clusterLock);
+        }
+    );
+
     FatalAssert(oldLocation != newLocation, LOG_TAG_BUFFER, "new and old location are the same!");
     FatalAssert((oldLocation != INVALID_VECTOR_LOCATION) || pinNewUnpinOld, LOG_TAG_BUFFER,
                 "if oldLocation is invalid then pinNewUnpinOld should be true");
