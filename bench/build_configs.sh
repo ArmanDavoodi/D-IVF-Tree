@@ -52,6 +52,7 @@ VAR_DELETE_RATIO=50
 # VAR_BUILT_SIZE=$(( 64 )) #num embedings to insert during build
 # VAR_WARMUP_TIME_SEC=10 #only search
 # VAR_RUN_TIME_SEC=10 #real test used for stat collection
+VAR_BATCH_SIZE=$(( 4096 )) #num embeddings read from disk at once during build
 VAR_BUILT_SIZE=$(( 1024 * 1024 * 4 )) #num embedings to insert during build
 VAR_WARMUP_TIME_SEC=300 #only search
 VAR_RUN_TIME_SEC=300 #real test used for stat collection
@@ -108,6 +109,7 @@ echo "num-bg-compactor-threads:$VAR_NUM_BG_COMPACTOR_THREADS" >> $CONF_FILE
 echo "write-ratio:$VAR_WRITE_RATIO" >> $CONF_FILE
 echo "delete-ratio:$VAR_DELETE_RATIO" >> $CONF_FILE
 
+echo "bench-batch-size:$VAR_BATCH_SIZE" >> $CONF_FILE
 echo "build-size:$VAR_BUILT_SIZE" >> $CONF_FILE
 echo "warmup-time:$VAR_WARMUP_TIME_SEC" >> $CONF_FILE
 echo "run-time:$VAR_RUN_TIME_SEC" >> $CONF_FILE

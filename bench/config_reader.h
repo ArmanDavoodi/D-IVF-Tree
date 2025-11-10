@@ -365,6 +365,15 @@ void ParseConfigs() {
         throw std::runtime_error("Delete ratio not provided!");
     }
 
+    vit = var_configs.find("bench-batch-size");
+    if (vit != var_configs.end()) {
+        if (!parseUnsignedInt(vit->second, bench_batch_size) || (bench_batch_size == 0)) {
+            throw std::runtime_error("Invalid bench batch size!");
+        }
+    } else {
+        throw std::runtime_error("Bench batch size not provided!");
+    }
+
     vit = var_configs.find("build-size");
     if (vit != var_configs.end()) {
         if (!parseUnsignedInt(vit->second, build_size)) {

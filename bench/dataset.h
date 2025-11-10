@@ -9,10 +9,6 @@ inline std::atomic<uint32_t> next_offset = 0;
 inline uint32_t total_num_queries = 0;
 inline divftree::VTYPE* search_query_vectors = nullptr;
 
-/* todo: for every 10 writes, use the next vector for search ->
-   not the best benchmark as it does not take the search skew in account */
-inline constexpr uint32_t BATCH_SIZE = 4096;
-
 void OpenDataFile(FILE*& input_file_ptr, bool read_header = false) {
     if (input_file_ptr != nullptr) {
         fclose(input_file_ptr);
@@ -72,7 +68,7 @@ size_t ReadNextBatch(FILE* input_file_ptr, divftree::VTYPE* buffer) {
         throw std::runtime_error("Error: buffer is null!");
     }
 
-    uint32_t offset = next_offset.fetch_add(BATCH_SIZE * DIMENSION * sizeof(divftree::VTYPE));
+    uint32_t offset = next_offset.fetch_add(bench_batch_size * DIMENSION * sizeof(divftree::VTYPE));
 
     if (offset >= total_num_vectors * DIMENSION * sizeof(divftree::VTYPE)) {
         return 0;
@@ -83,8 +79,8 @@ size_t ReadNextBatch(FILE* input_file_ptr, divftree::VTYPE* buffer) {
         throw std::runtime_error("Error seeking data file!");
     }
 
-    ret_code = fread(buffer, sizeof(divftree::VTYPE) * DIMENSION, BATCH_SIZE, input_file_ptr);
-    if (ret_code < BATCH_SIZE && offset < (total_num_vectors * DIMENSION * sizeof(divftree::VTYPE))) {
+    ret_code = fread(buffer, sizeof(divftree::VTYPE) * DIMENSION, bench_batch_size, input_file_ptr);
+    if (ret_code < bench_batch_size && offset < (total_num_vectors * DIMENSION * sizeof(divftree::VTYPE))) {
         if (feof(input_file_ptr))
             throw std::runtime_error("Error reading data file: unexpected end of file!");
         else if (ferror(input_file_ptr))

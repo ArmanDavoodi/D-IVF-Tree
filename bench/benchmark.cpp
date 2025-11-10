@@ -158,7 +158,7 @@ void FlushIncrement(uint64_t& local_cnt, std::atomic<uint64_t>& shared_cnt) {
 /* todo: instead of this get a batch per thread and make reading the file atomic? */
 void worker(divftree::Thread* self) {
     self->InitDIVFThread();
-    divftree::VTYPE buffer[BATCH_SIZE * DIMENSION];
+    divftree::VTYPE buffer[bench_batch_size * DIMENSION];
     FILE* input_file_ptr = nullptr;
     OpenDataFile(input_file_ptr, false);
     size_t num_read = 0;
