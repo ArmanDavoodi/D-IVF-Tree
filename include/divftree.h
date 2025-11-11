@@ -2698,8 +2698,10 @@ protected:
                 bufferMgr->ReleaseEntriesIfNotNull(&entries[max_entries - num_entries], num_entries,
                                             ReleaseBufferEntryFlags(false, false));
             } else {
-                uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) - batch.size;
+                uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) + batch.size;
                 uint16_t reserved = src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire);
+                FatalAssert(reserved >= num_deleted, LOG_TAG_DIVFTREE,
+                            "we cannot delete more vectors than there are in the cluster!");
                 num_migrated += batch.size;
                 if ((reserved - num_deleted) < src_cluster->attr.min_size) {
                     if (bufferMgr->AddMergeTaskIfNotExists(src_id, *src_entry)) {
@@ -2707,9 +2709,8 @@ protected:
                         UNUSED_VARIABLE(res);
                         FatalAssert(res, LOG_TAG_DIVFTREE, "this should not fail!");
                     }
-                } else if ((num_deleted > 0) &&
-                        (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
-                                                    ((double)num_deleted / (double)reserved))))) {
+                } else if (threadSelf->UniformBinary((uint32_t)((double)attr.random_base_perc *
+                                                    ((double)num_deleted / (double)reserved)))) {
                     if (bufferMgr->AddCompactionTaskIfNotExists(src_id, *src_entry)) {
                         bool res = compaction_tasks.Push(CompactionTask{src_id});
                         UNUSED_VARIABLE(res);
