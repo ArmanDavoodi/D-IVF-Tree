@@ -2700,6 +2700,8 @@ protected:
             } else {
                 uint16_t num_deleted = src_cluster->cluster.header.num_deleted.fetch_add(batch.size) + batch.size;
                 uint16_t reserved = src_cluster->cluster.header.reserved_size.load(std::memory_order_acquire);
+                FatalAssert(reserved >= num_deleted, LOG_TAG_DIVFTREE,
+                            "we cannot delete more vectors than there are in the cluster!");
                 num_migrated += batch.size;
                 if ((reserved - num_deleted) < src_cluster->attr.min_size) {
                     if (bufferMgr->AddMergeTaskIfNotExists(src_id, *src_entry)) {
