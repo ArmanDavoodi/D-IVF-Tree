@@ -373,7 +373,7 @@ public:
     }
 
     inline static size_t BlockBytes(uint16_t block_size, size_t meta_size, uint16_t dim) {
-        return ALLIGNED_SIZE((size_t)block_size * ((size_t)meta_size + ((size_t)dim * sizeof(VTYPE))));
+        return ALIGNED_SIZE((size_t)block_size * ((size_t)meta_size + ((size_t)dim * sizeof(VTYPE))));
     }
 
     inline static size_t NumBlocks(uint16_t block_size, uint16_t cap) {
@@ -387,12 +387,12 @@ public:
         if (last_block_cap == 0 && cap > 0) {
             last_block_cap = block_size;
         }
-        return ((NumBlocks(block_size, cap) - 1) * ALLIGNED_SIZE(block_size * (header_bytes + data_bytes))) +
-               ALLIGNED_SIZE(last_block_cap * (header_bytes + data_bytes));
+        return ((NumBlocks(block_size, cap) - 1) * ALIGNED_SIZE(block_size * (header_bytes + data_bytes))) +
+               ALIGNED_SIZE(last_block_cap * (header_bytes + data_bytes));
     }
 
     inline static size_t TotalBytes(bool is_leaf_vertex, uint16_t block_size, uint16_t cap, uint16_t dim) {
-        return ALLIGNED_SIZE(sizeof(ClusterHeader)) + DataBytes(is_leaf_vertex, block_size, cap, dim);
+        return ALIGNED_SIZE(sizeof(ClusterHeader)) + DataBytes(is_leaf_vertex, block_size, cap, dim);
     }
 
     Cluster(bool is_leaf_vertex, uint16_t block_cap, uint16_t cap, uint16_t dim, bool set_zero = true) :
@@ -413,11 +413,11 @@ public:
         const uint16_t block_offset = offset % block_size;
         const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
         const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
+        const uint16_t block_bytes = ALIGNED_SIZE(block_size * (header_bytes + data_bytes));
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<AddressToConst>(ALLIGNED_PTR(blocks) +
+        return reinterpret_cast<AddressToConst>(ALIGNED_PTR(blocks) +
                                                 block_number * block_bytes + block_offset * header_bytes);
     }
 
@@ -429,11 +429,11 @@ public:
         const uint16_t block_offset = offset % block_size;
         const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
         const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
+        const uint16_t block_bytes = ALIGNED_SIZE(block_size * (header_bytes + data_bytes));
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<Address>(ALLIGNED_PTR(blocks) +
+        return reinterpret_cast<Address>(ALIGNED_PTR(blocks) +
                                          block_number * block_bytes + block_offset * header_bytes);
     }
 
@@ -449,14 +449,14 @@ public:
         }
         const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
         const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
+        const uint16_t block_bytes = ALIGNED_SIZE(block_size * (header_bytes + data_bytes));
         const uint16_t meta_data_bytes = (block_number == (block_size - 1) ?
                                           last_block_size : block_size) *
                                           header_bytes;
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<const VTYPE*>(ALLIGNED_PTR(blocks) +
+        return reinterpret_cast<const VTYPE*>(ALIGNED_PTR(blocks) +
                                               block_number * block_bytes + meta_data_bytes + block_offset * data_bytes);
     }
 
@@ -472,14 +472,14 @@ public:
         }
         const uint64_t header_bytes = (is_leaf ? sizeof(VectorMetaData) : sizeof(CentroidMetaData));
         const uint64_t data_bytes = sizeof(VTYPE) * (uint64_t)dimension;
-        const uint16_t block_bytes = ALLIGNED_SIZE(block_size * (header_bytes + data_bytes));
+        const uint16_t block_bytes = ALIGNED_SIZE(block_size * (header_bytes + data_bytes));
         const uint16_t meta_data_bytes = (block_number == (block_size - 1) ?
                                           last_block_size : block_size) *
                                           header_bytes;
         FatalAssert(block_number == 0, LOG_TAG_CLUSTER,
                     "Only single block clusters are supported currently. offset=%hu, "
                     "block_number=%hu, block_size=%hu", offset, block_number, block_size);
-        return reinterpret_cast<VTYPE*>(ALLIGNED_PTR(blocks) +
+        return reinterpret_cast<VTYPE*>(ALIGNED_PTR(blocks) +
                                         block_number * block_bytes + meta_data_bytes + block_offset * data_bytes);
     }
     /*

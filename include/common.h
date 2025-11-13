@@ -599,33 +599,34 @@ might cause deadlock or unnecessary errors*/
 constexpr size_t CACHE_LINE_SIZE = 64; // Fallback to common cache line size
 // #endif
 
-inline constexpr size_t ALLIGNED_SIZE(size_t size) {
-    return (size % CACHE_LINE_SIZE == 0) ? size : (size + (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE)));
+inline constexpr size_t ALIGNED_SIZE(size_t size, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_COMMON, "Alignment bytes cannot be zero.");
+    return (size % align_bytes == 0) ? size : (size + (align_bytes - (size % align_bytes)));
 }
 
-inline constexpr size_t ALLIGNEMENT(size_t size) {
-    return (size % CACHE_LINE_SIZE == 0) ? 0 : (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE));
+inline constexpr size_t ALIGNEMENT(size_t size, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_COMMON, "Alignment bytes cannot be zero.");
+    return (size % align_bytes == 0) ? 0 : (align_bytes - (size % align_bytes));
 }
 
-inline constexpr bool ALLIGNED(void* ptr) {
-    return (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0);
+inline constexpr bool ALIGNED(void* ptr, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_COMMON, "Alignment bytes cannot be zero.");
+    return (reinterpret_cast<uintptr_t>(ptr) % align_bytes == 0);
 }
 
-inline constexpr bool ALLIGNED(void* ptr, size_t size) {
-    return (reinterpret_cast<uintptr_t>(ptr) % size == 0);
-}
-
-inline constexpr void* ALLIGNED_PTR(void* ptr) {
-    return (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ? ptr :
+inline constexpr void* ALIGNED_PTR(void* ptr, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_COMMON, "Alignment bytes cannot be zero.");
+    return (reinterpret_cast<uintptr_t>(ptr) % align_bytes == 0) ? ptr :
             reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(ptr) +
-                                    (CACHE_LINE_SIZE - (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
+                                    (align_bytes - (reinterpret_cast<uintptr_t>(ptr) % align_bytes))));
 }
 
-inline constexpr const void* ALLIGNED_PTR(const void* ptr) {
-    return (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) % CACHE_LINE_SIZE == 0) ? ptr :
+inline constexpr const void* ALIGNED_PTR(const void* ptr, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_COMMON, "Alignment bytes cannot be zero.");
+    return (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) % align_bytes == 0) ? ptr :
             reinterpret_cast<const void*>((reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) +
-                                (CACHE_LINE_SIZE - (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) %
-                                                                           CACHE_LINE_SIZE))));
+                                (align_bytes - (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) %
+                                                                           align_bytes))));
 }
 
 

@@ -243,6 +243,16 @@ void ParseConfigs() {
         }
     }
 
+    vit = var_configs.find("memory-pool-size-gb");
+    if (vit != var_configs.end()) {
+        if (!parseUnsignedInt(vit->second, index_attr.memory_pool_size_gb) ||
+            index_attr.memory_pool_size_gb < 1) {
+            throw std::runtime_error("Invalid memory pool size!");
+        }
+    } else {
+        throw std::runtime_error("Memory pool size not provided!");
+    }
+
     vit = var_configs.find("default-leaf-search-span");
     if (vit != var_configs.end()) {
         if (!parseUnsignedInt(vit->second, default_leaf_search_span) ||

@@ -730,7 +730,7 @@ public:
 #endif
         VectorID root_id;
         BufferVertexEntry* root_entry =
-            BufferManager::Init(sizeof(DIVFTreeVertex) - ALLIGNED_SIZE(sizeof(ClusterHeader)),
+            BufferManager::Init(sizeof(DIVFTreeVertex) - ALIGNED_SIZE(sizeof(ClusterHeader)),
                                 attr.leaf_blck_size, attr.internal_blck_size,
                                 attr.leaf_max_size, attr.internal_max_size, attr.dimension);
         CHECK_NOT_NULLPTR(root_entry, LOG_TAG_DIVFTREE);

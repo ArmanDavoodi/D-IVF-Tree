@@ -6,7 +6,7 @@ namespace divftree {
 BufferVectorEntry::BufferVectorEntry(VectorID id) : selfId(id), location(INVALID_VECTOR_LOCATION) {
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vector entry should be
     16 byte aligned as well */
-    FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVectorEntry is not alligned!");
+    FatalAssert(ALIGNED(this, 16), LOG_TAG_BUFFER, "BufferVectorEntry is not alligned!");
 #ifdef MEMORY_DEBUG
     DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p created buffer vector entry -> ID:" VECTORID_LOG_FMT, this,
             VECTORID_LOG(id));
@@ -159,7 +159,7 @@ BufferVertexEntry::BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID 
     hasMergeTask(false) {
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vertex entry should be
         16 byte aligned as well */
-    FatalAssert(ALLIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
+    FatalAssert(ALIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
     // liveVersions.emplace(initialPin, 0, cluster);
 #ifdef MEMORY_DEBUG
     DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p created buffer vertex entry -> ID:" VECTORID_LOG_FMT
@@ -416,9 +416,8 @@ String BufferVertexEntry::ToString() {
     return String("");
 }
 
-BufferManager::BufferManager(uint64_t internalSize, uint64_t leafSize) : internalVertexSize(internalSize),
-                                                                         leafVertexSize(leafSize),
-                                                                         currentRootId(INVALID_VECTOR_ID) {
+BufferManager::BufferManager(uint64_t internalSize, uint64_t leafSize, uint64_t pool_size_bytes) :
+    internalVertexSize(internalSize), leafVertexSize(leafSize), currentRootId(INVALID_VECTOR_ID) {
     FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
 }
 

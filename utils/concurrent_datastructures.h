@@ -103,6 +103,14 @@ public:
         return q.try_dequeue(value);
     }
 
+    inline size_t BatchPopHead(T* arr, size_t size) {
+        return q.wait_dequeue_bulk_timed(arr, size, std::chrono::microseconds(10));
+    }
+
+    inline size_t TryBatchPopHead(T* arr, size_t size) {
+        return q.try_dequeue_bulk(arr, size);
+    }
+
     inline bool Empty() {
         return q.size_approx() == 0;
     }

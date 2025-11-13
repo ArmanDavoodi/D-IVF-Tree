@@ -2,6 +2,7 @@
 #define DIVFTREE_BUFFER_H_
 
 #include "interface/divftree.h"
+#include "utils/memory_pool.h"
 
 #include <memory>
 #include <atomic>
@@ -255,7 +256,7 @@ struct alignas(16) BufferVertexEntry {
 class BufferManager {
 // TODO: reuse deleted IDs
 public:
-    BufferManager(uint64_t internalSize, uint64_t leafSize);
+    BufferManager(uint64_t internalSize, uint64_t leafSize, uint64_t pool_size_bytes);
     ~BufferManager();
 
     /*
@@ -346,6 +347,7 @@ public:
 protected:
     const uint64_t internalVertexSize;
     const uint64_t leafVertexSize;
+    LocalMemoryPool memoryPool;
     SXSpinLock bufferMgrLock;
     std::atomic<RawVectorID> currentRootId;
     std::vector<BufferVectorEntry*> vectorDirectory;
