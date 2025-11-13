@@ -417,8 +417,8 @@ String BufferVertexEntry::ToString() {
 }
 
 BufferManager::BufferManager(uint64_t internalSize, uint64_t leafSize, uint64_t pool_size_bytes) :
-    internalVertexSize(internalSize), leafVertexSize(leafSize), currentRootId(INVALID_VECTOR_ID),
-    memoryPool(internalSize, leafSize, pool_size_bytes) {
+    internalVertexSize(internalSize), leafVertexSize(leafSize), memoryPool(internalSize, leafSize, pool_size_bytes),
+    currentRootId(INVALID_VECTOR_ID) {
     FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
 }
 
@@ -510,7 +510,7 @@ DIVFTreeVertexInterface* BufferManager::AllocateMemoryForVertex(uint8_t level) {
                 "Level is out of bounds.");
     // void* res = std::aligned_alloc(CACHE_LINE_SIZE,
     //                                ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
-    res = memoryPool.Allocate((level == VectorID::LEAF_LEVEL) ? SlotType::Leaf : SlotType::Internal);
+    void* res = memoryPool.Allocate((level == VectorID::LEAF_LEVEL) ? SlotType::Leaf : SlotType::Internal);
     CHECK_NOT_NULLPTR(res, LOG_TAG_BUFFER);
 #ifdef MEMORY_DEBUG
     DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p allocated", res);

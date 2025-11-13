@@ -48,7 +48,7 @@ union AllocationFlags {
 
 class MemoryPool {
 public:
-    virtual ~MemoryPool() = 0;
+    virtual ~MemoryPool() = default;
 
     /* will wait until enough memory is available */
     virtual void* Allocate(SlotType type, AllocationFlags flags = {.value = 0}) = 0;
