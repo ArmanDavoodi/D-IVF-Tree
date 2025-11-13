@@ -732,7 +732,7 @@ public:
         BufferVertexEntry* root_entry =
             BufferManager::Init(sizeof(DIVFTreeVertex) - ALIGNED_SIZE(sizeof(ClusterHeader)),
                                 attr.leaf_blck_size, attr.internal_blck_size,
-                                attr.leaf_max_size, attr.internal_max_size, attr.dimension);
+                                attr.leaf_max_size, attr.internal_max_size, attr.dimension, attr.memory_pool_size_gb);
         CHECK_NOT_NULLPTR(root_entry, LOG_TAG_DIVFTREE);
         (void)(new (root_entry->ReadLatestVersion(false)) DIVFTreeVertex(attr, root_entry->centroidMeta.selfId, this));
         root_entry->headerLock.Unlock();

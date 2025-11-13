@@ -417,7 +417,8 @@ String BufferVertexEntry::ToString() {
 }
 
 BufferManager::BufferManager(uint64_t internalSize, uint64_t leafSize, uint64_t pool_size_bytes) :
-    internalVertexSize(internalSize), leafVertexSize(leafSize), currentRootId(INVALID_VECTOR_ID) {
+    internalVertexSize(internalSize), leafVertexSize(leafSize), currentRootId(INVALID_VECTOR_ID),
+    memoryPool(internalSize, leafSize, pool_size_bytes) {
     FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
 }
 
@@ -482,11 +483,12 @@ BufferManager::~BufferManager() {
 
 inline BufferVertexEntry* BufferManager::Init(uint64_t vertexMetaDataSize,
                                               uint16_t leaf_blk_size, uint16_t internal_blk_size,
-                                              uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim) {
+                                              uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim,
+                                              uint64_t pool_size_gb) {
     FatalAssert(bufferMgrInstance == nullptr, LOG_TAG_BUFFER, "Buffer already initialized");
     uint64_t internalVertexSize = vertexMetaDataSize + Cluster::TotalBytes(false, internal_blk_size, internal_cap, dim);
     uint64_t leafVertexSize = vertexMetaDataSize + Cluster::TotalBytes(true, leaf_blk_size, leaf_cap, dim);
-    bufferMgrInstance = new BufferManager(internalVertexSize, leafVertexSize);
+    bufferMgrInstance = new BufferManager(internalVertexSize, leafVertexSize, pool_size_gb * 1024 * 1024 * 1024);
     BufferVertexEntry* root = bufferMgrInstance->CreateNewRootEntry(INVALID_VECTOR_ID);
     return root;
 }
@@ -501,12 +503,15 @@ inline BufferManager* BufferManager::GetInstance() {
     return bufferMgrInstance;
 }
 
+/* todo: add batchallocate and batch free functions! */
 DIVFTreeVertexInterface* BufferManager::AllocateMemoryForVertex(uint8_t level) {
     FatalAssert(bufferMgrInstance == this, LOG_TAG_BUFFER, "Buffer not initialized");
     FatalAssert(MAX_TREE_HIGHT > (uint64_t)level && (uint64_t)level > VectorID::VECTOR_LEVEL, LOG_TAG_BUFFER,
                 "Level is out of bounds.");
-    void* res = std::aligned_alloc(CACHE_LINE_SIZE,
-                                   ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
+    // void* res = std::aligned_alloc(CACHE_LINE_SIZE,
+    //                                ((uint64_t)level == VectorID::LEAF_LEVEL ? leafVertexSize : internalVertexSize));
+    res = memoryPool.Allocate((level == VectorID::LEAF_LEVEL) ? SlotType::Leaf : SlotType::Internal);
+    CHECK_NOT_NULLPTR(res, LOG_TAG_BUFFER);
 #ifdef MEMORY_DEBUG
     DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p allocated", res);
 #endif
@@ -521,7 +526,8 @@ void BufferManager::Recycle(DIVFTreeVertexInterface* memory) {
 #ifdef MEMORY_DEBUG
     DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_BUFFER, "%p freed", memory);
 #endif
-    std::free(memory);
+    // std::free(memory);
+    memoryPool.Free(reinterpret_cast<void*>(memory));
 }
 
 void BufferManager::UpdateRoot(VectorID newRootId, Version newRootVersion, BufferVertexEntry* oldRootEntry) {

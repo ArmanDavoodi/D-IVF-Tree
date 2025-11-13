@@ -88,6 +88,7 @@ else
     echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
     echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE
 fi
+echo "memory-pool-size-gb:$VAR_MEMORY_POOL_SIZE_GB" >> $CONF_FILE
 
 echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
 echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE

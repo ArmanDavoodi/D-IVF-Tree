@@ -1,8 +1,6 @@
 #ifndef MEMORY_POOL_H_
 #define MEMORY_POOL_H_
 
-#define MEMORY_DEBUG
-
 #include <sys/mman.h>
 #include <atomic>
 #ifdef MEMORY_DEBUG

@@ -266,7 +266,8 @@ public:
      */
     inline static BufferVertexEntry* Init(uint64_t vertexMetaDataSize,
                                           uint16_t leaf_blk_size, uint16_t internal_blk_size,
-                                          uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim);
+                                          uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim,
+                                          uint64_t pool_size_gb);
 
     /*
      * Note: No thread should be calling any functions from the bufferMgr the moment
