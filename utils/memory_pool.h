@@ -5,6 +5,7 @@
 #include <atomic>
 #ifdef MEMORY_DEBUG
 #include <set>
+#include <mutex>
 #endif
 
 #include "debug.h"
@@ -75,8 +76,11 @@ public:
             pool_size >= 2 * (ALIGNED_SIZE(std::max(leafSlotSize, internalSlotSize)) +
                               ALIGNED_SIZE(sizeof(SlotMeta))),
             LOG_TAG_MEMORY, "pool_size is too small for the given object_size and alignment");
-
+#ifdef USE_HUGETLB
         base = mmap64(nullptr, poolSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB, -1, 0);
+#else
+        base = mmap64(nullptr, poolSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#endif
         if (base == MAP_FAILED) {
             DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_MEMORY, "Failed to allocate memory for LocalMemoryPool."
                     "errno %d, errno msg: %s", errno, strerror(errno));
@@ -252,8 +256,10 @@ public:
         FatalAssert(ALIGNED(slot_ptr->data), LOG_TAG_MEMORY, "Slot data is not properly aligned");
 #ifdef MEMORY_DEBUG
         {
-            AllocationSanityCheck((void*)(slot_ptr), objectSize);
-            allocations.insert(std::make_pair((void*)(slot_ptr), objectSize));
+            size_t slotSize = type == SlotType::Leaf ? leafSlotSize : internalSlotSize;
+            std::lock_guard<std::mutex> lock(allocation_mutex);
+            AllocationSanityCheck((void*)(slot_ptr), slotSize);
+            allocations.insert(std::make_pair((void*)(slot_ptr), slotSize));
         }
 #endif
         FatalAssert(slot_ptr->meta.in_use == 0, LOG_TAG_MEMORY, "Allocated slot is in use!");
@@ -412,6 +418,10 @@ public:
             }
         }
 
+#ifdef MEMORY_DEBUG
+        size_t slotSize = type == SlotType::Leaf ? leafSlotSize : internalSlotSize;
+#endif
+
         if (assigned > 0) {
             FatalAssert(allocated == 0, LOG_TAG_MEMORY,
                         "In atomic non-blocking allocation, allocated should be zero if assigned is greater than zero");
@@ -424,9 +434,9 @@ public:
                 FatalAssert(ALIGNED(slot_ptr->data), LOG_TAG_MEMORY, "Slot data is not properly aligned");
 #ifdef MEMORY_DEBUG
                 {
-                    AllocationSanityCheck((void*)(slot_ptr), objectSize);
-                    AllocationSanityCheck((void*)(slot_ptr), objectSize, current_allocations);
-                    current_allocations.insert(std::make_pair((void*)(slot_ptr), objectSize));
+                    AllocationSanityCheck((void*)(slot_ptr), slotSize);
+                    AllocationSanityCheck((void*)(slot_ptr), slotSize, current_allocations);
+                    current_allocations.insert(std::make_pair((void*)(slot_ptr), slotSize));
                 }
 #endif
                 FatalAssert(slot_ptr->meta.in_use == 0, LOG_TAG_MEMORY, "Allocated slot is in use!");
@@ -442,8 +452,9 @@ public:
             FatalAssert(ALIGNED(slot_ptr->data), LOG_TAG_MEMORY, "Slot data is not properly aligned");
 #ifdef MEMORY_DEBUG
             {
-                AllocationSanityCheck((void*)(slot_ptr), objectSize);
-                allocations.insert(std::make_pair((void*)(slot_ptr), objectSize));
+                std::lock_guard<std::mutex> lock(allocation_mutex);
+                AllocationSanityCheck((void*)(slot_ptr), slotSize);
+                allocations.insert(std::make_pair((void*)(slot_ptr), slotSize));
             }
 #endif
             FatalAssert(slot_ptr->meta.in_use == 0, LOG_TAG_MEMORY, "Allocated slot is in use!");
@@ -472,9 +483,10 @@ public:
         slot_ptr->meta.in_use = 0;
 #ifdef MEMORY_DEBUG
         {
+            std::lock_guard<std::mutex> lock(allocation_mutex);
             auto it = allocations.find(std::make_pair((void*)(slot_ptr),
                                                       slot_ptr->meta.type == static_cast<uint8_t>(SlotType::Leaf) ?
-                                                      leafObjectSize : internalObjectSize));
+                                                      leafSlotSize : internalSlotSize));
             FatalAssert(it != allocations.end(), LOG_TAG_MEMORY, "Double free or corruption detected");
             allocations.erase(it);
         }
@@ -509,9 +521,10 @@ public:
             slot_ptr->meta.in_use = 0;
 #ifdef MEMORY_DEBUG
             {
+                std::lock_guard<std::mutex> lock(allocation_mutex);
                 auto it = allocations.find(std::make_pair((void*)(slot_ptr),
-                                                          slot_ptr->meta.type == static_cast<uint8_t>(SlotType::Leaf) ?
-                                                          leafObjectSize : internalObjectSize));
+                                                          (slot_ptr->meta.type == static_cast<uint8_t>(SlotType::Leaf) ?
+                                                          leafSlotSize : internalSlotSize)));
                 FatalAssert(it != allocations.end(), LOG_TAG_MEMORY, "Double free or corruption detected");
                 allocations.erase(it);
             }
@@ -546,6 +559,7 @@ protected:
 
 #ifdef MEMORY_DEBUG
     std::set<std::pair<void*, size_t>> allocations;
+    std::mutex allocation_mutex;
 #endif
 };
 

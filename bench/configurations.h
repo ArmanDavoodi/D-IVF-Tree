@@ -8,6 +8,8 @@
 
 // Hang Detector.+Message: Detected hang in thread id [^0][0-9]*
 #define HANG_DETECTION
+// todo: enable hugeTLB for release after builds and resolve the issue for them
+// #define USE_HUGETLB
 
 #if defined(DATASET)
     #if ((DATASET == BIGANN100M) || (DATASET == BIGANN1B))
