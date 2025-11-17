@@ -1695,7 +1695,8 @@ protected:
                     found_marked = true;
 
                     if (!is_leaf) {
-                        FatalAssert(batch.version[i] == marked_version + 1, LOG_TAG_DIVFTREE,
+                        FatalAssert(batch.version[i] == marked_version.NextCompaction() ||
+                                    batch.version[i] == marked_version.NextSplit(), LOG_TAG_DIVFTREE,
                                     "marked for update version mismatch!");
                     }
                 }
@@ -1719,6 +1720,39 @@ protected:
         compacted->cluster.header.num_deleted.store(0, std::memory_order_relaxed);
         compacted->cluster.header.reserved_size.store(new_size, std::memory_order_relaxed);
         compacted->cluster.header.visible_size.store(new_size, std::memory_order_relaxed);
+
+        // VectorBatch centroid;
+        // centroid.size = 1;
+        // BufferVertexEntry* parent = nullptr;
+        // while (true) {
+        //     VectorLocation currentLocation = INVALID_VECTOR_LOCATION;
+        //     parent = container_entry->ReadParentEntry(currentLocation);
+        //     if (parent == nullptr) {
+        //         FatalAssert(currentLocation == INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+        //                     "null parent with valid location!");
+        //         /* In this case, we are compacting the root and we do not need to expand the tree */
+        //         break;
+        //     } else {
+        //         FatalAssert(currentLocation != INVALID_VECTOR_LOCATION, LOG_TAG_DIVFTREE,
+        //                 "null parent with valid location!");
+        //     }
+
+        //     CHECK_NOT_NULLPTR(parent, LOG_TAG_DIVFTREE);
+        //     rs = BatchInsertInto(parent, centroids, false, currentLocation.detail.entryOffset);
+        //     if (!rs.IsOK()) {
+        //         bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags(false, false));
+        //         parent = nullptr;
+        //         continue;
+        //     }
+
+        //     break;
+        // }
+
+        // threadSelf->SanityCheckLockHeldInModeByMe(&parent->clusterLock, SX_SHARED);
+
+        // container_entry->UpdateClusterPtr(clusters[0], centroids.version[0]);
+        // bufferMgr->ReleaseBufferEntry(parent, ReleaseBufferEntryFlags(false, false));
+        // parent = nullptr;
 
 #ifdef EXCESS_LOGING
         DIVFLOG(LOG_LEVEL_DEBUG, LOG_TAG_DIVFTREE, "compacted vertex id: " VECTORID_LOG_FMT
@@ -1855,7 +1889,7 @@ protected:
         BufferManager* bufferMgr = BufferManager::GetInstance();
         CHECK_NOT_NULLPTR(bufferMgr, LOG_TAG_CLUSTERING);
         centroids.id[0] = base->attr.centroid_id;
-        centroids.version[0] = base->attr.version + 1;
+        centroids.version[0] = base->attr.version.NextSplit();
         clusters[0] = new (bufferMgr->AllocateMemoryForVertex(centroids.id[0]._level))
             DIVFTreeVertex(DIVFTreeVertexAttributes(centroids.id[0], centroids.version[0], base->attr.min_size,
                                                     base->attr.cap, base->attr.block_size, base->attr.index));

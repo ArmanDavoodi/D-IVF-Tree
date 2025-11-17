@@ -147,7 +147,7 @@ constexpr VectorLocation INVALID_VECTOR_LOCATION = VectorLocation(INVALID_VECTOR
 union alignas(16) AtomicVectorLocation {
     struct Detail {
         std::atomic<RawVectorID> containerId;
-        std::atomic<Version> containerVersion;
+        std::atomic<RawVersion> containerVersion;
         std::atomic<uint16_t> entryOffset;
     } detail;
     atomic_data128 raw;
@@ -216,6 +216,9 @@ struct alignas(16) BufferVertexEntry {
     CondVar condVar;
     Version currentVersion;
     uint64_t nextVersionPin;
+    SANITY_CHECK(
+        Version sanity_nextVersion;
+    );
 
     std::atomic<bool> hasCompactionTask;
     std::atomic<bool> hasMergeTask;
@@ -225,7 +228,7 @@ struct alignas(16) BufferVertexEntry {
      * liveVersions can only be updated if parent is locked(any mode),
      * self is locked in X mode, and headerLock is locked in X mode
      */
-    std::unordered_map<Version, VersionedClusterPtr> liveVersions;
+    std::unordered_map<Version, VersionedClusterPtr, VersionHash> liveVersions;
 
     BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin = 1);
     ~BufferVertexEntry();

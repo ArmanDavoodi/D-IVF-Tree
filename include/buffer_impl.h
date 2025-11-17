@@ -155,8 +155,9 @@ DIVFTreeVertexInterface* BufferVectorEntry::ReadAndPinParent(VectorLocation& cur
 }
 
 BufferVertexEntry::BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin) :
-    centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0), nextVersionPin(0), hasCompactionTask(false),
-    hasMergeTask(false) {
+    centroidMeta(id), state(CLUSTER_CREATED), currentVersion(0), nextVersionPin(0),
+    SANITY_CHECK(sanity_nextVersion(0), )
+    hasCompactionTask(false), hasMergeTask(false) {
     /* since we have an atomicVectorLocation and it has to be 16byte aligned, the vertex entry should be
         16 byte aligned as well */
     FatalAssert(ALIGNED(this, 16), LOG_TAG_BUFFER, "BufferVertexEntry is not alligned!");
@@ -279,7 +280,7 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster) {
     headerLock.Lock(SX_EXCLUSIVE);
     FatalAssert(liveVersions.find(currentVersion) != liveVersions.end(), LOG_TAG_BUFFER,
                 "new version already exists!");
-    std::unordered_map<Version, VersionedClusterPtr>::iterator it = liveVersions.find(currentVersion);
+    std::unordered_map<Version, VersionedClusterPtr, VersionHash>::iterator it = liveVersions.find(currentVersion);
     uint64_t pinCount = it->second.clusterPtr.pin.load(std::memory_order_relaxed);
     DIVFTreeVertexInterface* cluster = it->second.clusterPtr.clusterPtr;
     it->second.clusterPtr.pin.store(0, std::memory_order_relaxed);
@@ -295,8 +296,10 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Ve
     UNUSED_VARIABLE(newVersion);
     FatalAssert(liveVersions.find(currentVersion) != liveVersions.end(), LOG_TAG_BUFFER,
                 "new version already exists!");
-    FatalAssert(newVersion == currentVersion + 1, LOG_TAG_BUFFER, "Version jump detected!");
-    currentVersion++;
+    FatalAssert(newVersion == currentVersion.NextSplit(), LOG_TAG_BUFFER, "Version jump detected!");
+    Version oldVersion = currentVersion;
+    currentVersion = newVersion;
+    FatalAssert(currentVersion != oldVersion, LOG_TAG_BUFFER, "Version did not change!");
     FatalAssert(liveVersions.find(currentVersion) == liveVersions.end(), LOG_TAG_BUFFER,
                 "new version already exists!");
     FatalAssert(newCluster != nullptr, LOG_TAG_BUFFER, "Invalid cluster ptr!");
@@ -304,10 +307,14 @@ void BufferVertexEntry::UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Ve
     FatalAssert(newCluster->GetAttributes().version == newVersion, LOG_TAG_BUFFER, "mismatch version!");
     FatalAssert(centroidMeta.selfId != BufferManager::GetInstance()->GetCurrentRootId(), LOG_TAG_BUFFER,
                 "Cannot call this version of update cluster on root!");
-
+    SANITY_CHECK(
+        FatalAssert(((sanity_nextVersion == oldVersion) && (nextVersionPin == 0)) ||
+                    ((sanity_nextVersion == newVersion)), LOG_TAG_BUFFER, "Unexcpected version!");
+        sanity_nextVersion = newVersion;
+    );
     liveVersions[currentVersion] = VersionedClusterPtr(1 + nextVersionPin, 0, newCluster);
     nextVersionPin = 0;
-    UnpinVersion(currentVersion - 1, true);
+    UnpinVersion(oldVersion, true);
     headerLock.Unlock();
 }
 
@@ -383,9 +390,10 @@ void BufferVertexEntry::PinVersion(Version version, bool headerLocked) {
         headerLock.Lock(SX_SHARED);
     }
     threadSelf->SanityCheckLockHeldByMe(&headerLock);
-    FatalAssert(version <= currentVersion + 1, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
-                VECTORID_LOG_FMT ", latest version = %u, input version = %u",
-                VECTORID_LOG(centroidMeta.selfId), currentVersion, version);
+    FatalAssert(version == currentVersion.NextSplit() || version <= currentVersion.NextCompaction(), LOG_TAG_BUFFER,
+                "Version is out of bounds: VertexID="
+                VECTORID_LOG_FMT ", latest version = %s, input version = %s",
+                VECTORID_LOG(centroidMeta.selfId), currentVersion.ToString().ToCStr(), version.ToString().ToCStr());
     if (version <= currentVersion) {
         auto it = liveVersions.find(version);
         FatalAssert(it != liveVersions.end(), LOG_TAG_BUFFER, "version is not live!");
@@ -398,6 +406,13 @@ void BufferVertexEntry::PinVersion(Version version, bool headerLocked) {
                 VECTORID_LOG(centroidMeta.selfId), version, oldVersionPin + 1, currentVersion);
 #endif
     } else {
+        SANITY_CHECK(
+            if (sanity_nextVersion == currentVersion) {
+                sanity_nextVersion = version;
+            } else {
+                FatalAssert(sanity_nextVersion == version, LOG_TAG_BUFFER, "Unexcpected version!");
+            }
+        );
         ++nextVersionPin;
 #ifdef MEMORY_DEBUG
         DIVFLOG(LOG_LEVEL_WARNING, LOG_TAG_DIVFTREE_VERTEX, "%p cluster version pinned -> ID:" VECTORID_LOG_FMT
