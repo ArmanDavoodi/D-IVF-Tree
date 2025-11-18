@@ -21,6 +21,8 @@ VAR_INTERNAL_BLOCK_BYTES=$(( 1024 * 16 ))
 VAR_LEAF_BLOCK_SIZE=$((${VAR_LEAF_SIZE[1]}))
 VAR_INTERNAL_BLOCK_SIZE=$((${VAR_INTERNAL_SIZE[1]}))
 
+VAR_MEMORY_POOL_SIZE_GB=$(( 100 )) #size of memory pool for data nodes in GB
+
 # VAR_DEF_LEAF_SEARCH_SPAN=8
 # VAR_DEF_INTERNAL_SEARCH_SPAN=4
 # VAR_DEF_K=2
@@ -86,6 +88,7 @@ else
     echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
     echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE
 fi
+echo "memory-pool-size-gb:$VAR_MEMORY_POOL_SIZE_GB" >> $CONF_FILE
 
 echo "leaf-block-bytes:$VAR_LEAF_BLOCK_BYTES" >> $CONF_FILE
 echo "internal-block-bytes:$VAR_INTERNAL_BLOCK_BYTES" >> $CONF_FILE

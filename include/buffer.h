@@ -2,6 +2,7 @@
 #define DIVFTREE_BUFFER_H_
 
 #include "interface/divftree.h"
+#include "utils/memory_pool.h"
 
 #include <memory>
 #include <atomic>
@@ -146,7 +147,7 @@ constexpr VectorLocation INVALID_VECTOR_LOCATION = VectorLocation(INVALID_VECTOR
 union alignas(16) AtomicVectorLocation {
     struct Detail {
         std::atomic<RawVectorID> containerId;
-        std::atomic<Version> containerVersion;
+        std::atomic<RawVersion> containerVersion;
         std::atomic<uint16_t> entryOffset;
     } detail;
     atomic_data128 raw;
@@ -215,6 +216,9 @@ struct alignas(16) BufferVertexEntry {
     CondVar condVar;
     Version currentVersion;
     uint64_t nextVersionPin;
+    SANITY_CHECK(
+        Version sanity_nextVersion;
+    );
 
     std::atomic<bool> hasCompactionTask;
     std::atomic<bool> hasMergeTask;
@@ -224,7 +228,7 @@ struct alignas(16) BufferVertexEntry {
      * liveVersions can only be updated if parent is locked(any mode),
      * self is locked in X mode, and headerLock is locked in X mode
      */
-    std::unordered_map<Version, VersionedClusterPtr> liveVersions;
+    std::unordered_map<Version, VersionedClusterPtr, VersionHash> liveVersions;
 
     BufferVertexEntry(DIVFTreeVertexInterface* cluster, VectorID id, uint64_t initialPin = 1);
     ~BufferVertexEntry();
@@ -242,10 +246,10 @@ struct alignas(16) BufferVertexEntry {
     /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
     void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster);
     /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
-    void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion);
+    void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion, bool isRoot = false);
     void InitiateDelete();
 
-    void UnpinVersion(Version version, bool headerLocked=false);
+    void UnpinVersion(Version version, uint64_t unpinCnt = 1, bool headerLocked=false);
     void PinVersion(Version version, bool headerLocked=false);
 
     String ToString();
@@ -255,7 +259,7 @@ struct alignas(16) BufferVertexEntry {
 class BufferManager {
 // TODO: reuse deleted IDs
 public:
-    BufferManager(uint64_t internalSize, uint64_t leafSize);
+    BufferManager(uint64_t internalSize, uint64_t leafSize, uint64_t pool_size_bytes);
     ~BufferManager();
 
     /*
@@ -265,7 +269,8 @@ public:
      */
     inline static BufferVertexEntry* Init(uint64_t vertexMetaDataSize,
                                           uint16_t leaf_blk_size, uint16_t internal_blk_size,
-                                          uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim);
+                                          uint16_t leaf_cap, uint16_t internal_cap, uint16_t dim,
+                                          uint64_t pool_size_gb);
 
     /*
      * Note: No thread should be calling any functions from the bufferMgr the moment
@@ -316,7 +321,7 @@ public:
      */
     BufferVertexEntry* ReadBufferEntry(VectorID vertexId, LockMode mode, bool* blocked = nullptr);
     BufferVertexEntry* TryReadBufferEntry(VectorID vertexId, LockMode mode);
-    inline void ReleaseEntriesIfNotNull(BufferVertexEntry** entries, uint8_t num_entries,
+    inline void ReleaseEntriesIfNotNull(BufferVertexEntry** entries, uint16_t num_entries,
                                         ReleaseBufferEntryFlags flags);
     inline void ReleaseBufferEntryIfNotNull(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags);
     void ReleaseBufferEntry(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags);
@@ -346,6 +351,7 @@ public:
 protected:
     const uint64_t internalVertexSize;
     const uint64_t leafVertexSize;
+    LocalMemoryPool memoryPool;
     SXSpinLock bufferMgrLock;
     std::atomic<RawVectorID> currentRootId;
     std::vector<BufferVectorEntry*> vectorDirectory;

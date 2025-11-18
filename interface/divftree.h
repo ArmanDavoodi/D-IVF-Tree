@@ -12,6 +12,10 @@
 
 namespace divftree {
 
+/* in functions such as migrate we may lock all clusters in a parent cluster + some other clusters */
+constexpr uint16_t MAX_CLUSTER_SIZE = UINT16_MAX - 8;
+constexpr uint16_t MAX_VECTOR_DIMENSION = 512;
+
 class DIVFTreeInterface;
 
 struct DIVFTreeVertexAttributes {
@@ -72,6 +76,8 @@ struct DIVFTreeAttributes {
 
     uint32_t random_base_perc;
 
+    size_t memory_pool_size_gb;
+
     bool collect_stats;
 
     String ToString() const {
@@ -95,12 +101,13 @@ struct DIVFTreeAttributes {
             "migration_check_triger_rate:%u, "
             "migration_check_triger_single_rate:%u, "
             "random_base_perc:%u, "
+            "memory_pool_size:%luGB, "
             "collect_stats:%s"
         "}", CLUSTERING_TYPE_NAME[(int8_t)clusteringAlg], DISTANCE_TYPE_NAME[(int8_t)distanceAlg],
         leaf_min_size, leaf_max_size, internal_min_size, internal_max_size, (use_block_bytes ? "T" : "F"),
         leaf_blck_bytes, leaf_blck_size, internal_blck_bytes, internal_blck_size, split_internal, split_leaf,
         dimension, num_searchers, num_migrators, num_mergers, num_compactors, migration_check_triger_rate,
-        migration_check_triger_single_rate, random_base_perc, (collect_stats ? "T" : "F"));
+        migration_check_triger_single_rate, random_base_perc, memory_pool_size_gb, (collect_stats ? "T" : "F"));
     }
 };
 

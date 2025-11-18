@@ -271,6 +271,15 @@ public:
 #endif
     }
 
+    inline uint64_t SanityCheckNumLocksHeldByMe() {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+#ifdef LOCK_DEBUG
+        return heldExclusive.size() + heldShared.size();
+#else
+        return 0;
+#endif
+    }
+
     inline void SanityCheckLockNotHeldInBothModesByMe(void* lockAddr) {
         UNUSED_VARIABLE(lockAddr);
         FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");

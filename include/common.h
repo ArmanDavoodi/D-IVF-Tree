@@ -194,7 +194,147 @@ union VectorID {
     }
 };
 
-typedef uint32_t Version;
+typedef uint32_t RawVersion;
+union Version {
+    RawVersion _raw;
+    struct {
+        uint32_t _compaction : 8;
+        uint32_t _split : 24;
+    };
+
+    constexpr Version() : _raw(0) {}
+    constexpr Version(const RawVersion& ver) : _raw(ver) {}
+    constexpr Version(const Version& ver) : _raw(ver._raw) {}
+
+    inline static Version AsVersion(RawVersion ver) {
+        return Version(ver);
+    }
+
+    inline static RawVersion AsRawVersion(Version ver) {
+        return ver._raw;
+    }
+
+    constexpr void operator=(const Version& ver) {
+        _raw = ver._raw;
+    }
+
+    constexpr void operator=(const RawVersion& ver) {
+        _raw = ver;
+    }
+
+    inline bool operator==(const Version& ver) const {
+        return _raw == ver._raw;
+    }
+
+    inline bool operator==(const RawVersion& ver) const {
+        return _raw == ver;
+    }
+
+    inline bool operator!=(const Version& ver) const {
+        return _raw != ver._raw;
+    }
+
+    inline bool operator!=(const RawVersion& ver) const {
+        return _raw != ver;
+    }
+
+    inline bool operator<(const Version& ver) const {
+        FatalAssert((_raw < ver._raw) == (_split < ver._split ||
+                    (_split == ver._split && _compaction < ver._compaction)),
+                    LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        return _raw < ver._raw;
+    }
+
+    inline bool operator<(const RawVersion& ver) const {
+        SANITY_CHECK(
+            Version v = AsVersion(ver);
+            FatalAssert((_raw < v._raw) == (_split < v._split ||
+                        (_split == v._split && _compaction < v._compaction)),
+                        LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        );
+        return _raw < ver;
+    }
+
+    inline bool operator<=(const Version& ver) const {
+        FatalAssert((_raw <= ver._raw) == (_split < ver._split ||
+                    (_split == ver._split && _compaction <= ver._compaction)),
+                    LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        return _raw <= ver._raw;
+    }
+
+    inline bool operator<=(const RawVersion& ver) const {
+        SANITY_CHECK(
+            Version v = AsVersion(ver);
+            FatalAssert((_raw <= v._raw) == (_split < v._split ||
+                        (_split == v._split && _compaction <= v._compaction)),
+                        LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        );
+        return _raw <= ver;
+    }
+
+    inline bool operator>(const Version& ver) const {
+        FatalAssert((_raw > ver._raw) == (_split > ver._split ||
+                    (_split == ver._split && _compaction > ver._compaction)),
+                    LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        return _raw > ver._raw;
+    }
+
+    inline bool operator>(const RawVersion& ver) const {
+        SANITY_CHECK(
+            Version v = AsVersion(ver);
+            FatalAssert((_raw > v._raw) == (_split > v._split ||
+                        (_split == v._split && _compaction > v._compaction)),
+                        LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        );
+        return _raw > ver;
+    }
+
+    inline bool operator>=(const Version& ver) const {
+        FatalAssert((_raw >= ver._raw) == (_split > ver._split ||
+                    (_split == ver._split && _compaction >= ver._compaction)),
+                    LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        return _raw >= ver._raw;
+    }
+
+    inline bool operator>=(const RawVersion& ver) const {
+        SANITY_CHECK(
+            Version v = AsVersion(ver);
+            FatalAssert((_raw >= v._raw) == (_split > v._split ||
+                        (_split == v._split && _compaction >= v._compaction)),
+                        LOG_TAG_BASIC, "Version comparison operator inconsistency");
+        );
+        return _raw >= ver;
+    }
+
+    inline String ToString() const {
+        return String("%u{split=%u, compaction=%u}", _raw, _split, _compaction);
+    }
+
+    inline Version NextCompaction() const {
+        Version newVersion = *this;
+        newVersion._raw += 1;
+        /* If we have compaction overflow, it should be fine as we can consider a compaction to be split and it will
+           only make things slower. */
+        FatalAssert(((newVersion._compaction != 0) && (newVersion._compaction == _compaction + 1) &&
+                     (newVersion._split == _split)) ||
+                    ((newVersion._compaction == 0) && (newVersion._split == _split + 1)), LOG_TAG_BASIC,
+                    "Version compaction overflow");
+        /* todo: remove this and replace with stat collection code */
+        DIVFLOG_IF_TRUE(newVersion._compaction == 0, LOG_LEVEL_DEBUG, LOG_TAG_BASIC,
+                        "Version compaction overflow happened, performance may be degraded.");
+        FatalAssert(newVersion != 0, LOG_TAG_BASIC, "Version overflow");
+        return newVersion;
+    }
+
+    inline Version NextSplit() const {
+        Version newVersion;
+        newVersion._split = _split + 1;
+        FatalAssert((newVersion._split == _split + 1) && (newVersion._compaction == 0), LOG_TAG_BASIC,
+                    "Version split overflow");
+        FatalAssert(newVersion != 0, LOG_TAG_BASIC, "Version overflow");
+        return newVersion;
+    }
+};
 
 template<uint8_t bits>
 constexpr inline uint64_t GET_HALF_MASK() {
@@ -240,6 +380,12 @@ constexpr inline uint64_t GET_MASK() {
     return (uint64_t)0;
 }
 
+struct VersionHash {
+    size_t operator()(const Version& p) const {
+        return std::hash<uint32_t>()(p._raw);
+    }
+};
+
 struct VectorIDHash {
     size_t operator()(const VectorID& p) const {
         return std::hash<uint64_t>()(p._id);
@@ -259,7 +405,7 @@ struct VectorIDVersionPairHash {
             return ((((((p.first._creator_node_id & GET_HALF_MASK<4>()) << 4) |
                     (p.first._level & GET_HALF_MASK<4>()) << 48) |
                     p.first._val) << 8) |
-                    (p.second & GET_MASK<1>()));
+                    (p.second._raw & GET_MASK<1>()));
         } else {
             return std::hash<uint64_t>()(p.first._id);
         }
@@ -599,33 +745,34 @@ might cause deadlock or unnecessary errors*/
 constexpr size_t CACHE_LINE_SIZE = 64; // Fallback to common cache line size
 // #endif
 
-inline constexpr size_t ALLIGNED_SIZE(size_t size) {
-    return (size % CACHE_LINE_SIZE == 0) ? size : (size + (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE)));
+inline constexpr size_t ALIGNED_SIZE(size_t size, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_BASIC, "Alignment bytes cannot be zero.");
+    return (size % align_bytes == 0) ? size : (size + (align_bytes - (size % align_bytes)));
 }
 
-inline constexpr size_t ALLIGNEMENT(size_t size) {
-    return (size % CACHE_LINE_SIZE == 0) ? 0 : (CACHE_LINE_SIZE - (size % CACHE_LINE_SIZE));
+inline constexpr size_t ALIGNEMENT(size_t size, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_BASIC, "Alignment bytes cannot be zero.");
+    return (size % align_bytes == 0) ? 0 : (align_bytes - (size % align_bytes));
 }
 
-inline constexpr bool ALLIGNED(void* ptr) {
-    return (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0);
+inline constexpr bool ALIGNED(void* ptr, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_BASIC, "Alignment bytes cannot be zero.");
+    return (reinterpret_cast<uintptr_t>(ptr) % align_bytes == 0);
 }
 
-inline constexpr bool ALLIGNED(void* ptr, size_t size) {
-    return (reinterpret_cast<uintptr_t>(ptr) % size == 0);
-}
-
-inline constexpr void* ALLIGNED_PTR(void* ptr) {
-    return (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE == 0) ? ptr :
+inline constexpr void* ALIGNED_PTR(void* ptr, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_BASIC, "Alignment bytes cannot be zero.");
+    return (reinterpret_cast<uintptr_t>(ptr) % align_bytes == 0) ? ptr :
             reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(ptr) +
-                                    (CACHE_LINE_SIZE - (reinterpret_cast<uintptr_t>(ptr) % CACHE_LINE_SIZE))));
+                                    (align_bytes - (reinterpret_cast<uintptr_t>(ptr) % align_bytes))));
 }
 
-inline constexpr const void* ALLIGNED_PTR(const void* ptr) {
-    return (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) % CACHE_LINE_SIZE == 0) ? ptr :
+inline constexpr const void* ALIGNED_PTR(const void* ptr, size_t align_bytes = CACHE_LINE_SIZE) {
+    FatalAssert(align_bytes != 0, LOG_TAG_BASIC, "Alignment bytes cannot be zero.");
+    return (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) % align_bytes == 0) ? ptr :
             reinterpret_cast<const void*>((reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) +
-                                (CACHE_LINE_SIZE - (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) %
-                                                                           CACHE_LINE_SIZE))));
+                                (align_bytes - (reinterpret_cast<uintptr_t>(const_cast<void*>(ptr)) %
+                                                                           align_bytes))));
 }
 
 
@@ -654,8 +801,8 @@ struct ANNVectorInfo {
 };
 
 String ANNVectorInfoToString(const ANNVectorInfo& target) {
-    return String("{dist=" DTYPE_FMT ", id=" VECTORID_LOG_FMT ", Version=%u}",
-                 target.distance_to_query, VECTORID_LOG(target.id), target.version);
+    return String("{dist=" DTYPE_FMT ", id=" VECTORID_LOG_FMT ", Version=%s}",
+                 target.distance_to_query, VECTORID_LOG(target.id), target.version.ToString().ToCStr());
 }
 
 // enum DataType : int8_t {
