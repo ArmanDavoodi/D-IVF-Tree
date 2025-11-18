@@ -319,6 +319,9 @@ union Version {
                      (newVersion._split == _split)) ||
                     ((newVersion._compaction == 0) && (newVersion._split == _split + 1)), LOG_TAG_BASIC,
                     "Version compaction overflow");
+        /* todo: remove this and replace with stat collection code */
+        DIVFLOG_IF_TRUE(newVersion._compaction == 0, LOG_LEVEL_DEBUG, LOG_TAG_BASIC,
+                        "Version compaction overflow happened, performance may be degraded.");
         FatalAssert(newVersion != 0, LOG_TAG_BASIC, "Version overflow");
         return newVersion;
     }

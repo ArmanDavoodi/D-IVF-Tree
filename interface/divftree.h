@@ -12,6 +12,10 @@
 
 namespace divftree {
 
+/* in functions such as migrate we may lock all clusters in a parent cluster + some other clusters */
+constexpr uint16_t MAX_CLUSTER_SIZE = UINT16_MAX - 8;
+constexpr uint16_t MAX_VECTOR_DIMENSION = 512;
+
 class DIVFTreeInterface;
 
 struct DIVFTreeVertexAttributes {

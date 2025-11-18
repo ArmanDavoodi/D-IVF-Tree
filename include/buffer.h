@@ -246,10 +246,10 @@ struct alignas(16) BufferVertexEntry {
     /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
     void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster);
     /* parentNode should also be locked in shared or exclusive mode and self should be locked in X mode */
-    void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion);
+    void UpdateClusterPtr(DIVFTreeVertexInterface* newCluster, Version newVersion, bool isRoot = false);
     void InitiateDelete();
 
-    void UnpinVersion(Version version, bool headerLocked=false);
+    void UnpinVersion(Version version, uint64_t unpinCnt = 1, bool headerLocked=false);
     void PinVersion(Version version, bool headerLocked=false);
 
     String ToString();
@@ -321,7 +321,7 @@ public:
      */
     BufferVertexEntry* ReadBufferEntry(VectorID vertexId, LockMode mode, bool* blocked = nullptr);
     BufferVertexEntry* TryReadBufferEntry(VectorID vertexId, LockMode mode);
-    inline void ReleaseEntriesIfNotNull(BufferVertexEntry** entries, uint8_t num_entries,
+    inline void ReleaseEntriesIfNotNull(BufferVertexEntry** entries, uint16_t num_entries,
                                         ReleaseBufferEntryFlags flags);
     inline void ReleaseBufferEntryIfNotNull(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags);
     void ReleaseBufferEntry(BufferVertexEntry* entry, ReleaseBufferEntryFlags flags);

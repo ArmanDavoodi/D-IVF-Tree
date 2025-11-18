@@ -327,6 +327,7 @@ struct ConstVectorBatch {
     const uint16_t size = 0;
 
     ConstVectorBatch() = default;
+    ConstVectorBatch(uint16_t s) : size(s) {};
     ConstVectorBatch(const ConstVectorBatch& other) = default;
     ConstVectorBatch(ConstVectorBatch&& other) = default;
 
