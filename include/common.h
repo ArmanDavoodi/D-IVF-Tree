@@ -71,11 +71,16 @@ struct RetStatus {
     const char* message = nullptr;
 
     static inline RetStatus Success() {
-        return RetStatus{SUCCESS, "OK"};
+        return RetStatus{SUCCESS, nullptr};
     }
 
     static inline RetStatus Fail(const char* msg) {
-        return RetStatus{FAIL, msg};
+        RetStatus status{FAIL, nullptr};
+        if (msg != nullptr) {
+            status.message = new char[strlen(msg) + 1];
+            strcpy(const_cast<char*>(status.message), msg);
+        }
+        return status;
     }
 
     inline bool IsOK() const {
@@ -83,7 +88,57 @@ struct RetStatus {
     }
 
     inline const char* Msg() const {
-        return message;
+        return message == nullptr ? "" : message;
+    }
+
+    ~RetStatus() {
+        if (message != nullptr) {
+            delete[] message;
+            message = nullptr;
+        }
+    }
+
+    RetStatus() = default;
+    RetStatus(const RetStatus& other) {
+        stat = other.stat;
+        if (other.message != nullptr) {
+            message = new char[strlen(other.message) + 1];
+            strcpy(const_cast<char*>(message), other.message);
+        } else {
+            message = nullptr;
+        }
+    }
+
+    RetStatus(RetStatus&& other) : stat(other.stat), message(other.message) {
+        other.message = nullptr;
+    }
+
+    RetStatus& operator=(const RetStatus& other) {
+        if (this != &other) {
+            stat = other.stat;
+            if (message != nullptr) {
+                delete[] message;
+            }
+            if (other.message != nullptr) {
+                message = new char[strlen(other.message) + 1];
+                strcpy(const_cast<char*>(message), other.message);
+            } else {
+                message = nullptr;
+            }
+        }
+        return *this;
+    }
+
+    RetStatus& operator=(RetStatus&& other) {
+        if (this != &other) {
+            stat = other.stat;
+            if (message != nullptr) {
+                delete[] message;
+            }
+            message = other.message;
+            other.message = nullptr;
+        }
+        return *this;
     }
 };
 
