@@ -92,14 +92,6 @@ union ConnTaskId {
         return _raw != raw;
     }
 };
-// union ConnTaskId {
-//     struct {
-//         uint64_t task_id : 48;
-//         uint64_t connection_id : 8;
-//         uint64_t buffer_id : 8;
-//     };
-//     uint64_t raw;
-// };
 
 enum CommBufferState : uint8_t {
     BUFFER_STATE_READY = 0,
@@ -176,22 +168,28 @@ struct ConnectionContext {
 struct CommConnectionContext {
     ConnectionContext ctx;
     uintptr_t remote_buffer;
+    std::atomic<uint8_t> current_buffer_idx;
+    SXLock buffer_lock[NUM_COMM_BUFFERS_PER_CONNECTION];
     CommBuffer comm_buffers[NUM_COMM_BUFFERS_PER_CONNECTION];
 
     CommConnectionContext() = default;
     void Init(ConnectionType t, uint32_t id, struct ibv_qp* q, struct ibv_cq* c) {
         ctx.Init(t, id, q, c);
+        current_buffer_idx.store(0, std::memory_order_relaxed);
     }
 };
 
 struct UrgentConnectionContext {
     ConnectionContext ctx;
     uintptr_t remote_buffer;
+    std::atomic<uint8_t> current_buffer_idx;
+    SXLock buffer_lock[NUM_URGENT_BUFFERS_PER_CONNECTION];
     UrgentBuffer urgent_buffers[NUM_URGENT_BUFFERS_PER_CONNECTION];
 
     UrgentConnectionContext() = default;
     void Init(ConnectionType t, uint32_t id, struct ibv_qp* q, struct ibv_cq* c) {
         ctx.Init(t, id, q, c);
+        current_buffer_idx.store(0, std::memory_order_relaxed);
     }
 };
 
@@ -1001,7 +999,50 @@ EXIT:
         return rs;
     }
 
-    RetStatus EstablishRDMAConnections();
+    RetStatus EstablishRDMAConnections() {
+        RetStatus rs = RetStatus::Success();
+        FatalAssert(nodes.size() == (size_t)num_nodes, LOG_TAG_RDMA,
+                    "nodes.size() does not match num_nodes. nodes.size()=%lu, num_nodes=%hhu",
+                    nodes.size(), num_nodes);
+        FatalAssert(num_nodes > 1, LOG_TAG_RDMA,
+                    "num_nodes must be greater than 1. num_nodes=%hhu", num_nodes);
+#ifdef MEMORY_NODE
+        for (uint8_t i = 0; i < num_nodes; ++i) {
+            if (i == MEMORY_NODE_ID) {
+                continue;
+            }
+#else
+        uint8_t i = MEMORY_NODE_ID;
+#endif
+
+            for (size_t j = 0; j < NUM_CONNECTIONS[CN_CLUSTER_READ]; ++j) {
+                rs = ModifyQPStateToRTR(nodes[i].cn_cluster_read_connections[j].qp,
+                                        nodes[i].cn_cluster_read_connections[j].remote_qp_num,
+                                        nodes[i].remote_gid,
+                                        port_num,
+                                        nodes[i].cn_cluster_read_connections[j].remote_psn,
+                                        CN_CLUSTER_READ);
+                if (!rs.IsOK()) {
+                    DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                            "Failed to modify CN_CLUSTER_READ QP to RTR for node %hhu connection %zu. Error: %s",
+                            i, j, rs.Msg());
+                    return rs;
+                }
+
+                rs = ModifyQPStateToRTS(nodes[i].cn_cluster_read_connections[j].qp,
+                                        nodes[i].cn_cluster_read_connections[j].local_psn,
+                                        CN_CLUSTER_READ);
+                if (!rs.IsOK()) {
+                    DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                            "Failed to modify CN_CLUSTER_READ QP to RTS for node %hhu connection %zu. Error: %s",
+                            i, j, rs.Msg());
+                    return rs;
+                }
+            }
+#ifdef MEMORY_NODE
+        }
+#endif
+    }
 
     RetStatus DisconnectAllNodes();
     RetStatus DeregisterAllMemoryRegions();
@@ -1361,12 +1402,14 @@ public:
 
     /* --------- end of not thread-safe region --------- */
 
+    /* for urgent buffers we CAS the state for synchronization. for commbuffers we first check the state and if valid
+        */
     RetStatus GrabCommBuffer(void*& buffer, size_t len, bool is_urgent = false);
-    RetStatus ReleaseCommBuffer(void* buffer, bool flush = false, bool is_urgent = false);
+    RetStatus ReleaseCommBuffer(void* buffer, ConnTaskId& task_id, bool flush = false, bool is_urgent = false);
     RetStatus RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers,
-                        uint8_t target_node_id, uint32_t connection_id);
+                        uint8_t target_node_id, uint32_t connection_id, ConnTaskId& task_id);
     RetStatus RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers,
-                       uint8_t target_node_id, uint32_t connection_id);
+                       uint8_t target_node_id, uint32_t connection_id, ConnTaskId& task_id);
 
 TESTABLE;
 };
