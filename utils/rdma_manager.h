@@ -59,12 +59,17 @@ constexpr size_t NUM_COMM_BUFFERS_PER_CONNECTION = 2;
 constexpr size_t NUM_URGENT_BUFFERS_PER_CONNECTION = 2;
 
 constexpr size_t COMM_BUFFER_SIZE = 4096;
-constexpr size_t URGENT_BUFFER_SIZE = 64; /* todo: needs to be set to max inline data or max size of urgent message */
+constexpr size_t URGENT_BUFFER_SIZE = 4096;
+constexpr size_t URGENT_MESSAGE_SIZE = 64; /* todo: needs to be set to max inline data or max size of urgent message */
 
 static_assert(CACHE_LINE_SIZE <= COMM_BUFFER_SIZE, "COMM_BUFFER_SIZE must be at least CACHE_LINE_SIZE");
 static_assert(CACHE_LINE_SIZE <= URGENT_BUFFER_SIZE, "URGENT_BUFFER_SIZE must be at least CACHE_LINE_SIZE");
+static_assert(CACHE_LINE_SIZE <= URGENT_MESSAGE_SIZE, "URGENT_MESSAGE_SIZE must be at least CACHE_LINE_SIZE");
 static_assert(COMM_BUFFER_SIZE % CACHE_LINE_SIZE == 0, "COMM_BUFFER_SIZE must be multiple of CACHE_LINE_SIZE");
 static_assert(URGENT_BUFFER_SIZE % CACHE_LINE_SIZE == 0, "URGENT_BUFFER_SIZE must be multiple of CACHE_LINE_SIZE");
+static_assert(URGENT_MESSAGE_SIZE % CACHE_LINE_SIZE == 0, "URGENT_MESSAGE_SIZE must be multiple of CACHE_LINE_SIZE");
+static_assert(URGENT_MESSAGE_SIZE * 2 <= URGENT_BUFFER_SIZE,
+              "URGENT_MESSAGE_SIZE * 2 must be less than or equal to URGENT_BUFFER_SIZE");
 
 union ConnTaskId {
     struct {
@@ -98,6 +103,14 @@ union ConnTaskId {
     inline bool operator!=(uint64_t raw) const {
         return _raw != raw;
     }
+
+    inline bool operator==(const ConnTaskId& other) const {
+        return _raw == other._raw;
+    }
+
+    inline bool operator!=(const ConnTaskId& other) const {
+        return _raw != other._raw;
+    }
 };
 
 enum CommBufferState : uint8_t {
@@ -105,10 +118,54 @@ enum CommBufferState : uint8_t {
     BUFFER_STATE_IN_USE
 };
 
-constexpr size_t URGENT_BUFFER_DATA_SIZE = URGENT_BUFFER_SIZE - sizeof(CommBufferState);
+
+/* In the compute node do I need these two?! I guess not so I only need a buffer for the requests and an index */
 struct alignas(CACHE_LINE_SIZE) UrgentBuffer {
-    char data[URGENT_BUFFER_DATA_SIZE] = {0};
-    std::atomic<CommBufferState> state = BUFFER_STATE_READY; /* this should be the last byte! */ /* todo alignas(64)? */
+    char data[URGENT_BUFFER_SIZE] = {0};
+};
+
+struct UrgentMessageMeta {
+    uint8_t length : 6; /* length in number of bytes */ /* max length is 64 bytes */
+    uint8_t seen : 1;
+    uint8_t valid : 1;
+};
+
+struct UrgentMessage {
+    char data[URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)] = {0};
+    UrgentMessageMeta meta;
+
+    UrgentMessage() = default;
+    ~UrgentMessage() = default;
+
+    void Clear() {
+        memset(data, 0, sizeof(data));
+        meta.length = 0;
+    }
+
+    size_t GetLength() const {
+        return static_cast<size_t>(meta.length);
+    }
+
+    void AppendData(const void* src, size_t len) {
+        FatalAssert((GetLength() + len) <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
+                    LOG_TAG_RDMA,
+                    "Appending data of length %zu exceeds urgent message maximum size %zu",
+                    len, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
+        memcpy(data + GetLength(), src, len);
+        meta.length += static_cast<uint8_t>(len);
+    }
+
+    void WriteData(size_t offset, const void* src, size_t len) {
+        FatalAssert((offset + len) <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
+                    LOG_TAG_RDMA,
+                    "Writing data of length %zu at offset %zu exceeds urgent message maximum size %zu",
+                    len, offset, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
+        FatalAssert(offset <= GetLength(), LOG_TAG_RDMA,
+                    "Writing data at offset %zu which is beyond current message length %zu",
+                    offset, GetLength());
+        memcpy(data + offset, src, len);
+        meta.length = static_cast<uint8_t>(std::max(static_cast<size_t>(meta.length), offset + len));
+    }
 };
 
 struct CommBufferMeta {
@@ -140,7 +197,7 @@ struct ConnectionContext {
     uint32_t local_psn;
     uint32_t remote_psn;
     uint32_t remote_qp_num;
-    std::atomic<ConnTaskId> last_task_id;
+    std::atomic<uint64_t> last_task_id;
     std::atomic<uint16_t> num_pending_requests;
     struct ibv_qp *qp;
     struct ibv_cq *cq; /* todo: use a single cq per node or total? */
@@ -204,25 +261,42 @@ struct CommConnectionContext {
 
 struct UrgentConnectionContext {
     ConnectionContext ctx;
-    uintptr_t remote_buffers;
-    std::atomic<uint8_t> curr_buffer_idx;
-    SXLock buffer_lock[NUM_URGENT_BUFFERS_PER_CONNECTION];
-    UrgentBuffer* urgent_buffers = nullptr;
+    uintptr_t remote_buffer;
+#ifdef MEMORY_NODE
+    std::atomic<uint64_t>* read_off;
+    std::atomic<uint64_t> write_off;
+#else
+    std::atomic<uint64_t> curr_idx;
+    UrgentBuffer* buffer;
+#endif
+
 
     UrgentConnectionContext() = default;
     void Init(ConnectionType t, uint32_t id, struct ibv_qp* q, struct ibv_cq* c) {
         ctx.Init(t, id, q, c);
-        curr_buffer_idx.store(0, std::memory_order_relaxed);
+        remote_buffer = 0;
+#ifdef MEMORY_NODE
+        read_off = nullptr;
+        write_off = 0;
+#else
+        buffer = nullptr;
+        curr_idx.store(0, std::memory_order_relaxed);
+#endif
     }
 
-    void SetBuffer(UrgentBuffer* bufs) {
-        FatalAssert(urgent_buffers == nullptr, LOG_TAG_RDMA,
-                    "urgent_buffers is already set for UrgentConnectionContext");
-        FatalAssert(bufs != nullptr, LOG_TAG_RDMA,
-                    "bufs cannot be nullptr for UrgentConnectionContext");
-        FatalAssert(ALIGNED(bufs, CACHE_LINE_SIZE), LOG_TAG_RDMA,
-                    "bufs must be aligned to CACHE_LINE_SIZE for UrgentConnectionContext");
-        urgent_buffers = bufs;
+    void SetBuffer(void* buff) {
+        FatalAssert(buff != nullptr, LOG_TAG_RDMA,
+                    "buff cannot be nullptr for UrgentConnectionContext");
+        FatalAssert(ALIGNED(buff, CACHE_LINE_SIZE), LOG_TAG_RDMA,
+                    "buff must be aligned to CACHE_LINE_SIZE for UrgentConnectionContext");
+#ifdef MEMORY_NODE
+            FatalAssert(read_off == nullptr, LOG_TAG_RDMA, "read_off is already inited!");
+            read_off = reinterpret_cast<std::atomic<uint64_t>*>(buff);
+            read_off->store(0, std::memory_order_relaxed);
+#else
+            FatalAssert(buffer == nullptr, LOG_TAG_RDMA, "buffer is already inited!");
+            buffer = reinterpret_cast<UrgentBuffer*>(buff);
+#endif
     }
 };
 
@@ -240,6 +314,8 @@ struct RDMABuffer {
     void* local_addr;
     uintptr_t remote_addr;
     size_t length;
+    uint8_t remote_node_id;
+    uint8_t buffer_idx = 0;
 };
 
 template <ConnectionType conn_type, typename ConnCtxType>
@@ -370,7 +446,7 @@ protected:
         0,                            /* CN_CLUSTER_WRITE */
         sizeof(CommBufferState),      /* CN_COMM */
         0,                            /* MN_COMM */
-        URGENT_BUFFER_SIZE            /* MN_URGENT */
+        URGENT_MESSAGE_SIZE            /* MN_URGENT */
     };
 #else
     /* todo: maybe I need to pass this as a runtime arg?! needs tuning */
@@ -394,9 +470,10 @@ protected:
     };
 
     /* todo: we may need to increase this later */
+    /* Note: sge requires the operation to have a single remote target memory */
     static constexpr uint32_t MAX_SEND_SGE[CONNECTION_TYPE_COUNT] = {
-        32,  /* CN_CLUSTER_READ */ /* todo: need to tune -> maybe should get it as conf -> equal to span */
-        2,   /* CN_CLUSTER_WRITE */ /* currently we only use 2 for num clusters during split */
+        1,  /* CN_CLUSTER_READ */ /* todo: need to tune -> maybe should get it as conf -> equal to span */
+        1,   /* CN_CLUSTER_WRITE */ /* currently we only use 2 for num clusters during split */
         1,   /* CN_COMM */
         1,   /* MN_COMM */
         1    /* MN_URGENT */
@@ -408,7 +485,7 @@ protected:
         0,                            /* CN_CLUSTER_WRITE */
         0,                            /* CN_COMM */
         sizeof(CommBufferState),      /* MN_COMM */
-        sizeof(CommBufferState)       /* MN_URGENT */
+        sizeof(uint64_t)              /* MN_URGENT */ /* sizeof readoffset */
     };
 #endif
 
@@ -498,6 +575,12 @@ protected:
 
     RetStatus FlushCommBuffer(uint8_t target_node_id, uint8_t conn_id, uint8_t buffer_idx);
 
+    uint32_t GetLocalKey(Address addr, size_t length) const;
+    RetStatus RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, ConnectionContext& conn_ctx,
+                        unsigned int send_flags);
+    RetStatus RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, ConnectionContext& conn_ctx,
+                       ConnTaskId& wait_id);
+
 public:
     inline static RDMA_Manager* GetInstance();
 
@@ -519,14 +602,12 @@ public:
         */
     RetStatus GrabCommBuffer(uint8_t target_node_id, size_t len, BufferInfo& buffer);
     RetStatus ReleaseCommBuffer(BufferInfo buffer, bool flush = false);
-    RetStatus SendUrgentMessage(void* buffer, size_t len, uint8_t target_node_id);
-    // RetStatus GrabUrgentBuffer(uint8_t target_node_id, BufferInfo& buffer);
-    // RetStatus ReleaseUrgentBuffer(BufferInfo buffer, ConnTaskId& task_id, bool flush = false);
+    UrgentMessage* BuildUrgentMessage();
+    void ReleaseUrgentMessage(UrgentMessage* msg);
+    RetStatus SendUrgentMessage(UrgentMessage* msg, uint8_t target_node_id);
 
-    RetStatus RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers,
-                        uint8_t target_node_id, uint32_t connection_id, unsigned int send_flags, ConnTaskId* task_id);
-    RetStatus RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers,
-                       uint8_t target_node_id, uint32_t connection_id, ConnTaskId* task_id);
+    RetStatus RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers);
+    RetStatus RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, ConnTaskId& wait_id);
 
 TESTABLE;
 };

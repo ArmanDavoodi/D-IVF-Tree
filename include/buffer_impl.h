@@ -266,7 +266,7 @@ RetStatus BufferVertexEntry::UpgradeAccessToExclusive(BufferVertexEntryState& ta
             clusterLock.Unlock();
         }
         targetState = expected;
-        return RetStatus{.stat=RetStatus::FAILED_TO_CAS_ENTRY_STATE, .message=""};
+        return RetStatus{.stat=RetStatus::FAILED_TO_CAS_ENTRY_STATE, .message=nullptr};
     }
 }
 
@@ -919,7 +919,7 @@ RetStatus BufferManager::ReadAndPinVertex(VectorID vertexId, Version version,
     vertex = nullptr;
     BufferVertexEntry* entry = GetVertexEntry(vertexId);
     if (entry == nullptr) {
-        return RetStatus{.stat=RetStatus::VERTEX_DELETED, .message=""};
+        return RetStatus{.stat=RetStatus::VERTEX_DELETED, .message=nullptr};
     }
 
     FatalAssert(entry->centroidMeta.selfId == vertexId, LOG_TAG_BUFFER, "BufferEntry id mismatch! VertexID="
@@ -932,7 +932,7 @@ RetStatus BufferManager::ReadAndPinVertex(VectorID vertexId, Version version,
     entry->headerLock.Lock(SX_SHARED);
     if (version > entry->currentVersion) {
         entry->headerLock.Unlock();
-        return RetStatus{.stat=RetStatus::VERSION_NOT_APPLIED, .message=""};
+        return RetStatus{.stat=RetStatus::VERSION_NOT_APPLIED, .message=nullptr};
     }
 
     FatalAssert(version <= entry->currentVersion, LOG_TAG_BUFFER, "Version is out of bounds: VertexID="
@@ -944,7 +944,7 @@ RetStatus BufferManager::ReadAndPinVertex(VectorID vertexId, Version version,
     auto it = entry->liveVersions.find(version);
     if (it == entry->liveVersions.end() || it->second.versionPin.load() == 0) {
         entry->headerLock.Unlock();
-        return RetStatus{.stat=RetStatus::OUTDATED_VERSION_DELETED, .message=""};
+        return RetStatus{.stat=RetStatus::OUTDATED_VERSION_DELETED, .message=nullptr};
     }
 
     uint64_t pin = it->second.clusterPtr.pin.fetch_add(1);

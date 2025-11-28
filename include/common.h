@@ -65,6 +65,8 @@ struct RetStatus {
 
         EMPTY_MIGRATION_BATCH,
 
+        RDMA_QP_FULL,
+
         FAIL
     } stat;
 
