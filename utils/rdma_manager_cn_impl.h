@@ -279,7 +279,7 @@ RetStatus RDMA_Manager::InitConnectionCtx(ConnectionType conn_type, struct ibv_c
             UrgentConnectionContext* urgent_ctx = reinterpret_cast<UrgentConnectionContext*>(&connections[conn_id]);
             urgent_ctx->urgent_buffers = reinterpret_cast<UrgentBuffer*>(next_buffer);
             next_buffer = reinterpret_cast<void*>(
-                reinterpret_cast<uintptr_t>(next_buffer) + URGENT_BUFFER_SIZE * NUM_URGENT_BUFFERS_PER_CONNECTION);
+                reinterpret_cast<uintptr_t>(next_buffer) + URGENT_BUFFER_SIZE);
             urgent_ctx->ctx.local_psn = threadSelf->UniformRange32(0, (uint32_t)(1 << 24) - 1);
         } else {
             connections[conn_id].local_psn = threadSelf->UniformRange32(0, (uint32_t)(1 << 24) - 1);
@@ -865,11 +865,11 @@ RDMA_Manager::RDMA_Manager(uint8_t self_id, const std::vector<std::pair<const ch
     buffer_size =
         (num_nodes - 1) *
         ((NUM_CONNECTIONS[CN_COMM] + NUM_CONNECTIONS[MN_COMM]) * NUM_COMM_BUFFERS_PER_CONNECTION * COMM_BUFFER_SIZE +
-         NUM_CONNECTIONS[MN_URGENT] * NUM_URGENT_BUFFERS_PER_CONNECTION * URGENT_BUFFER_SIZE);
+         URGENT_BUFFER_SIZE);
 #else
     buffer_size =
         ((NUM_CONNECTIONS[CN_COMM] + NUM_CONNECTIONS[MN_COMM]) * NUM_COMM_BUFFERS_PER_CONNECTION * COMM_BUFFER_SIZE +
-         NUM_CONNECTIONS[MN_URGENT] * NUM_URGENT_BUFFERS_PER_CONNECTION * URGENT_BUFFER_SIZE);
+         URGENT_BUFFER_SIZE);
 #endif
     buffers = std::aligned_alloc(CACHE_LINE_SIZE, buffer_size);
 
@@ -1203,8 +1203,10 @@ RetStatus RDMA_Manager::GrabCommBuffer(uint8_t target_node_id, size_t len, Buffe
                     CommBufferState::BUFFER_STATE_READY;
         if (!is_free) {
             uint64_t num_holders =
-                nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].num_readers[buffer.buffer_idx].fetch_sub(1);
-            nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].buffer_lock[buffer.buffer_idx].Unlock();
+                nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].num_readers[buffer.buffer_idx].
+                fetch_sub(1);
+            nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].buffer_lock[buffer.buffer_idx]
+                .Unlock();
             if (num_holders == 1) {
                 rs = FlushCommBuffer(target_node_id, buffer.conn_id, buffer.buffer_idx);
                 if (!rs.IsOK()) {
@@ -1220,10 +1222,13 @@ RetStatus RDMA_Manager::GrabCommBuffer(uint8_t target_node_id, size_t len, Buffe
             nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].
                 length[buffer.buffer_idx].fetch_sub(len, std::memory_order_release);
             nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].
-                comm_buffers[buffer.buffer_idx].meta.state.store(CommBufferState::BUFFER_STATE_IN_USE, std::memory_order_release);
+                comm_buffers[buffer.buffer_idx].meta.state.store(CommBufferState::BUFFER_STATE_IN_USE,
+                                                                 std::memory_order_release);
             uint64_t num_holders =
-                nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].num_readers[buffer.buffer_idx].fetch_sub(1);
-            nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].buffer_lock[buffer.buffer_idx].Unlock();
+                nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].num_readers[buffer.buffer_idx].
+                fetch_sub(1);
+            nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].buffer_lock[buffer.buffer_idx].
+                Unlock();
             if (num_holders == 1) {
                 rs = FlushCommBuffer(target_node_id, buffer.conn_id, buffer.buffer_idx);
                 if (!rs.IsOK()) {
@@ -1236,8 +1241,8 @@ RetStatus RDMA_Manager::GrabCommBuffer(uint8_t target_node_id, size_t len, Buffe
         buffer.length = len;
         buffer.buffer = nodes[target_node_id].
             cn_comm_connections.connection[buffer.conn_id].comm_buffers[buffer.buffer_idx].data + offset;
-        nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].comm_buffers[buffer.buffer_idx].meta.num_requests.
-            fetch_add(1, std::memory_order_release);
+        nodes[target_node_id].cn_comm_connections.connection[buffer.conn_id].comm_buffers[buffer.buffer_idx].
+            meta.num_requests.fetch_add(1, std::memory_order_release);
         return RetStatus::Success();
     }
 }
@@ -1312,7 +1317,15 @@ RetStatus RDMA_Manager::FlushCommBuffer(uint8_t target_node_id, uint8_t conn_id,
     rdma_buffer.remote_node_id = target_node_id;
 
     nodes[target_node_id].cn_comm_connections.connection[conn_id].buffer_lock[buffer_idx].Lock(SX_EXCLUSIVE);
-    rs = RDMAWrite(&rdma_buffer, 1, nodes[target_node_id].cn_comm_connections.connection[conn_id].ctx, 0, nullptr);
+    do {
+        rs = RDMAWrite(&rdma_buffer, 1, nodes[target_node_id].cn_comm_connections.connection[conn_id].ctx, 0);
+        if (!rs.IsOK() && rs.stat != RetStatus::RDMA_QP_FULL) {
+            FatalAssert(false, LOG_TAG_RDMA,
+                        "Failed to flush communication buffer to node %hhu: %s",
+                        target_node_id, rs.Msg());
+            return rs;
+        }
+    } while (!rs.IsOK());
     nodes[target_node_id].cn_comm_connections.connection[conn_id].buffer_lock[buffer_idx].Unlock();
     /* the state of the buffer is set to ready using RDMAWrite at remote side! */
     return rs;
@@ -1339,6 +1352,7 @@ void RDMA_Manager::ReleaseUrgentMessage(UrgentMessage* msg) {
     std::free(msg);
 }
 
+/* For urgent connections we can have one buffer but multiple QPS */
 RetStatus RDMA_Manager::SendUrgentMessage(UrgentMessage* msg, uint8_t target_node_id) {
 #ifndef MEMORY_NODE
     DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_RDMA, "CNs cannot send urgent messages!");
@@ -1362,21 +1376,26 @@ RetStatus RDMA_Manager::SendUrgentMessage(UrgentMessage* msg, uint8_t target_nod
     uint64_t write_off = 0;
     uint8_t conn_idx = (nodes[target_node_id].mn_urgent_connections.curr_conn_idx.fetch_add(1) - 1) %
                        NUM_CONNECTIONS[MN_URGENT];
-    while (((write_off + URGENT_MESSAGE_SIZE) % URGENT_BUFFER_SIZE) == read_off) {
-        ++conn_idx;
+    RDMABuffer rdma_buffer;
+    rdma_buffer.local_addr = msg;
+    rdma_buffer.length = URGENT_MESSAGE_SIZE;
+    rdma_buffer.buffer_idx = 0;
+    rdma_buffer.remote_node_id = target_node_id;
+    while (true) {
+        conn_idx = (conn_idx + 1) % NUM_CONNECTIONS[MN_URGENT];
         while(true) {
             read_off =
                 nodes[target_node_id].mn_urgent_connections.connection[conn_idx].
                     read_off->load(std::memory_order_acquire) % URGENT_BUFFER_SIZE;
             write_off =
                 nodes[target_node_id].mn_urgent_connections.connection[conn_idx].
-                write_off.load(std::memory_order_acquire) % URGENT_BUFFER_SIZE;
+                write_off->load(std::memory_order_acquire) % URGENT_BUFFER_SIZE;
             if (((write_off + URGENT_MESSAGE_SIZE) % URGENT_BUFFER_SIZE) == read_off) {
                 DIVFTREE_YIELD(); /* todo: may need to tune */
                 break;
             }
 
-            if (!nodes[target_node_id].mn_urgent_connections.connection[conn_idx].write_off.compare_exchange_strong(
+            if (!nodes[target_node_id].mn_urgent_connections.connection[conn_idx].write_off->compare_exchange_strong(
                     write_off,
                     (write_off + URGENT_MESSAGE_SIZE) % URGENT_BUFFER_SIZE)) {
                 DIVFTREE_YIELD(); /* todo: may need to tune */
@@ -1385,17 +1404,26 @@ RetStatus RDMA_Manager::SendUrgentMessage(UrgentMessage* msg, uint8_t target_nod
 
             break;
         }
+
+        if (((write_off + URGENT_MESSAGE_SIZE) % URGENT_BUFFER_SIZE) == read_off) {
+            continue;
+        }
+
+        rdma_buffer.remote_addr =
+            nodes[target_node_id].mn_urgent_connections.connection[conn_idx].remote_buffer + write_off;
+        rs = RDMAWrite(&rdma_buffer, 1, nodes[target_node_id].mn_urgent_connections.connection[conn_idx].ctx,
+                       IBV_SEND_INLINE);
+        if (rs.IsOK()) {
+            break;
+        }
+
+        if (rs.stat != RetStatus::RDMA_QP_FULL) {
+            FatalAssert(false, LOG_TAG_RDMA,
+                        "Failed to send urgent message to node %hhu: %s", target_node_id, rs.Msg());
+            return rs;
+        }
     }
 
-    RDMABuffer rdma_buffer;
-    rdma_buffer.local_addr = msg;
-    rdma_buffer.remote_addr =
-        nodes[target_node_id].mn_urgent_connections.connection[conn_idx].remote_buffer + write_off;
-    rdma_buffer.length = URGENT_MESSAGE_SIZE;
-    rdma_buffer.buffer_idx = 0;
-    rdma_buffer.remote_node_id = target_node_id;
-    rs = RDMAWrite(&rdma_buffer, 1, nodes[target_node_id].mn_urgent_connections.connection[conn_idx].ctx,
-                   IBV_SEND_INLINE, nullptr);
     FatalAssert(rs.IsOK(), LOG_TAG_RDMA,
                 "Failed to send urgent message to node %hhu: %s", target_node_id, rs.Msg());
     return rs;
@@ -1427,7 +1455,7 @@ uint32_t RDMA_Manager::GetLocalKey(Address addr, size_t length) const {
 
 /* todo: I actually need to create seperate RDMA requests for this as their dest is not the same place */
 RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, ConnectionContext& conn_ctx,
-                                 unsigned int send_flags) {
+                                  unsigned int send_flags) {
     FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
                 "RDMA_Manager instance mismatch in RDMAWrite");
     FatalAssert(rdma_buffers != nullptr, LOG_TAG_RDMA,
@@ -1438,6 +1466,8 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
                 "ConnectionContext QP is null in RDMAWrite");
     FatalAssert(num_buffers <= UINT32_MAX, LOG_TAG_RDMA,
                 "num_buffers exceeds UINT32_MAX in RDMAWrite");
+    FatalAssert(num_buffers <= MAX_SEND_WR[conn_ctx.type], LOG_TAG_RDMA,
+                "num_buffers exceeds MAX_SEND_WR (%u) in RDMAWrite", MAX_SEND_WR[conn_ctx.type]);
     RetStatus rs = RetStatus::Success();
 
     ConnTaskId new_task_id;
@@ -1448,112 +1478,86 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
     struct ibv_sge* sge_list = new ibv_sge[num_buffers];
     struct ibv_send_wr* bad_wr = nullptr;
 
-    size_t batch_size = std::min(num_buffers, static_cast<size_t>(MAX_SEND_WR[conn_ctx.type]));
-    size_t remaining = num_buffers;
-    while(remaining > 0) {
-        uint16_t num_outstanding = conn_ctx.num_pending_requests.fetch_add(batch_size);
-        while (num_outstanding + batch_size > MAX_SEND_WR[conn_ctx.type]) {
-            if (num_outstanding > MAX_SEND_WR[conn_ctx.type]) {
-                /* todo: maybe at this point I should actually drop and return failed so the called uses a new connection */
-                while (num_outstanding > MAX_SEND_WR[conn_ctx.type]) {
-                    conn_ctx.num_pending_requests.fetch_sub(batch_size);
-                    while (conn_ctx.num_pending_requests.load(std::memory_order_acquire) > MAX_SEND_WR[conn_ctx.type]) {
-                        DIVFTREE_YIELD(); /* todo: may need to tune */
-                    }
-                    num_outstanding = conn_ctx.num_pending_requests.fetch_add(batch_size);
-                }
-                continue;
-            }
+    uint16_t num_outstanding = conn_ctx.num_pending_requests.fetch_add(num_buffers);
+    if (num_outstanding + num_buffers > MAX_SEND_WR[conn_ctx.type]) {
+        conn_ctx.num_pending_requests.fetch_sub(num_buffers);
+        return RetStatus{.stat=RetStatus::RDMA_QP_FULL, .message=nullptr};
+    }
 
-            conn_ctx.num_pending_requests.fetch_sub(batch_size - (MAX_SEND_WR[conn_ctx.type] - num_outstanding));
-            batch_size = MAX_SEND_WR[conn_ctx.type] - num_outstanding;
+    bool create_wc = (num_outstanding + num_buffers == MAX_SEND_WR[conn_ctx.type]);
+    ConnTaskId last_task_id;
+    for (size_t i = 0; i < num_buffers; ++i) {
+        FatalAssert(rdma_buffers[i].local_addr != nullptr, LOG_TAG_RDMA,
+                    "rdma_buffers[%zu] local_addr is null in RDMAWrite", i);
+        FatalAssert(rdma_buffers[i].length > 0, LOG_TAG_RDMA,
+                    "rdma_buffers[%zu] length is zero in RDMAWrite", i);
+        FatalAssert(rdma_buffers[i].length <= UINT32_MAX, LOG_TAG_RDMA,
+                    "rdma_buffers[%zu] length exceeds UINT32_MAX in RDMAWrite", i);
+        FatalAssert(new_task_id.buffer_id == rdma_buffers[i].buffer_idx, LOG_TAG_RDMA,
+                    "rdma_buffers[%zu] buffer_idx does not match task_id buffer_id in RDMAWrite", i);
+        sge_list[i].addr = reinterpret_cast<uintptr_t>(rdma_buffers[i].local_addr);
+        sge_list[i].length = static_cast<uint32_t>(rdma_buffers[i].length);
+        sge_list[i].lkey = (send_flags & IBV_SEND_INLINE) != 0 ? 0 :
+            GetLocalKey(rdma_buffers[i].local_addr, rdma_buffers[i].length);
+
+        memset(&wr_list[i], 0, sizeof(wr_list[i]));
+        wr_list[i].wr_id = new_task_id._raw;
+        wr_list[i].sg_list = sge_list;
+        wr_list[i].num_sge = 1;
+        wr_list[i].opcode = IBV_WR_RDMA_WRITE;
+        wr_list[i].send_flags = send_flags | ((create_wc && (i == (num_buffers - 1))) ? IBV_SEND_SIGNALED : 0);
+        wr_list[i].wr.rdma.remote_addr = rdma_buffers[i].remote_addr;
+        wr_list[i].wr.rdma.rkey = nodes[rdma_buffers[i].remote_node_id].GetKey(
+            rdma_buffers[i].remote_addr, rdma_buffers[i].length);
+        wr_list[i].next = (i == (num_buffers - 1)) ? nullptr : &wr_list[i + 1];
+        if (i == (num_buffers - 1)) {
+            last_task_id = new_task_id;
+        }
+        new_task_id.task_id = (new_task_id.task_id + 1) % UINT32_MAX;
+    }
+
+    int ret = ibv_post_send(conn_ctx.qp, &wr_list[0], &bad_wr);
+    if (ret != 0) {
+        String error_msg = String("Failed to post RDMA Write send work request. ret=(%d)%s errno=(%d)%s",
+                                    ret, strerror(ret), errno, strerror(errno));
+        FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
+        rs = RetStatus::Fail(error_msg.ToCStr());
+        return rs;
+    }
+
+    if (create_wc) {
+        struct ibv_wc wc;
+        int num_comp = 0;
+        while (num_comp == 0) {
+            num_comp = ibv_poll_cq(conn_ctx.cq, 1, &wc);
+            if (num_comp == 0) {
+                /* todo: maybe use sleep instead? */
+                DIVFTREE_YIELD();
+            }
         }
 
-        FatalAssert(num_outstanding + batch_size <= MAX_SEND_WR[conn_ctx.type], LOG_TAG_RDMA,
-                    "num_outstanding (%u) + batch_size (%zu) exceeds MAX_SEND_WR (%u) in RDMAWrite",
-                    num_outstanding, batch_size, MAX_SEND_WR[conn_ctx.type]);
-
-        bool create_wc = (num_outstanding + batch_size == MAX_SEND_WR[conn_ctx.type]);
-        uint64_t start_idx = num_buffers - remaining;
-        uint64_t last_idx;
-        ConnTaskId last_task_id;
-        for (size_t i = 0; i < batch_size; ++i, --remaining) {
-            size_t idx = num_buffers - remaining;
-            FatalAssert(rdma_buffers[idx].local_addr != nullptr, LOG_TAG_RDMA,
-                    "rdma_buffers[%zu] local_addr is null in RDMAWrite", idx);
-            FatalAssert(rdma_buffers[idx].length > 0, LOG_TAG_RDMA,
-                        "rdma_buffers[%zu] length is zero in RDMAWrite", idx);
-            FatalAssert(rdma_buffers[idx].length <= UINT32_MAX, LOG_TAG_RDMA,
-                        "rdma_buffers[%zu] length exceeds UINT32_MAX in RDMAWrite", idx);
-            FatalAssert(new_task_id.buffer_id == rdma_buffers[idx].buffer_idx, LOG_TAG_RDMA,
-                        "rdma_buffers[%zu] buffer_idx does not match task_id buffer_id in RDMAWrite", idx);
-            sge_list[idx].addr = reinterpret_cast<uintptr_t>(rdma_buffers[idx].local_addr);
-            sge_list[idx].length = static_cast<uint32_t>(rdma_buffers[idx].length);
-            sge_list[idx].lkey = (send_flags & IBV_SEND_INLINE) != 0 ? 0 :
-                GetLocalKey(rdma_buffers[idx].local_addr, rdma_buffers[idx].length);
-
-            memset(&wr_list[idx], 0, sizeof(wr_list[idx]));
-            wr_list[idx].wr_id = new_task_id._raw;
-            wr_list[idx].sg_list = sge_list;
-            wr_list[idx].num_sge = 1;
-            wr_list[idx].opcode = IBV_WR_RDMA_WRITE;
-            wr_list[idx].send_flags = send_flags | ((create_wc && (i == (batch_size - 1))) ? IBV_SEND_SIGNALED : 0);
-            wr_list[idx].wr.rdma.remote_addr = rdma_buffers[idx].remote_addr;
-            wr_list[idx].wr.rdma.rkey = nodes[rdma_buffers[idx].remote_node_id].GetKey(
-                rdma_buffers[idx].remote_addr, rdma_buffers[idx].length);
-            wr_list[idx].next = (i == (batch_size - 1)) ? nullptr : &wr_list[idx + 1];
-            if (i == (batch_size - 1)) {
-                last_idx = idx;
-                last_task_id = new_task_id;
-            }
-            new_task_id.task_id = (new_task_id.task_id + 1) % UINT32_MAX;
-        }
-
-        int ret = ibv_post_send(conn_ctx.qp, &wr_list[start_idx], &bad_wr);
-        if (ret != 0) {
-            String error_msg = String("Failed to post RDMA Write send work request. ret=(%d)%s errno=(%d)%s",
-                                      ret, strerror(ret), errno, strerror(errno));
+        if (num_comp < 0) {
+            String error_msg = String("Failed to poll Completion Queue for RDMA Write. num_comp=(%d)%s errno=(%d)%s",
+                                        num_comp, strerror(-num_comp), errno, strerror(errno));
             FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
             rs = RetStatus::Fail(error_msg.ToCStr());
             return rs;
         }
 
-        if (create_wc) {
-            struct ibv_wc wc;
-            int num_comp = 0;
-            while (num_comp == 0) {
-                num_comp = ibv_poll_cq(conn_ctx.cq, 1, &wc);
-                if (num_comp == 0) {
-                    /* todo: maybe use sleep instead? */
-                    DIVFTREE_YIELD();
-                }
-            }
-
-            if (num_comp < 0) {
-                String error_msg = String("Failed to poll Completion Queue for RDMA Write. num_comp=(%d)%s errno=(%d)%s",
-                                          num_comp, strerror(-num_comp), errno, strerror(errno));
-                FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
-                rs = RetStatus::Fail(error_msg.ToCStr());
-                return rs;
-            }
-
-            if (wc.status != IBV_WC_SUCCESS) {
-                String error_msg = String("RDMA Write failed in Completion Queue. wc_status=(%d)%s wc_wr_id=%lu",
-                                          wc.status, ibv_wc_status_str(wc.status), wc.wr_id);
-                FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
-                rs = RetStatus::Fail(error_msg.ToCStr());
-                return rs;
-            }
-
-            FatalAssert(num_comp == 1, LOG_TAG_RDMA,
-                        "Polled %d completions from CQ, expected 1 in RDMAWrite", num_comp);
-            FatalAssert(wc.wr_id == last_task_id._raw, LOG_TAG_RDMA,
-                        "wc.wr_id %lu does not match expected last_task_id %lu in RDMAWrite",
-                        wc.wr_id, last_task_id._raw);
-            conn_ctx.num_pending_requests.fetch_sub(batch_size);
+        if (wc.status != IBV_WC_SUCCESS) {
+            String error_msg = String("RDMA Write failed in Completion Queue. wc_status=(%d)%s wc_wr_id=%lu",
+                                        wc.status, ibv_wc_status_str(wc.status), wc.wr_id);
+            FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
+            rs = RetStatus::Fail(error_msg.ToCStr());
+            return rs;
         }
 
-        batch_size = std::min(remaining, static_cast<size_t>(MAX_SEND_WR[conn_ctx.type]));
+        FatalAssert(num_comp == 1, LOG_TAG_RDMA,
+                    "Polled %d completions from CQ, expected 1 in RDMAWrite", num_comp);
+        FatalAssert(wc.wr_id == last_task_id._raw, LOG_TAG_RDMA,
+                    "wc.wr_id %lu does not match expected last_task_id %lu in RDMAWrite",
+                    wc.wr_id, last_task_id._raw);
+        conn_ctx.num_pending_requests.fetch_sub(MAX_SEND_WR[conn_ctx.type]);
     }
 }
 
@@ -1644,143 +1648,137 @@ RetStatus RDMA_Manager::RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, C
     return rs;
 }
 
-RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers);
-RetStatus RDMA_Manager::RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, ConnTaskId* task_id);
+RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers) {
+    FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
+                "RDMA_Manager instance mismatch in RDMAWrite");
+    FatalAssert(rdma_buffers != nullptr, LOG_TAG_RDMA,
+                "rdma_buffers is null in RDMAWrite");
+    FatalAssert(num_buffers > 0, LOG_TAG_RDMA,
+                "num_buffers is zero in RDMAWrite");
+#ifdef MEMORY_NODE
+    FatalAssert(false, LOG_TAG_RDMA,
+                "RDMAWrite without connection context should not be called on MEMORY_NODE");
+#endif
+    RetStatus rs = RetStatus::Success();
 
-/* todo: do I even need to grab an urgent connection for this?! yes I do because I do not know if
-the remote memory is freed yet -> maybe for the urgent messages it is better to have a huge memory at
-remote, FAA a reserved size and write my stuff as long as it does not overwrite unseen messages!
-To make sure thsi does not happen, the CN still has to respond by setting a variable in the MN
-to something! */
-// RetStatus RDMA_Manager::GrabUrgentBuffer(uint8_t target_node_id, BufferInfo& buffer) {
-    // FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
-    //             "RDMA_Manager instance mismatch in GrabCommBuffer");
-    // FatalAssert(target_node_id < num_nodes, LOG_TAG_RDMA,
-    //             "Invalid target_node_id %hhu", target_node_id);
-    // FatalAssert(target_node_id != self_node_id, LOG_TAG_RDMA,
-    //             "Cannot grab communication buffer for self_node_id %hhu", self_node_id);
-// #ifndef MEMORY_NODE
-//     FatalAssert(false, LOG_TAG_RDMA, "only the memory node can grab urgent buffers");
-//     FatalAssert(target_node_id == MEMORY_NODE_ID, LOG_TAG_RDMA,
-//                 "In CN build, target_node_id must be MEMORY_NODE_ID %hhu. Given: %hhu",
-//                 MEMORY_NODE_ID, target_node_id);
-// #endif
+    /* for now we only support RDMA write to communication buffers */
+    uint8_t target_node_id = rdma_buffers[0].remote_node_id;
+    FatalAssert(target_node_id < num_nodes, LOG_TAG_RDMA,
+                "Invalid target_node_id %hhu in RDMAWrite", target_node_id);
+    FatalAssert(target_node_id == MEMORY_NODE_ID, LOG_TAG_RDMA,
+                "In CN build, target_node_id must be MEMORY_NODE_ID %hhu. Given: %hhu",
+                MEMORY_NODE_ID, target_node_id);
 
-//     bool grabbed = false;
-//     uint8_t num_conn_checked = 0;
-//     buffer.target_node_id = target_node_id;
-//     buffer.length = 0;
-//     buffer.max_length = URGENT_BUFFER_DATA_SIZE;
-//     while (!grabbed) {
-//         ++num_conn_checked;
-//         buffer.conn_id = nodes[target_node_id].mn_urgent_connections.curr_conn_idx.fetch_add(1) %
-//             NUM_CONNECTIONS[MN_URGENT];
-//         uint8_t num_buffers_checked = 0;
-//         while (true) {
-//             ++num_buffers_checked;
-//             buffer.buffer_idx =
-//                 nodes[target_node_id].mn_urgent_connections.connection[buffer.conn_id].
-//                     curr_buffer_idx.fetch_add(1) % NUM_URGENT_BUFFERS_PER_CONNECTION;
-//             bool locked = nodes[target_node_id].
-//                 mn_urgent_connections.connection[buffer.conn_id].buffer_lock[buffer.buffer_idx].TryLock(SX_EXCLUSIVE);
-//             if (!locked) {
-//                 if (num_buffers_checked >= NUM_URGENT_BUFFERS_PER_CONNECTION) {
-//                     break;
-//                 } else {
-//                     continue;
-//                 }
-//             }
 
-//             bool is_free = nodes[target_node_id].mn_urgent_connections.connection[buffer.conn_id].
-//                 urgent_buffers[buffer.buffer_idx].state.load(std::memory_order_acquire) ==
-//                 CommBufferState::BUFFER_STATE_READY;
-//             if (!is_free) {
-//                 nodes[target_node_id].mn_urgent_connections.connection[buffer.conn_id].
-//                     buffer_lock[buffer.buffer_idx].Unlock();
-//                 if (num_buffers_checked >= NUM_URGENT_BUFFERS_PER_CONNECTION) {
-//                     break;
-//                 } else {
-//                     continue;
-//                 }
-//             }
-//             grabbed = true;
-//             break;
-//         }
-//         if (num_conn_checked % NUM_CONNECTIONS[MN_URGENT] == 0 && !grabbed) {
-//             usleep(1); /* todo: may need to tune */
-//         }
-//     }
+    uint8_t conn_id = (nodes[target_node_id].cn_cluster_write_connections.curr_conn_idx.fetch_add(1) - 1) %
+                      NUM_CONNECTIONS[CN_CLUSTER_WRITE];
+    do {
+        conn_id = (conn_id + 1) % NUM_CONNECTIONS[CN_CLUSTER_WRITE];
+        rs = RDMAWrite(rdma_buffers, num_buffers,
+                       nodes[target_node_id].cn_cluster_write_connections.connection[conn_id], 0);
+        if (!rs.IsOK() && rs.stat != RetStatus::RDMA_QP_FULL) {
+            FatalAssert(false, LOG_TAG_RDMA,
+                        "Failed to send RDMA Write to node %hhu: %s", target_node_id, rs.Msg());
+            return rs;
+        }
+    } while (!rs.IsOK());
 
-//     buffer.buffer = nodes[target_node_id].
-//         mn_urgent_connections.connection[buffer.conn_id].
-//             urgent_buffers[buffer.buffer_idx].data;
-//     return RetStatus::Success();
-// }
+    return rs;
+}
 
-// RetStatus RDMA_Manager::ReleaseUrgentBuffer(BufferInfo buffer, ConnTaskId& task_id, bool flush) {
-//     FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
-//                 "RDMA_Manager instance mismatch in ReleaseCommBuffer");
-//     FatalAssert(buffer.conn_id < NUM_CONNECTIONS[MN_URGENT], LOG_TAG_RDMA,
-//                 "Invalid conn_id %hhu in ReleaseUrgentBuffer", buffer.conn_id);
-//     FatalAssert(buffer.buffer_idx < NUM_URGENT_BUFFERS_PER_CONNECTION, LOG_TAG_RDMA,
-//                 "Invalid buffer_idx %hhu in ReleaseUrgentBuffer", buffer.buffer_idx);
-// #ifndef MEMORY_NODE
-//     FatalAssert(false, LOG_TAG_RDMA, "only the memory node can release urgent buffers");
-// #endif
-//     threadSelf->SanityCheckLockHeldInModeByMe(&(nodes[buffer.target_node_id].mn_urgent_connections.
-//         connection[buffer.conn_id].buffer_lock[buffer.buffer_idx]), SX_EXCLUSIVE);
-//     FatalAssert(buffer.target_node_id != MEMORY_NODE_ID, LOG_TAG_RDMA,
-//                 "CN cannot grab an urgent buffer and memory node cannot send a message to itself!");
-//     FatalAssert(buffer.max_length == URGENT_BUFFER_DATA_SIZE, LOG_TAG_RDMA,
-//                 "Invalid buffer length %zu in ReleaseUrgentBuffer", buffer.max_length);
-//     FatalAssert(buffer.buffer ==
-//                 nodes[buffer.target_node_id].
-//                     mn_urgent_connections.connection[buffer.conn_id].
-//                         urgent_buffers[buffer.buffer_idx].data,
-//                 LOG_TAG_RDMA,
-//                 "Buffer pointer mismatch in ReleaseUrgentBuffer");
-//     FatalAssert(
-//         nodes[buffer.target_node_id].
-//             mn_urgent_connections.connection[buffer.conn_id].
-//                 urgent_buffers[buffer.buffer_idx].state.load(std::memory_order_relaxed) ==
-//         CommBufferState::BUFFER_STATE_READY,
-//         LOG_TAG_RDMA,
-//         "Buffer state invalid in ReleaseUrgentBuffer");
+RetStatus RDMA_Manager::RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, ConnTaskId& task_id) {
+    FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
+                "RDMA_Manager instance mismatch in RDMARead");
+    FatalAssert(rdma_buffers != nullptr, LOG_TAG_RDMA,
+                "rdma_buffers is null in RDMARead");
+    FatalAssert(num_buffers > 0, LOG_TAG_RDMA,
+                "num_buffers is zero in RDMARead");
+#ifdef MEMORY_NODE
+    FatalAssert(false, LOG_TAG_RDMA,
+                "RDMARead without connection context should not be called on MEMORY_NODE");
+#endif
+    RetStatus rs = RetStatus::Success();
 
-//     nodes[buffer.target_node_id].
-//         mn_urgent_connections.connection[buffer.conn_id].urgent_buffers[buffer.buffer_idx].
-//             state.store(CommBufferState::BUFFER_STATE_IN_USE, std::memory_order_release);
+    /* for now we only support RDMA write to communication buffers */
+    uint8_t target_node_id = rdma_buffers[0].remote_node_id;
+    FatalAssert(target_node_id < num_nodes, LOG_TAG_RDMA,
+                "Invalid target_node_id %hhu in RDMARead", target_node_id);
+    FatalAssert(target_node_id == MEMORY_NODE_ID, LOG_TAG_RDMA,
+                "In CN build, target_node_id must be MEMORY_NODE_ID %hhu. Given: %hhu",
+                MEMORY_NODE_ID, target_node_id);
 
-//     struct ibv_sge sg;
-//     struct ibv_send_wr wr;
-//     struct ibv_send_wr *bad_wr;
 
-//     memset(&sg, 0, sizeof(sg));
-//     sg.addr	  = (uintptr_t)buf_addr;
-//     sg.length = buf_size;
-//     sg.lkey	  = mr-&gt;lkey;
+    uint8_t conn_id = (nodes[target_node_id].cn_cluster_read_connections.curr_conn_idx.fetch_add(1) - 1) %
+                      NUM_CONNECTIONS[CN_CLUSTER_READ];
+    do {
+        conn_id = (conn_id + 1) % NUM_CONNECTIONS[CN_CLUSTER_READ];
+        rs = RDMARead(rdma_buffers, num_buffers,
+                      nodes[target_node_id].cn_cluster_read_connections.connection[conn_id], task_id);
+        if (!rs.IsOK() && rs.stat != RetStatus::RDMA_QP_FULL) {
+            FatalAssert(false, LOG_TAG_RDMA,
+                        "Failed to send RDMA Read to node %hhu: %s", target_node_id, rs.Msg());
+            return rs;
+        }
+    } while (!rs.IsOK());
 
-//     memset(&wr, 0, sizeof(wr));
-//     wr.wr_id      = 0;
-//     wr.sg_list    = &amp;sg;
-//     wr.num_sge    = 1;
-//     wr.opcode     = IBV_WR_RDMA_WRITE;
-//     wr.send_flags = IBV_SEND_SIGNALED;
-//     wr.wr.rdma.remote_addr = remote_address
-//     wr.wr.rdma.rkey        = remote_key;
+    return rs;
+}
 
-//     if (ibv_post_send(qp, &amp;wr, &amp;bad_wr)) {
-//         fprintf(stderr, "Error, ibv_post_send() failed\n");
-//         return -1;
-//     }
+RetStatus RDMA_Manager::PollCompletion(ConnectionType conn_type, std::vector<ConnTaskId>& completed_task_ids) {
+    FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
+                "RDMA_Manager instance mismatch in PollCompletion");
+    FatalAssert(conn_type == CN_CLUSTER_READ, LOG_TAG_RDMA,
+                "Invalid ConnectionType %d in PollCompletion", static_cast<int>(conn_type));
+#ifdef MEMORY_NODE
+    FatalAssert(false, LOG_TAG_RDMA,
+                "PollCompletion should not be called on MEMORY_NODE");
+#endif
+    RetStatus rs = RetStatus::Success();
 
-//     return RetStatus::Success();
-// }
+    /* todo: may need to use lower numbers */
+    completed_task_ids.clear();
+    completed_task_ids.reserve(MAX_SEND_WR[CN_CLUSTER_READ]);
+    struct ibv_wc wc[MAX_SEND_WR[CN_CLUSTER_READ]];
+    int num_comp = 0;
+    constexpr uint8_t target_node_id = MEMORY_NODE_ID;
+    for (size_t conn = 0; conn < NUM_CONNECTIONS[conn_type]; ++conn) {
+        ConnectionContext& conn_ctx = nodes[target_node_id].
+            cn_cluster_read_connections.connection[conn];
+        uint16_t num_outstanding = conn_ctx.num_pending_requests.load();
+        if (num_outstanding == 0) {
+            continue;
+        }
 
-// RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers,
-//                                   uint8_t target_node_id, uint32_t connection_id, ConnTaskId& task_id) {}
-// RetStatus RDMA_Manager::RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers,
-//                                  uint8_t target_node_id, uint32_t connection_id, ConnTaskId& task_id) {}
+        num_comp = ibv_poll_cq(conn_ctx.cq, num_outstanding, wc);
+        if (num_comp == 0) {
+            break;
+        }
+
+        if (num_comp < 0) {
+            String error_msg =
+                String("Failed to poll Completion Queue for connection type %d. num_comp=(%d)%s errno=(%d)%s",
+                        static_cast<int>(conn_type), num_comp, strerror(-num_comp), errno, strerror(errno));
+            FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
+            rs = RetStatus::Fail(error_msg.ToCStr());
+            return rs;
+        }
+
+        for (int i = 0; i < num_comp; ++i) {
+            if (wc[i].status != IBV_WC_SUCCESS) {
+                String error_msg = String("RDMA operation failed in Completion Queue. wc_status=(%d)%s wc_wr_id=%lu",
+                                            wc[i].status, ibv_wc_status_str(wc[i].status), wc[i].wr_id);
+                FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
+                rs = RetStatus::Fail(error_msg.ToCStr());
+                return rs;
+            }
+
+            completed_task_ids.emplace_back(wc[i].wr_id);
+        }
+        conn_ctx.num_pending_requests.fetch_sub(num_comp);
+    }
+
+    return rs;
+}
 
 };
 

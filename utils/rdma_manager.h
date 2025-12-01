@@ -56,7 +56,6 @@ constexpr size_t NUM_CONNECTIONS[CONNECTION_TYPE_COUNT] = {
 };
 
 constexpr size_t NUM_COMM_BUFFERS_PER_CONNECTION = 2;
-constexpr size_t NUM_URGENT_BUFFERS_PER_CONNECTION = 2;
 
 constexpr size_t COMM_BUFFER_SIZE = 4096;
 constexpr size_t URGENT_BUFFER_SIZE = 4096;
@@ -264,7 +263,7 @@ struct UrgentConnectionContext {
     uintptr_t remote_buffer;
 #ifdef MEMORY_NODE
     std::atomic<uint64_t>* read_off;
-    std::atomic<uint64_t> write_off;
+    std::atomic<uint64_t>* write_off;
 #else
     std::atomic<uint64_t> curr_idx;
     UrgentBuffer* buffer;
@@ -277,7 +276,7 @@ struct UrgentConnectionContext {
         remote_buffer = 0;
 #ifdef MEMORY_NODE
         read_off = nullptr;
-        write_off = 0;
+        write_off = nullptr;
 #else
         buffer = nullptr;
         curr_idx.store(0, std::memory_order_relaxed);
@@ -608,6 +607,7 @@ public:
 
     RetStatus RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers);
     RetStatus RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, ConnTaskId& wait_id);
+    RetStatus PollCompletion(ConnectionType conn_type, std::vector<ConnTaskId>& completed_task_ids);
 
 TESTABLE;
 };
