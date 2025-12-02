@@ -12,7 +12,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#define MEMORY_NODE
+// #define MEMORY_NODE
 
 #define MEMORY_NODE_ID ((uint8_t)0)
 
@@ -117,32 +117,51 @@ enum CommBufferState : uint8_t {
     BUFFER_STATE_IN_USE
 };
 
+union UrgentMessageMeta {
+    struct Detail {
+        uint8_t length : 6; /* length in number of bytes */ /* max length is 64 bytes */
+        uint8_t seen : 1;
+        uint8_t valid : 1;
 
-/* In the compute node do I need these two?! I guess not so I only need a buffer for the requests and an index */
-struct alignas(CACHE_LINE_SIZE) UrgentBuffer {
-    char data[URGENT_BUFFER_SIZE] = {0};
+        Detail() : length{0}, seen{0}, valid{0} {}
+        Detail(uint8_t len, uint8_t s, uint8_t v) : length{len}, seen{s}, valid{v} {}
+    };
+
+    Detail detail;
+    std::atomic<Detail> atomic_detail;
+
+    UrgentMessageMeta() : detail() {}
 };
 
-struct UrgentMessageMeta {
-    uint8_t length : 6; /* length in number of bytes */ /* max length is 64 bytes */
-    uint8_t seen : 1;
-    uint8_t valid : 1;
+struct UrgentMessageData {
+    char data[URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)] = {0};
+
+    UrgentMessageData() = default;
+    UrgentMessageData(const UrgentMessageData& other) {
+        memcpy(data, other.data, sizeof(data));
+    }
 };
 
 struct UrgentMessage {
-    char data[URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)] = {0};
+    UrgentMessageData data;
     UrgentMessageMeta meta;
 
     UrgentMessage() = default;
     ~UrgentMessage() = default;
 
+    void Init() {
+        meta.detail.length = 0;
+        meta.detail.seen = 0;
+        meta.detail.valid = 1;
+    }
+
     void Clear() {
-        memset(data, 0, sizeof(data));
-        meta.length = 0;
+        memset(data.data, 0, sizeof(data.data));
+        meta.detail.length = 0;
     }
 
     size_t GetLength() const {
-        return static_cast<size_t>(meta.length);
+        return static_cast<size_t>(meta.detail.length);
     }
 
     void AppendData(const void* src, size_t len) {
@@ -150,8 +169,8 @@ struct UrgentMessage {
                     LOG_TAG_RDMA,
                     "Appending data of length %zu exceeds urgent message maximum size %zu",
                     len, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
-        memcpy(data + GetLength(), src, len);
-        meta.length += static_cast<uint8_t>(len);
+        memcpy(data.data + GetLength(), src, len);
+        meta.detail.length += static_cast<uint8_t>(len);
     }
 
     void WriteData(size_t offset, const void* src, size_t len) {
@@ -162,9 +181,30 @@ struct UrgentMessage {
         FatalAssert(offset <= GetLength(), LOG_TAG_RDMA,
                     "Writing data at offset %zu which is beyond current message length %zu",
                     offset, GetLength());
-        memcpy(data + offset, src, len);
-        meta.length = static_cast<uint8_t>(std::max(static_cast<size_t>(meta.length), offset + len));
+        memcpy(data.data + offset, src, len);
+        meta.detail.length = static_cast<uint8_t>(std::max(static_cast<size_t>(meta.detail.length), offset + len));
     }
+
+    bool IsUnseenValid() const {
+        UrgentMessageMeta::Detail m = meta.atomic_detail.load(std::memory_order_acquire);
+        return (m.valid == 1) && (m.seen == 0);
+    }
+
+    void SetSeen() {
+        UrgentMessageMeta::Detail m = meta.atomic_detail.load(std::memory_order_relaxed);
+        FatalAssert(m.valid == 1, LOG_TAG_RDMA,
+                    "Cannot set seen flag on an invalid urgent message");
+        FatalAssert(m.seen == 0, LOG_TAG_RDMA,
+                    "Urgent message is already marked as seen");
+        m.seen = 1;
+        meta.atomic_detail.store(m, std::memory_order_relaxed);
+    }
+};
+
+/* In the compute node do I need these two?! I guess not so I only need a buffer for the requests and an index */
+struct alignas(CACHE_LINE_SIZE) UrgentBuffer {
+    static constexpr size_t MAX_URGENT_MESSAGES = URGENT_BUFFER_SIZE / URGENT_MESSAGE_SIZE;
+    UrgentMessage messages[MAX_URGENT_MESSAGES];
 };
 
 struct CommBufferMeta {
@@ -187,6 +227,18 @@ struct alignas(CACHE_LINE_SIZE) CommBuffer {
      */
     char data[COMM_BUFFER_DATA_SIZE] = {0};
     CommBufferMeta meta;
+};
+
+struct CommBufferInfo {
+    SXLock buffer_lock;
+    std::atomic<size_t> num_readers;
+    std::atomic<size_t> length;
+
+    uint32_t lkey;
+    CommBuffer* buffer;
+
+    uint32_t rkey;
+    uintptr_t remote_addr; /* if at the reciver side remote addr is the addr of the buffer state */
 };
 
 struct ConnectionContext {
@@ -232,70 +284,41 @@ struct ConnectionContext {
 
 struct CommConnectionContext {
     ConnectionContext ctx;
-    uintptr_t remote_buffers;
     std::atomic<uint8_t> curr_buffer_idx;
-    SXLock buffer_lock[NUM_COMM_BUFFERS_PER_CONNECTION];
-    std::atomic<size_t> num_readers[NUM_COMM_BUFFERS_PER_CONNECTION];
-    std::atomic<size_t> length[NUM_COMM_BUFFERS_PER_CONNECTION];
-    CommBuffer* comm_buffers = nullptr;
+    CommBufferInfo buffer_info[NUM_COMM_BUFFERS_PER_CONNECTION];
 
     CommConnectionContext() = default;
     void Init(ConnectionType t, uint32_t id, struct ibv_qp* q, struct ibv_cq* c) {
         ctx.Init(t, id, q, c);
-        memset(length, 0, sizeof(length));
         curr_buffer_idx.store(0, std::memory_order_relaxed);
-        memset(num_readers, 0, sizeof(num_readers));
     }
 
-    void SetBuffer(CommBuffer* bufs) {
-        FatalAssert(comm_buffers == nullptr, LOG_TAG_RDMA,
-                    "comm_buffers is already set for CommConnectionContext");
+    void SetSendBuffers(CommBuffer* bufs, uint32_t lkey) {
         FatalAssert(bufs != nullptr, LOG_TAG_RDMA,
                     "bufs cannot be nullptr for CommConnectionContext");
-        FatalAssert(ALIGNED(bufs, CACHE_LINE_SIZE), LOG_TAG_RDMA,
+        for (size_t i = 0; i < NUM_COMM_BUFFERS_PER_CONNECTION; ++i) {
+            FatalAssert(ALIGNED(&bufs[i], CACHE_LINE_SIZE), LOG_TAG_RDMA,
                     "bufs must be aligned to CACHE_LINE_SIZE for CommConnectionContext");
-        comm_buffers = bufs;
-    }
-};
-
-struct UrgentConnectionContext {
-    ConnectionContext ctx;
-    uintptr_t remote_buffer;
-#ifdef MEMORY_NODE
-    std::atomic<uint64_t>* read_off;
-    std::atomic<uint64_t>* write_off;
-#else
-    std::atomic<uint64_t> curr_idx;
-    UrgentBuffer* buffer;
-#endif
-
-
-    UrgentConnectionContext() = default;
-    void Init(ConnectionType t, uint32_t id, struct ibv_qp* q, struct ibv_cq* c) {
-        ctx.Init(t, id, q, c);
-        remote_buffer = 0;
-#ifdef MEMORY_NODE
-        read_off = nullptr;
-        write_off = nullptr;
-#else
-        buffer = nullptr;
-        curr_idx.store(0, std::memory_order_relaxed);
-#endif
+            buffer_info[i].buffer = new (&bufs[i]) CommBuffer();
+            buffer_info[i].lkey = lkey;
+        }
     }
 
-    void SetBuffer(void* buff) {
-        FatalAssert(buff != nullptr, LOG_TAG_RDMA,
-                    "buff cannot be nullptr for UrgentConnectionContext");
-        FatalAssert(ALIGNED(buff, CACHE_LINE_SIZE), LOG_TAG_RDMA,
-                    "buff must be aligned to CACHE_LINE_SIZE for UrgentConnectionContext");
-#ifdef MEMORY_NODE
-            FatalAssert(read_off == nullptr, LOG_TAG_RDMA, "read_off is already inited!");
-            read_off = reinterpret_cast<std::atomic<uint64_t>*>(buff);
-            read_off->store(0, std::memory_order_relaxed);
-#else
-            FatalAssert(buffer == nullptr, LOG_TAG_RDMA, "buffer is already inited!");
-            buffer = reinterpret_cast<UrgentBuffer*>(buff);
-#endif
+    void SetReceiveBuffers(uintptr_t bufs, uint32_t rkey, bool self_comm_path) {
+        FatalAssert(bufs != 0, LOG_TAG_RDMA,
+                    "bufs cannot be nullptr for CommConnectionContext");
+        for (size_t i = 0; i < NUM_COMM_BUFFERS_PER_CONNECTION; ++i) {
+            FatalAssert(ALIGNED((void*)(bufs + i * COMM_BUFFER_SIZE), CACHE_LINE_SIZE), LOG_TAG_RDMA,
+                    "bufs must be aligned to CACHE_LINE_SIZE for CommConnectionContext");
+            if (self_comm_path) {
+                buffer_info[i].remote_addr = bufs + i * COMM_BUFFER_SIZE;
+            } else {
+                /* in this case, we are the reciever side so target recive buffer should be the sate so we can
+                   signal that we have read the message */
+                buffer_info[i].remote_addr = bufs + i * COMM_BUFFER_SIZE + COMM_BUFFER_DATA_SIZE;
+            }
+            buffer_info[i].rkey = rkey;
+        }
     }
 };
 
@@ -317,11 +340,38 @@ struct RDMABuffer {
     uint8_t buffer_idx = 0;
 };
 
-template <ConnectionType conn_type, typename ConnCtxType>
-struct ConnCtxList {
-static_assert(conn_type < CONNECTION_TYPE_COUNT, "Invalid ConnectionType for template");
+struct ClusterReadPathInfo {
     std::atomic<uint8_t> curr_conn_idx = 0;
-    ConnCtxType connection[NUM_CONNECTIONS[conn_type]];
+    ConnectionContext connection[NUM_CONNECTIONS[CN_CLUSTER_READ]];
+};
+
+struct ClusterWritePathInfo {
+    std::atomic<uint8_t> curr_conn_idx = 0;
+    ConnectionContext connection[NUM_CONNECTIONS[CN_CLUSTER_WRITE]];
+};
+
+struct CNCommPathInfo {
+    std::atomic<uint8_t> curr_conn_idx = 0;
+    CommConnectionContext connection[NUM_CONNECTIONS[CN_COMM]];
+};
+
+struct MNCommPathInfo {
+    std::atomic<uint8_t> curr_conn_idx = 0;
+    CommConnectionContext connection[NUM_CONNECTIONS[MN_COMM]];
+};
+
+struct UrgentPathInfo {
+    std::atomic<uint8_t> curr_conn_idx = 0;
+    ConnectionContext connection[NUM_CONNECTIONS[MN_URGENT]];
+    uintptr_t remote_buffer = 0;
+    uint32_t rkey = 0;
+#ifdef MEMORY_NODE
+    std::atomic<uint64_t>* read_off = nullptr;
+    std::atomic<uint64_t> write_off = 0;
+#else
+    UrgentBuffer* buffer = nullptr;
+    size_t read_off = 0;
+#endif
 };
 
 struct NodeInfo {
@@ -332,11 +382,11 @@ struct NodeInfo {
     union ibv_gid remote_gid;
     int socket;
 
-    ConnCtxList<CN_CLUSTER_READ, ConnectionContext> cn_cluster_read_connections;
-    ConnCtxList<CN_CLUSTER_WRITE, ConnectionContext> cn_cluster_write_connections;
-    ConnCtxList<CN_COMM, CommConnectionContext> cn_comm_connections;
-    ConnCtxList<MN_COMM, CommConnectionContext> mn_comm_connections;
-    ConnCtxList<MN_URGENT, UrgentConnectionContext> mn_urgent_connections;
+    ClusterReadPathInfo cn_cluster_read_connections;
+    ClusterWritePathInfo cn_cluster_write_connections;
+    CNCommPathInfo cn_comm_connections;
+    MNCommPathInfo mn_comm_connections;
+    UrgentPathInfo mn_urgent_connections;
     std::map<uintptr_t, RemoteMemoryRegion> remoteMemoryRegions;
 
     NodeInfo(uint8_t id, uint32_t ip, uint16_t p);
@@ -356,18 +406,37 @@ struct HandshakeBufferedConnectionInfo {
 
 struct HandshakeInfo {
     union ibv_gid gid;
+    uintptr_t buffer_addr;
     uint32_t buffer_rkey;
+    size_t buffer_size;
+    uintptr_t urgent_buffer_addr;
     HandshakeConnectionInfo cn_cluster_read_conns[NUM_CONNECTIONS[CN_CLUSTER_READ]];
     HandshakeConnectionInfo cn_cluster_write_conns[NUM_CONNECTIONS[CN_CLUSTER_WRITE]];
-    HandshakeBufferedConnectionInfo comm_conns[NUM_CONNECTIONS[CN_COMM]];
-    HandshakeBufferedConnectionInfo comm_conns[NUM_CONNECTIONS[MN_COMM]];
-    HandshakeBufferedConnectionInfo urgent_conns[NUM_CONNECTIONS[MN_URGENT]];
+    HandshakeBufferedConnectionInfo cn_comm_conns[NUM_CONNECTIONS[CN_COMM]];
+    HandshakeBufferedConnectionInfo mn_comm_conns[NUM_CONNECTIONS[MN_COMM]];
+    HandshakeConnectionInfo urgent_conns[NUM_CONNECTIONS[MN_URGENT]];
+};
+
+enum class MessageType : uint8_t {
+    REGISTER_MEMORY = 0,
+    NUM_MESSAGE_TYPES
+};
+
+struct MemoryInfo {
+    const MessageType type = MessageType::REGISTER_MEMORY;
+    uintptr_t addr;
+    size_t length;
+    uint32_t rkey;
 };
 
 struct BufferInfo {
     void* buffer;
     size_t max_length;
-    size_t length;
+    union {
+        size_t length;
+        size_t num_requests;
+    };
+
     uint8_t target_node_id;
     uint8_t conn_id;
     uint8_t buffer_idx;
@@ -554,9 +623,9 @@ protected:
     void FillHandshakeInfo(uint8_t node_id, HandshakeInfo& handshake_info);
     void ProcessHandshakeInfo(uint8_t node_id, const HandshakeInfo& handshake_info);
 
-    template<typename ConnCtxType>
-    RetStatus InitConnectionCtx(ConnectionType conn_type, struct ibv_cq* cq, ConnCtxType* connections,
-                                void*& next_buffer);
+    template<typename PathInfo>
+    RetStatus InitConnectionCtx(ConnectionType conn_type, struct ibv_cq* cq, PathInfo& path_info,
+                                void*& next_buffer, uint32_t lkey);
     RetStatus EstablishTCPConnections();
     RetStatus Handshake();
     RetStatus EstablishRDMAConnections();
@@ -585,29 +654,56 @@ public:
 
     /* --------- start of not thread-safe region --------- */
     static RetStatus Initialize(uint8_t self_id, const std::vector<std::pair<const char*, uint16_t>>& node_addresses,
-                                const char* target_rdma_device_name, uint8_t rdma_port, int gid_index,
-                                uint8_t cn_read_connections, uint8_t cn_write_connections,
-                                uint8_t mn_write_connections);
+                                const char* target_rdma_device_name, uint8_t rdma_port, int gid_index);
     static void Destroy();
 
     /* Note: this function only registers the memory locally and will not send any notifications to other nodes */
-    RetStatus RegisterMemory(Address addr, size_t length);
+    RetStatus RegisterMemory(Address addr, size_t length, uint32_t& lkey, uint32_t& rkey);
     RetStatus EstablishConnections();
+    /* todo: this should be done at comm layer */
+    /* registers memory locally and notifies the target node. if target node is self, it will be broadcasted to all */
+    // RetStatus RegisterMemory(uint8_t target_node_id, Address addr, size_t length);
     /* todo: API for creating new connections and adding new nodes to the system */
 
     /* --------- end of not thread-safe region --------- */
 
     /* for urgent buffers we CAS the state for synchronization. for commbuffers we first check the state and if valid
         */
+    /* --------------------- Sender Side Operations --------------------- */
+    /* Comm Path */
     RetStatus GrabCommBuffer(uint8_t target_node_id, size_t len, BufferInfo& buffer);
     RetStatus ReleaseCommBuffer(BufferInfo buffer, bool flush = false);
+
+#ifdef MEMORY_NODE
+    /* Urgent Path */
     UrgentMessage* BuildUrgentMessage();
     void ReleaseUrgentMessage(UrgentMessage* msg);
     RetStatus SendUrgentMessage(UrgentMessage* msg, uint8_t target_node_id);
-
+#else
+    /* Cluster Write Path */
     RetStatus RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers);
+
+    /* Cluster Read Path */
     RetStatus RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, ConnTaskId& wait_id);
     RetStatus PollCompletion(ConnectionType conn_type, std::vector<ConnTaskId>& completed_task_ids);
+#endif
+
+    /* --------------------- Reciever Side Operations --------------------- */
+    /* todo: change Reciever Side inputs later */
+
+#ifndef MEMORY_NODE
+    /* Recieve UrgentMessage */
+    /* Note: this operation is not thread-safe! */
+    /* todo: should we make this thread-safe? */
+    RetStatus PollUrgentMessages(std::vector<std::pair<UrgentMessageData, uint8_t>>& messages);
+#endif
+
+    /* Recieve CommRequest */
+    /* Note: these two operations are not thread-safe! */
+    /* todo: should we make these two thread-safe? */
+    RetStatus PollCommRequests(uint8_t node_id, std::vector<BufferInfo>& request_buffers);
+    /* Note: these two operations are not thread-safe! */
+    RetStatus ReleaseCommReciveBuffers(uint8_t node_id, std::vector<BufferInfo>& buffers);
 
 TESTABLE;
 };
