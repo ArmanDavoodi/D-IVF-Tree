@@ -235,7 +235,7 @@ struct CommBufferInfo {
     std::atomic<size_t> length;
 
     uint32_t lkey;
-    CommBuffer* buffer;
+    CommBuffer* buffer = nullptr;
 
     uint32_t rkey;
     uintptr_t remote_addr; /* if at the reciver side remote addr is the addr of the buffer state */
@@ -388,6 +388,7 @@ struct NodeInfo {
     MNCommPathInfo mn_comm_connections;
     UrgentPathInfo mn_urgent_connections;
     std::map<uintptr_t, RemoteMemoryRegion> remoteMemoryRegions;
+    SXSpinLock comm_path_lock;
 
     NodeInfo(uint8_t id, uint32_t ip, uint16_t p);
 
@@ -608,9 +609,12 @@ protected:
     union ibv_gid dev_gid;
 
     std::vector<NodeInfo> nodes;
-    void* buffers;
+    void* buffers = nullptr;
     uint32_t buffer_lkey;
     std::map<uintptr_t, struct ibv_mr*> localMemoryRegions;
+#ifndef MEMORY_NODE
+    SXSpinLock urgent_msg_lock;
+#endif
 
     static RetStatus CreateQP(struct ibv_qp** qp, struct ibv_cq* cq, struct ibv_pd* pd, ConnectionType type);
     static RetStatus ModifyQPStateToReset(struct ibv_qp* qp);
@@ -619,6 +623,7 @@ protected:
                                         const union ibv_gid& dest_gid,
                                         uint8_t port_num, uint32_t remote_psn, ConnectionType type);
     static RetStatus ModifyQPStateToRTS(struct ibv_qp* qp, uint32_t local_psn, ConnectionType type);
+    static RetStatus ModifyQPStateToError(struct ibv_qp* qp);
 
     void FillHandshakeInfo(uint8_t node_id, HandshakeInfo& handshake_info);
     void ProcessHandshakeInfo(uint8_t node_id, const HandshakeInfo& handshake_info);

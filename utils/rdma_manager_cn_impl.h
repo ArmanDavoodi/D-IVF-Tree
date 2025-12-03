@@ -258,6 +258,7 @@ RetStatus RDMA_Manager::ReleaseCommBuffer(BufferInfo buffer, bool flush) {
                 "Cannot release null buffer in ReleaseCommBuffer");
     threadSelf->SanityCheckLockHeldInModeByMe(&(nodes[buffer.target_node_id].cn_comm_connections.
         connection[buffer.conn_id].buffer_info[buffer.buffer_idx].buffer_lock), SX_SHARED);
+
     if (flush || reinterpret_cast<uintptr_t>(buffer.buffer) + buffer.length == reinterpret_cast<uintptr_t>(
                  nodes[buffer.target_node_id].cn_comm_connections.connection[buffer.conn_id].
                     buffer_info[buffer.buffer_idx].buffer->data) + buffer.max_length) {
@@ -448,8 +449,12 @@ RetStatus RDMA_Manager::PollUrgentMessages(std::vector<std::pair<UrgentMessageDa
     FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
                 "RDMA_Manager instance mismatch in PollUrgentMessages");
     RetStatus rs = RetStatus::Success();
-
     messages.clear();
+
+    if (!urgent_msg_lock.TryLock(SX_EXCLUSIVE)) {
+        return rs;
+    }
+
     messages.reserve(UrgentBuffer::MAX_URGENT_MESSAGES);
     constexpr uint8_t target_node_id = MEMORY_NODE_ID;
     size_t start_idx = nodes[target_node_id].mn_urgent_connections.read_off;
@@ -484,10 +489,11 @@ RetStatus RDMA_Manager::PollUrgentMessages(std::vector<std::pair<UrgentMessageDa
         if (!rs.IsOK() && rs.stat != RetStatus::RDMA_QP_FULL) {
             FatalAssert(false, LOG_TAG_RDMA,
                         "Failed to send RDMA Write to node %hhu: %s", target_node_id, rs.Msg());
-            return rs;
+            break;
         }
     } while (!rs.IsOK());
 
+    urgent_msg_lock.Unlock();
     return rs;
 }
 
@@ -501,6 +507,11 @@ RetStatus RDMA_Manager::PollCommRequests(uint8_t node_id, std::vector<BufferInfo
                 MEMORY_NODE_ID, node_id);
 
     request_buffers.clear();
+
+    if (!nodes[node_id].comm_path_lock.TryLock(SX_EXCLUSIVE)) {
+        return RetStatus::Success();
+    }
+
     request_buffers.reserve(NUM_COMM_BUFFERS_PER_CONNECTION * NUM_CONNECTIONS[MN_COMM]);
     RetStatus rs = RetStatus::Success();
     for (uint8_t conn_id = 0; conn_id < NUM_CONNECTIONS[MN_COMM]; ++conn_id) {
@@ -522,6 +533,8 @@ RetStatus RDMA_Manager::PollCommRequests(uint8_t node_id, std::vector<BufferInfo
             request_buffers.push_back(buffer_info);
         }
     }
+
+    return rs;
 }
 
 RetStatus RDMA_Manager::ReleaseCommReciveBuffers(uint8_t node_id, std::vector<BufferInfo>& buffers) {
@@ -532,6 +545,7 @@ RetStatus RDMA_Manager::ReleaseCommReciveBuffers(uint8_t node_id, std::vector<Bu
     FatalAssert(node_id == MEMORY_NODE_ID, LOG_TAG_RDMA,
                 "In CN build, node_id must be MEMORY_NODE_ID %hhu. Given: %hhu",
                 MEMORY_NODE_ID, node_id);
+    threadSelf->SanityCheckLockHeldInModeByMe(&nodes[node_id].comm_path_lock, SX_EXCLUSIVE);
     RetStatus rs = RetStatus::Success();
 
     RDMABuffer* rdma_buffers = new RDMABuffer[buffers.size()];
@@ -570,11 +584,14 @@ RetStatus RDMA_Manager::ReleaseCommReciveBuffers(uint8_t node_id, std::vector<Bu
         if (!rs.IsOK() && rs.stat != RetStatus::RDMA_QP_FULL) {
             FatalAssert(false, LOG_TAG_RDMA,
                         "Failed to send RDMA Write to node %hhu: %s", node_id, rs.Msg());
-            return rs;
+            break;
         }
     } while (!rs.IsOK());
 
-    return RetStatus::Success();
+    nodes[node_id].comm_path_lock.Unlock();
+    delete[] rdma_buffers;
+
+    return rs;
 }
 
 };

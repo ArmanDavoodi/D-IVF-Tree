@@ -249,6 +249,22 @@ RetStatus RDMA_Manager::ModifyQPStateToRTS(struct ibv_qp* qp, uint32_t local_psn
     return RetStatus::Success();
 }
 
+RetStatus RDMA_Manager::ModifyQPStateToError(struct ibv_qp* qp) {
+    CHECK_NOT_NULLPTR(qp, LOG_TAG_RDMA);
+    struct ibv_qp_attr qp_attr;
+    memset(&qp_attr, 0, sizeof(qp_attr));
+
+    qp_attr.qp_state = IBV_QPS_ERR;
+
+    int flags = IBV_QP_STATE;
+    int ret = ibv_modify_qp(qp, &qp_attr, flags);
+    if (ret != 0) {
+        return RetStatus::Fail(String("Failed to modify QP to ERROR state. ret=(%d)%s errno=(%d)%s",
+                                        ret, strerror(ret), errno, strerror(errno)).ToCStr());
+    }
+    return RetStatus::Success();
+}
+
 template<typename PathInfo>
 RetStatus RDMA_Manager::InitConnectionCtx(ConnectionType conn_type, struct ibv_cq* cq, PathInfo& path_info,
                                           void*& next_buffer, uint32_t lkey) {
@@ -462,10 +478,7 @@ void RDMA_Manager::ProcessHandshakeInfo(uint8_t node_id, const HandshakeInfo& ha
 
 RetStatus RDMA_Manager::DisconnectTCPConnections() {
     RetStatus rs = RetStatus::Success();
-    FatalAssert(nodes.size() == (size_t)num_nodes, LOG_TAG_RDMA,
-                "nodes.size() does not match num_nodes. nodes.size()=%lu, num_nodes=%hhu",
-                nodes.size(), num_nodes);
-    for (uint8_t i = 0; i < num_nodes; ++i) {
+    for (uint8_t i = 0; i < nodes.size(); ++i) {
         if (nodes[i].socket != -1) {
             close(nodes[i].socket);
             nodes[i].socket = -1;
@@ -477,18 +490,200 @@ RetStatus RDMA_Manager::DisconnectTCPConnections() {
 }
 
 RetStatus RDMA_Manager::DisconnectAllNodes() {
-    DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED,
-            "RDMA_Manager DisconnectAllNodes is not implemented yet");
+    for (uint8_t i = 0; i < nodes.size(); ++i) {
+        for (size_t conn_type = 0; conn_type < CONNECTION_TYPE_COUNT; ++conn_type) {
+            size_t num_conns = NUM_CONNECTIONS[static_cast<ConnectionType>(conn_type)];
+            for (size_t j = 0; j < num_conns; ++j) {
+                ConnectionContext* conn_ctx = nullptr;
+                switch (static_cast<ConnectionType>(conn_type)) {
+                    case CN_COMM:
+                        conn_ctx = &nodes[i].cn_comm_connections.connection[j].ctx;
+                        break;
+                    case MN_COMM:
+                        conn_ctx = &nodes[i].mn_comm_connections.connection[j].ctx;
+                        break;
+                    case CN_CLUSTER_READ:
+                        conn_ctx = &nodes[i].cn_cluster_read_connections.connection[j];
+                        break;
+                    case CN_CLUSTER_WRITE:
+                        conn_ctx = &nodes[i].cn_cluster_write_connections.connection[j];
+                        break;
+                    case MN_URGENT:
+                        conn_ctx = &nodes[i].mn_urgent_connections.connection[j];
+                        break;
+                    default:
+                        DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_RDMA,
+                                "Unknown connection type %zu for node %hhu connection id %lu",
+                                conn_type, i, j);
+                }
+                if (conn_ctx->qp != nullptr) {
+                    /* The QP/CQ should already be empty at this point and no further communication should be ongoing */
+                    RetStatus rs = ModifyQPStateToError(conn_ctx->qp);
+                    if (!rs.IsOK()) {
+                        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                                "Failed to modify QP to ERROR state for node %hhu connection type %s id %lu. Error: %s",
+                                i, ToString(static_cast<ConnectionType>(conn_type)).ToCStr(), j, rs.Msg());
+                    }
+
+                    int ret = ibv_destroy_qp(conn_ctx->qp);
+                    if (ret != 0) {
+                        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                                "Failed to destroy QP for node %hhu connection type %s id %lu. ret=(%d)%s errno=(%d)%s",
+                                i, ToString(static_cast<ConnectionType>(conn_type)).ToCStr(), j,
+                                ret, strerror(ret), errno, strerror(errno));
+                    }
+                    conn_ctx->qp = nullptr;
+                }
+                conn_ctx->cq = nullptr;
+            }
+        }
+    }
+
+    if (cn_cluster_read_cq != nullptr) {
+        int ret = ibv_destroy_cq(cn_cluster_read_cq);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to destroy CN_CLUSTER_READ CQ. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        cn_cluster_read_cq = nullptr;
+    }
+
+    if (cn_cluster_write_cq != nullptr) {
+        int ret = ibv_destroy_cq(cn_cluster_write_cq);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to destroy CN_CLUSTER_WRITE CQ. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        cn_cluster_write_cq = nullptr;
+    }
+
+    if (cn_comm_cq != nullptr) {
+        int ret = ibv_destroy_cq(cn_comm_cq);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to destroy CN COMM CQ. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        cn_comm_cq = nullptr;
+    }
+
+    if (mn_comm_cq != nullptr) {
+        int ret = ibv_destroy_cq(mn_comm_cq);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to destroy MN COMM CQ. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        mn_comm_cq = nullptr;
+    }
+
+    if (mn_urgent_cq != nullptr) {
+        int ret = ibv_destroy_cq(mn_urgent_cq);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to destroy MN URGENT CQ. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        mn_urgent_cq = nullptr;
+    }
+
+    return RetStatus::Success();
 }
 
 RetStatus RDMA_Manager::DeregisterAllMemoryRegions() {
-    DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED,
-            "RDMA_Manager DeregisterAllMemoryRegions is not implemented yet");
+    for (auto& it : localMemoryRegions) {
+        struct ibv_mr* mr = it.second;
+        if (mr != nullptr) {
+            int ret = ibv_dereg_mr(mr);
+            if (ret != 0) {
+                DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                        "Failed to deregister memory region at addr=0x%lx, length=%lu. ret=(%d)%s errno=(%d)%s",
+                        it.first, mr->length, ret, strerror(ret), errno, strerror(errno));
+            }
+        }
+    }
+    localMemoryRegions.clear();
+    return RetStatus::Success();
 }
 
 inline void RDMA_Manager::Cleanup() {
-    DIVFLOG(LOG_LEVEL_PANIC, LOG_TAG_NOT_IMPLEMENTED,
-            "RDMA_Manager Cleanup is not implemented yet");
+    RetStatus rs;
+    rs = DisconnectAllNodes();
+    if (!rs.IsOK()) {
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                "Failed to disconnect all nodes. Error: %s", rs.Msg());
+    }
+    rs = DeregisterAllMemoryRegions();
+    if (!rs.IsOK()) {
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                "Failed to deregister all memory regions. Error: %s", rs.Msg());
+    }
+
+
+    rs = DisconnectTCPConnections();
+    if (!rs.IsOK()) {
+        DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                "Failed to disconnect TCP connections. Error: %s", rs.Msg());
+    }
+
+    if (pd != nullptr) {
+        int ret = ibv_dealloc_pd(pd);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to deallocate Protection Domain. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        pd = nullptr;
+    }
+
+    if (ib_ctx != nullptr) {
+        int ret = ibv_close_device(ib_ctx);
+        if (ret != 0) {
+            DIVFLOG(LOG_LEVEL_ERROR, LOG_TAG_RDMA,
+                    "Failed to close IB device context. ret=(%d)%s errno=(%d)%s",
+                    ret, strerror(ret), errno, strerror(errno));
+        }
+        ib_ctx = nullptr;
+    }
+
+    for (uint8_t i = 0; i < nodes.size(); ++i) {
+        for (uint8_t j = 0; j < NUM_CONNECTIONS[CN_COMM]; ++j) {
+            for (uint8_t k = 0; k < NUM_COMM_BUFFERS_PER_CONNECTION; ++k) {
+                if (nodes[i].cn_comm_connections.connection[j].buffer_info[k].buffer != nullptr) {
+                    nodes[i].cn_comm_connections.connection[j].buffer_info[k].buffer->~CommBuffer();
+                    nodes[i].cn_comm_connections.connection[j].buffer_info[k].buffer = nullptr;
+                }
+            }
+        }
+
+        for (uint8_t j = 0; j < NUM_CONNECTIONS[MN_COMM]; ++j) {
+            for (uint8_t k = 0; k < NUM_COMM_BUFFERS_PER_CONNECTION; ++k) {
+                if (nodes[i].mn_comm_connections.connection[j].buffer_info[k].buffer != nullptr) {
+                    nodes[i].mn_comm_connections.connection[j].buffer_info[k].buffer->~CommBuffer();
+                    nodes[i].mn_comm_connections.connection[j].buffer_info[k].buffer = nullptr;
+                }
+            }
+        }
+
+#ifdef MEMORY_NODE
+        if (nodes[i].mn_urgent_connections.read_off != nullptr) {
+            nodes[i].mn_urgent_connections.read_off->~atomic<uint64_t>();
+            nodes[i].mn_urgent_connections.read_off = nullptr;
+        }
+#else
+        if (nodes[i].mn_urgent_connections.buffer != nullptr) {
+            nodes[i].mn_urgent_connections.buffer->~UrgentBuffer();
+            nodes[i].mn_urgent_connections.buffer = nullptr;
+        }
+#endif
+
+        if (buffers != nullptr) {
+            free(buffers);
+            buffers = nullptr;
+        }
+    }
 }
 
 /* todo: support multiple memory nodes */
@@ -691,8 +886,8 @@ RDMA_Manager::RDMA_Manager(uint8_t self_id, const std::vector<std::pair<const ch
             buffer_size);
 
     cn_cluster_read_cq = ibv_create_cq(ib_ctx,
-                                        MAX_CQE[ConnectionType::CN_CLUSTER_READ],
-                                        nullptr, nullptr, 0);
+                                       MAX_CQE[ConnectionType::CN_CLUSTER_READ],
+                                       nullptr, nullptr, 0);
     if (cn_cluster_read_cq == nullptr) {
         error_msg = String("Failed to create CN Cluster Read Completion Queue. errno=(%d)%s",
                             errno, strerror(errno));
@@ -1068,15 +1263,16 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
     new_task_id.connection_id = conn_ctx.connection_id;
     new_task_id.buffer_id = rdma_buffers[0].buffer_idx;
     new_task_id.task_id = conn_ctx.last_task_id.fetch_add(num_buffers) % UINT32_MAX;
-    struct ibv_send_wr* wr_list = new ibv_send_wr[num_buffers];
-    struct ibv_sge* sge_list = new ibv_sge[num_buffers];
-    struct ibv_send_wr* bad_wr = nullptr;
 
     uint16_t num_outstanding = conn_ctx.num_pending_requests.fetch_add(num_buffers);
     if (num_outstanding + num_buffers > MAX_SEND_WR[conn_ctx.type]) {
         conn_ctx.num_pending_requests.fetch_sub(num_buffers);
         return RetStatus{.stat=RetStatus::RDMA_QP_FULL, .message=nullptr};
     }
+
+    struct ibv_send_wr* wr_list = new ibv_send_wr[num_buffers];
+    struct ibv_sge* sge_list = new ibv_sge[num_buffers];
+    struct ibv_send_wr* bad_wr = nullptr;
 
     bool create_wc = (num_outstanding + num_buffers == MAX_SEND_WR[conn_ctx.type]);
     ConnTaskId last_task_id;
@@ -1116,6 +1312,8 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
                                     ret, strerror(ret), errno, strerror(errno));
         FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
         rs = RetStatus::Fail(error_msg.ToCStr());
+        delete[] wr_list;
+        delete[] sge_list;
         return rs;
     }
 
@@ -1135,6 +1333,8 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
                                         num_comp, strerror(-num_comp), errno, strerror(errno));
             FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
             rs = RetStatus::Fail(error_msg.ToCStr());
+            delete[] wr_list;
+            delete[] sge_list;
             return rs;
         }
 
@@ -1143,6 +1343,8 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
                                         wc.status, ibv_wc_status_str(wc.status), wc.wr_id);
             FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
             rs = RetStatus::Fail(error_msg.ToCStr());
+            delete[] wr_list;
+            delete[] sge_list;
             return rs;
         }
 
@@ -1153,6 +1355,10 @@ RetStatus RDMA_Manager::RDMAWrite(RDMABuffer* rdma_buffers, size_t num_buffers, 
                     wc.wr_id, last_task_id._raw);
         conn_ctx.num_pending_requests.fetch_sub(MAX_SEND_WR[conn_ctx.type]);
     }
+
+    delete[] wr_list;
+    delete[] sge_list;
+    return rs;
 }
 
 /* todo: for the read instead of the sg_list we have to use multiple wr to get a wc for each */
@@ -1236,9 +1442,10 @@ RetStatus RDMA_Manager::RDMARead(RDMABuffer* rdma_buffers, size_t num_buffers, C
                                     ret, strerror(ret), errno, strerror(errno));
         FatalAssert(false, LOG_TAG_RDMA, "%s", error_msg.ToCStr());
         rs = RetStatus::Fail(error_msg.ToCStr());
-        return rs;
     }
 
+    delete[] wr_list;
+    delete[] sge_list;
     return rs;
 }
 
