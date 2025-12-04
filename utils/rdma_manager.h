@@ -418,18 +418,6 @@ struct HandshakeInfo {
     HandshakeConnectionInfo urgent_conns[NUM_CONNECTIONS[MN_URGENT]];
 };
 
-enum class MessageType : uint8_t {
-    REGISTER_MEMORY = 0,
-    NUM_MESSAGE_TYPES
-};
-
-struct MemoryInfo {
-    const MessageType type = MessageType::REGISTER_MEMORY;
-    uintptr_t addr;
-    size_t length;
-    uint32_t rkey;
-};
-
 struct BufferInfo {
     void* buffer;
     size_t max_length;
