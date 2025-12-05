@@ -465,7 +465,8 @@ RetStatus RDMA_Manager::PollUrgentMessages(std::vector<std::pair<UrgentMessageDa
         UrgentMessage& message = nodes[target_node_id].mn_urgent_connections.buffer->messages[end_idx];
         uint8_t len = message.meta.detail.length;
         /* todo: we are doing a memcpy here -> is there a way to avoid this while letting the MN use the buffer? */
-        messages.emplace_back(message.data, len);
+        messages.emplace_back(UrgentMessageData(), len);
+        memcpy(messages.back().first.data, message.data.data, len);
         message.SetSeen();
     }
 
@@ -547,6 +548,10 @@ RetStatus RDMA_Manager::ReleaseCommReciveBuffers(uint8_t node_id, std::vector<Bu
                 MEMORY_NODE_ID, node_id);
     threadSelf->SanityCheckLockHeldInModeByMe(&nodes[node_id].comm_path_lock, SX_EXCLUSIVE);
     RetStatus rs = RetStatus::Success();
+    if (buffers.empty()) {
+        nodes[node_id].comm_path_lock.Unlock();
+        return rs;
+    }
 
     RDMABuffer* rdma_buffers = new RDMABuffer[buffers.size()];
     for (size_t i = 0; i < buffers.size(); ++i) {

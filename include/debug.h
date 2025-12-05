@@ -56,6 +56,7 @@ enum LOG_TAG_BITS : uint64_t {
     LOG_TAG_LOCK_BIT,
     LOG_TAG_THREAD_BIT,
     LOG_TAG_RDMA_BIT,
+    LOG_TAG_COMM_LAYER_BIT,
     LOG_TAG_HANG_DETECTOR_BIT,
     LOG_TAG_NOT_IMPLEMENTED_BIT,
     LOG_TAG_TEST_BIT,
@@ -74,6 +75,7 @@ enum LOG_TAG_BITS : uint64_t {
 #define LOG_TAG_LOCK (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_LOCK_BIT))
 #define LOG_TAG_THREAD (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_THREAD_BIT))
 #define LOG_TAG_RDMA (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_RDMA_BIT))
+#define LOG_TAG_COMM_LAYER (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_COMM_LAYER_BIT))
 #define LOG_TAG_HANG_DETECTOR (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_HANG_DETECTOR_BIT))
 #define LOG_TAG_NOT_IMPLEMENTED (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_NOT_IMPLEMENTED_BIT))
 #define LOG_TAG_TEST (1ul << (uint64_t)(LOG_TAG_BITS::LOG_TAG_TEST_BIT))
@@ -395,6 +397,8 @@ inline const char* tagtostr(uint64_t tag)
         return "    Thread     ";
     case LOG_TAG_RDMA:
         return "     RDMA      ";
+    case LOG_TAG_COMM_LAYER:
+        return "  Comm Layer   ";
     case LOG_TAG_NOT_IMPLEMENTED:
         return "Not Implemented";
     case LOG_TAG_HANG_DETECTOR:

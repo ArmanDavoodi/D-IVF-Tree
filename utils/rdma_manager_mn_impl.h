@@ -319,6 +319,37 @@ RetStatus RDMA_Manager::ReleaseCommBuffer(BufferInfo buffer, bool flush) {
     return RetStatus::Success();
 }
 
+RetStatus RDMA_Manager::BroadCastCommRequest(void* data, size_t len, bool flush) {
+    FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
+                "RDMA_Manager instance mismatch in BroadCastCommRequest");
+    FatalAssert(MEMORY_NODE_ID == self_node_id, LOG_TAG_RDMA,
+                "Memory node id %hhu does not match self_node_id %hhu",
+                MEMORY_NODE_ID, self_node_id);
+    RetStatus rs = RetStatus::Success();
+    BufferInfo buffer;
+    for (uint8_t node_id = 0; node_id < num_nodes; ++node_id) {
+        if (node_id == MEMORY_NODE_ID) {
+            continue;
+        }
+
+        rs = GrabCommBuffer(node_id, len, buffer);
+        if (!rs.IsOK()) {
+            FatalAssert(false, LOG_TAG_RDMA,
+                        "Failed to grab communication buffer for broadcast to node %hhu: %s",
+                        node_id, rs.Msg());
+            return rs;
+        }
+        memcpy(buffer.buffer, data, len);
+        rs = ReleaseCommBuffer(buffer, flush);
+        if (!rs.IsOK()) {
+            FatalAssert(false, LOG_TAG_RDMA,
+                        "Failed to release communication buffer for broadcast to node %hhu: %s",
+                        node_id, rs.Msg());
+            return rs;
+        }
+    }
+}
+
 RetStatus RDMA_Manager::FlushCommBuffer(uint8_t target_node_id, uint8_t conn_id, uint8_t buffer_idx) {
     FatalAssert(rdmaManagerInstance == this, LOG_TAG_RDMA,
                 "RDMA_Manager instance mismatch in FlushCommBuffer");
@@ -507,6 +538,10 @@ RetStatus RDMA_Manager::ReleaseCommReciveBuffers(uint8_t node_id, std::vector<Bu
                 "Cannot poll communication requests for self_node_id %hhu", self_node_id);
     threadSelf->SanityCheckLockHeldInModeByMe(&nodes[node_id].comm_path_lock, SX_EXCLUSIVE);
     RetStatus rs = RetStatus::Success();
+    if (buffers.empty()) {
+        nodes[node_id].comm_path_lock.Unlock();
+        return rs;
+    }
 
     RDMABuffer* rdma_buffers = new RDMABuffer[buffers.size()];
     for (size_t i = 0; i < buffers.size(); ++i) {

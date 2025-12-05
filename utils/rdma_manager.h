@@ -155,8 +155,10 @@ struct UrgentMessage {
         meta.detail.valid = 1;
     }
 
-    void Clear() {
-        memset(data.data, 0, sizeof(data.data));
+    void Clear(bool set_zero = true) {
+        if (set_zero) {
+            memset(data.data, 0, sizeof(data.data));
+        }
         meta.detail.length = 0;
     }
 
@@ -164,26 +166,34 @@ struct UrgentMessage {
         return static_cast<size_t>(meta.detail.length);
     }
 
-    void AppendData(const void* src, size_t len) {
-        FatalAssert((GetLength() + len) <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
+    void SetLength(size_t len) {
+        FatalAssert(len <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
                     LOG_TAG_RDMA,
-                    "Appending data of length %zu exceeds urgent message maximum size %zu",
+                    "Setting urgent message length to %zu exceeds maximum size %zu",
                     len, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
-        memcpy(data.data + GetLength(), src, len);
-        meta.detail.length += static_cast<uint8_t>(len);
+        meta.detail.length = static_cast<uint8_t>(len);
     }
 
-    void WriteData(size_t offset, const void* src, size_t len) {
-        FatalAssert((offset + len) <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
-                    LOG_TAG_RDMA,
-                    "Writing data of length %zu at offset %zu exceeds urgent message maximum size %zu",
-                    len, offset, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
-        FatalAssert(offset <= GetLength(), LOG_TAG_RDMA,
-                    "Writing data at offset %zu which is beyond current message length %zu",
-                    offset, GetLength());
-        memcpy(data.data + offset, src, len);
-        meta.detail.length = static_cast<uint8_t>(std::max(static_cast<size_t>(meta.detail.length), offset + len));
-    }
+    // void AppendData(const void* src, size_t len) {
+    //     FatalAssert((GetLength() + len) <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
+    //                 LOG_TAG_RDMA,
+    //                 "Appending data of length %zu exceeds urgent message maximum size %zu",
+    //                 len, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
+    //     memcpy(data.data + GetLength(), src, len);
+    //     meta.detail.length += static_cast<uint8_t>(len);
+    // }
+
+    // void WriteData(size_t offset, const void* src, size_t len) {
+    //     FatalAssert((offset + len) <= (URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta)),
+    //                 LOG_TAG_RDMA,
+    //                 "Writing data of length %zu at offset %zu exceeds urgent message maximum size %zu",
+    //                 len, offset, URGENT_MESSAGE_SIZE - sizeof(UrgentMessageMeta));
+    //     FatalAssert(offset <= GetLength(), LOG_TAG_RDMA,
+    //                 "Writing data at offset %zu which is beyond current message length %zu",
+    //                 offset, GetLength());
+    //     memcpy(data.data + offset, src, len);
+    //     meta.detail.length = static_cast<uint8_t>(std::max(static_cast<size_t>(meta.detail.length), offset + len));
+    // }
 
     bool IsUnseenValid() const {
         UrgentMessageMeta::Detail m = meta.atomic_detail.load(std::memory_order_acquire);
@@ -430,38 +440,45 @@ struct BufferInfo {
     uint8_t conn_id;
     uint8_t buffer_idx;
 
-    void Append(void* data, size_t len) {
-        FatalAssert(len + length <= max_length, LOG_TAG_RDMA,
-                    "Appending data exceeds buffer max_length. current length=%zu, append length=%zu, max_length=%zu",
-                    length, len, max_length);
-        FatalAssert(buffer != nullptr, LOG_TAG_RDMA,
-                    "buffer is nullptr in BufferInfo");
-        FatalAssert(data != nullptr, LOG_TAG_RDMA,
-                    "data to append is nullptr in BufferInfo");
-        memcpy(reinterpret_cast<uint8_t*>(buffer) + length, data, len);
-        length += len;
+    void SetLength(size_t len) {
+        FatalAssert(len <= max_length, LOG_TAG_RDMA,
+                    "Setting buffer length exceeds max_length. set length=%zu, max_length=%zu",
+                    len, max_length);
+        length = len;
     }
 
-    void Write(void* data, size_t len, size_t offset) {
-        FatalAssert(offset <= length, LOG_TAG_RDMA,
-                    "Offset exceeds current length in BufferInfo. current length=%zu, offset=%zu",
-                    length, offset);
-        FatalAssert(len + offset <= max_length, LOG_TAG_RDMA,
-                    "Writing data exceeds buffer max_length. offset=%zu, write length=%zu, max_length=%zu",
-                    offset, len, max_length);
-        FatalAssert(buffer != nullptr, LOG_TAG_RDMA,
-                    "buffer is nullptr in BufferInfo");
-        FatalAssert(data != nullptr, LOG_TAG_RDMA,
-                    "data to write is nullptr in BufferInfo");
-        memcpy(reinterpret_cast<uint8_t*>(buffer) + offset, data, len);
-        if (offset + len > length) {
-            length = offset + len;
-        }
-    }
+    // void Append(void* data, size_t len) {
+    //     FatalAssert(len + length <= max_length, LOG_TAG_RDMA,
+    //                 "Appending data exceeds buffer max_length. current length=%zu, append length=%zu, max_length=%zu",
+    //                 length, len, max_length);
+    //     FatalAssert(buffer != nullptr, LOG_TAG_RDMA,
+    //                 "buffer is nullptr in BufferInfo");
+    //     FatalAssert(data != nullptr, LOG_TAG_RDMA,
+    //                 "data to append is nullptr in BufferInfo");
+    //     memcpy(reinterpret_cast<uint8_t*>(buffer) + length, data, len);
+    //     length += len;
+    // }
 
-    size_t RemainingSpace() const {
-        return max_length - length;
-    }
+    // void Write(void* data, size_t len, size_t offset) {
+    //     FatalAssert(offset <= length, LOG_TAG_RDMA,
+    //                 "Offset exceeds current length in BufferInfo. current length=%zu, offset=%zu",
+    //                 length, offset);
+    //     FatalAssert(len + offset <= max_length, LOG_TAG_RDMA,
+    //                 "Writing data exceeds buffer max_length. offset=%zu, write length=%zu, max_length=%zu",
+    //                 offset, len, max_length);
+    //     FatalAssert(buffer != nullptr, LOG_TAG_RDMA,
+    //                 "buffer is nullptr in BufferInfo");
+    //     FatalAssert(data != nullptr, LOG_TAG_RDMA,
+    //                 "data to write is nullptr in BufferInfo");
+    //     memcpy(reinterpret_cast<uint8_t*>(buffer) + offset, data, len);
+    //     if (offset + len > length) {
+    //         length = offset + len;
+    //     }
+    // }
+
+    // size_t RemainingSpace() const {
+    //     return max_length - length;
+    // }
 };
 
 class RDMA_Manager {
@@ -650,6 +667,14 @@ public:
                                 const char* target_rdma_device_name, uint8_t rdma_port, int gid_index);
     static void Destroy();
 
+    inline uint8_t GetSelfNodeId() const {
+        return self_node_id;
+    }
+
+    inline uint8_t GetNumNodes() const {
+        return num_nodes;
+    }
+
     /* Note: this function only registers the memory locally and will not send any notifications to other nodes */
     RetStatus RegisterMemory(Address addr, size_t length, uint32_t& lkey, uint32_t& rkey);
     RetStatus EstablishConnections();
@@ -668,6 +693,7 @@ public:
     RetStatus ReleaseCommBuffer(BufferInfo buffer, bool flush = false);
 
 #ifdef MEMORY_NODE
+    RetStatus BroadCastCommRequest(void* data, size_t len, bool flush);
     /* Urgent Path */
     UrgentMessage* BuildUrgentMessage();
     void ReleaseUrgentMessage(UrgentMessage* msg);

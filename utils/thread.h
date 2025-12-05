@@ -439,6 +439,44 @@ public:
         return (_next_task_id++);
     }
 
+#ifdef MEMORY_NODE
+    inline void* GetUrgentMessageBuffer() {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(urgent_message_buffer != nullptr, LOG_TAG_THREAD,
+                    "urgent message buffer is not set!");
+        return urgent_message_buffer;
+    }
+
+    inline void SetUrgentMessageBuffer(void* buffer) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(urgent_message_buffer == nullptr, LOG_TAG_THREAD,
+                    "urgent message buffer is already set!");
+        FatalAssert(buffer != nullptr, LOG_TAG_THREAD,
+                    "urgent message buffer cannot be null!");
+        urgent_message_buffer = buffer;
+    }
+
+    inline void* GetBroadcastBuffer(size_t& max_size) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(broadcast_message_buffer != nullptr, LOG_TAG_THREAD,
+                    "broadcast message buffer is not set!");
+        max_size = broadcast_message_max_size;
+        return broadcast_message_buffer;
+    }
+
+    inline void SetBroadcastMessageBuffer(void* buffer, size_t max_size) {
+        FatalAssert(threadSelf == this, LOG_TAG_THREAD, "thread is not inited!");
+        FatalAssert(broadcast_message_buffer == nullptr, LOG_TAG_THREAD,
+                    "broadcast message buffer is already set!");
+        FatalAssert(max_size > 0, LOG_TAG_THREAD,
+                    "broadcast message buffer size must be greater than 0!");
+        FatalAssert(buffer != nullptr, LOG_TAG_THREAD,
+                    "broadcast message buffer cannot be null!");
+        broadcast_message_buffer = buffer;
+        broadcast_message_max_size = max_size;
+    }
+#endif
+
     /*
      * even if there are only 5 vectors in a layer the probablity of choosing taht cluster is 20%.
      * Therefore, if we retry 21 times it should be highly unlikely that this happens. In case we do not succeed.
@@ -465,6 +503,11 @@ protected:
     std::mt19937_64 _gen64;
     std::uniform_int_distribution<uint32_t> _uniform_dist;
     uint64_t _next_task_id;
+#ifdef MEMORY_NODE
+    void* urgent_message_buffer = nullptr;
+    void* broadcast_message_buffer = nullptr;
+    size_t broadcast_message_max_size = 0;
+#endif
 
 #ifdef HANG_DETECTION
     std::atomic<uint64_t> _iteration_sn = 0;
