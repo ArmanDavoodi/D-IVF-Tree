@@ -396,6 +396,16 @@ class CommLayer {
 protected:
     uint16_t dim;
     uint16_t split_factor;
+    size_t leaf_size_bytes;
+    size_t internal_size_bytes;
+#ifndef MEMORY_NODE
+    /* todo: replace with concurrent hash table? */
+    SXSpinLock pending_reads_lock;
+    std::unordered_map<ConnTaskId, std::vector<std::pair<VectorID, Version>>, ConnTaskIdHash> pending_reads;
+    SANITY_CHECK(
+        std::unordered_map<std::pair<VectorID, Version>, ConnTaskId, VectorIDVersionPairHash> read_requests_map;
+    )
+#endif
     CommLayer() = default;
     ~CommLayer() = default;
 public:
@@ -702,6 +712,9 @@ public:
                             static_cast<uint8_t>(type));
 #endif
                 CommLayerMessage current_msg;
+                /* todo: use a single memory allocation for this instead of multiple allocations
+                   even better, keep an aditional unregistered buffer for this per thread? or maybe handle the whole
+                   thing in the upper layer somehow to avoid additional copy */
                 current_msg.info.buffer = new char[message_size];
                 memcpy(current_msg.info.buffer, current_msg_ptr, message_size);
                 current_msg.info.length = message_size;
@@ -879,11 +892,187 @@ public:
     }
 
 #ifndef MEMORY_NODE
-    RetStatus PostClusterReadRequests(const std::vector<ClusterRemoteAccessInfo>& clusters_to_read);
-    RetStatus PostClusterWriteRequests(const std::vector<ClusterRemoteAccessInfo>& clusters_to_write);
-    RetStatus CheckClusterReadCompletions(std::vector<std::pair<VectorID, Version>>& completed_reads);
+    RetStatus PostClusterReadRequests(const std::vector<ClusterRemoteAccessInfo>& clusters_to_read) {
+        FatalAssert(!clusters_to_read.empty(), LOG_TAG_COMM_LAYER,
+                    "No clusters to read in PostClusterReadRequests");
+        RDMA_Manager* rdma_manager = RDMA_Manager::GetInstance();
+        CHECK_NOT_NULLPTR(rdma_manager, LOG_TAG_COMM_LAYER);
+        RetStatus rs = RetStatus::Success();
+        std::vector<std::pair<VectorID, Version>> new_read_requests;
+        new_read_requests.reserve(clusters_to_read.size());
+        /* todo: use preallocated buffer */
+        RDMABuffer* buffers = new RDMABuffer[clusters_to_read.size()];
+        for (size_t i = 0; i < clusters_to_read.size(); ++i) {
+            const ClusterRemoteAccessInfo& cluster_info = clusters_to_read[i];
+            FatalAssert(cluster_info.cluster_id.IsValid() && cluster_info.cluster_id.IsCentroid() &&
+                        cluster_info.remote_addr != 0 &&
+                        cluster_info.local_addr != nullptr,
+                        LOG_TAG_COMM_LAYER,
+                        "Invalid cluster info in PostClusterReadRequests: cluster_id " VECTORID_LOG_FMT
+                        ", cluster_version %u, local_addr %p, remote_addr 0x%lx",
+                        VECTORID_LOG(cluster_info.cluster_id),
+                        cluster_info.cluster_version,
+                        cluster_info.local_addr,
+                        cluster_info.remote_addr);
+            new_read_requests.emplace_back(cluster_info.cluster_id, cluster_info.cluster_version);
+            buffers[i].buffer_idx = 0;
+            buffers[i].local_addr = cluster_info.local_addr;
+            buffers[i].remote_addr = cluster_info.remote_addr;
+            buffers[i].length = (cluster_info.cluster_id.IsLeaf()) ?
+                                leaf_size_bytes : internal_size_bytes;
+            buffers[i].remote_node_id = MEMORY_NODE_ID;
+        }
+        pending_reads_lock.Lock(SX_EXCLUSIVE);
+        ConnTaskId task_id;
+        rs = rdma_manager->RDMARead(buffers, clusters_to_read.size(), task_id);
+        if (!rs.IsOK()) {
+            pending_reads_lock.Unlock();
+            FatalAssert(false, LOG_TAG_COMM_LAYER,
+                        "Failed to post RDMA read for %zu clusters: %s",
+                        clusters_to_read.size(), rs.Msg());
+            delete[] buffers;
+            return rs;
+        }
+
+        SANITY_CHECK(
+            for (const auto& req : new_read_requests) {
+                FatalAssert(read_requests_map.find(req) == read_requests_map.end(),
+                            LOG_TAG_COMM_LAYER,
+                            "Duplicate read request for cluster " VECTORID_LOG_FMT " version %u",
+                            VECTORID_LOG(req.first),
+                            req.second);
+                read_requests_map.emplace(req, task_id);
+            }
+        )
+        FatalAssert(pending_reads.find(task_id) == pending_reads.end(),
+                    LOG_TAG_COMM_LAYER,
+                    "Duplicate task_id 0x%lx in pending_reads map",
+                    task_id._raw);
+        pending_reads.emplace(task_id, std::move(new_read_requests));
+        pending_reads_lock.Unlock();
+        delete[] buffers;
+        return rs;
+    }
+
+    RetStatus PostClusterWriteRequests(const std::vector<ClusterRemoteAccessInfo>& clusters_to_write) {
+        FatalAssert(!clusters_to_write.empty(), LOG_TAG_COMM_LAYER,
+                    "No clusters to write in PostClusterWriteRequests");
+        RDMA_Manager* rdma_manager = RDMA_Manager::GetInstance();
+        CHECK_NOT_NULLPTR(rdma_manager, LOG_TAG_COMM_LAYER);
+        RetStatus rs = RetStatus::Success();
+        /* todo: use preallocated buffer */
+        RDMABuffer* buffers = new RDMABuffer[clusters_to_write.size()];
+        for (size_t i = 0; i < clusters_to_write.size(); ++i) {
+            const ClusterRemoteAccessInfo& cluster_info = clusters_to_write[i];
+            FatalAssert(cluster_info.cluster_id.IsValid() && cluster_info.cluster_id.IsCentroid() &&
+                        cluster_info.remote_addr != 0 &&
+                        cluster_info.local_addr != nullptr,
+                        LOG_TAG_COMM_LAYER,
+                        "Invalid cluster info in PostClusterReadRequests: cluster_id " VECTORID_LOG_FMT
+                        ", cluster_version %u, local_addr %p, remote_addr 0x%lx",
+                        VECTORID_LOG(cluster_info.cluster_id),
+                        cluster_info.cluster_version,
+                        cluster_info.local_addr,
+                        cluster_info.remote_addr);
+            buffers[i].buffer_idx = 0;
+            buffers[i].local_addr = cluster_info.local_addr;
+            buffers[i].remote_addr = cluster_info.remote_addr;
+            buffers[i].length = (cluster_info.cluster_id.IsLeaf()) ?
+                                leaf_size_bytes : internal_size_bytes;
+            buffers[i].remote_node_id = MEMORY_NODE_ID;
+        }
+
+        rs = rdma_manager->RDMAWrite(buffers, clusters_to_write.size());
+        if (!rs.IsOK()) {
+            FatalAssert(false, LOG_TAG_COMM_LAYER,
+                        "Failed to post RDMA write for %zu clusters: %s",
+                        clusters_to_write.size(), rs.Msg());
+        }
+
+
+        delete[] buffers;
+        return rs;
+    }
+    RetStatus CheckClusterReadCompletions(std::vector<std::vector<std::pair<VectorID, Version>>>& completed_reads) {
+        RDMA_Manager* rdma_manager = RDMA_Manager::GetInstance();
+        CHECK_NOT_NULLPTR(rdma_manager, LOG_TAG_COMM_LAYER);
+        std::vector<ConnTaskId> completed_task_ids;
+        completed_reads.clear();
+        RetStatus rs = rdma_manager->PollCompletion(ConnectionType::CN_CLUSTER_READ, completed_task_ids);
+        if (!rs.IsOK()) {
+            FatalAssert(false, LOG_TAG_COMM_LAYER,
+                        "Failed to poll RDMA read completions from memory node: %s",
+                        rs.Msg());
+            return rs;
+        }
+
+        if (completed_task_ids.empty()) {
+            return rs;
+        }
+        completed_reads.reserve(completed_task_ids.size());
+
+        pending_reads_lock.Lock(SX_EXCLUSIVE);
+        for (const ConnTaskId& task_id : completed_task_ids) {
+            auto it = pending_reads.find(task_id);
+            FatalAssert(it != pending_reads.end(),
+                        LOG_TAG_COMM_LAYER,
+                        "Completed task_id 0x%lx not found in pending_reads map",
+                        task_id._raw);
+            SANITY_CHECK(
+                for (const auto& req : it->second) {
+                    auto map_it = read_requests_map.find(req);
+                    FatalAssert(map_it != read_requests_map.end(),
+                                LOG_TAG_COMM_LAYER,
+                                "Read request for cluster " VECTORID_LOG_FMT " version %u not found in read_requests_map",
+                                VECTORID_LOG(req.first),
+                                req.second);
+                    FatalAssert(map_it->second._raw == task_id._raw,
+                                LOG_TAG_COMM_LAYER,
+                                "Task ID mismatch for cluster " VECTORID_LOG_FMT " version %u: expected 0x%lx, got 0x%lx",
+                                VECTORID_LOG(req.first),
+                                req.second,
+                                map_it->second._raw,
+                                task_id._raw);
+                    read_requests_map.erase(map_it);
+                }
+            )
+            completed_reads.push_back(std::move(it->second));
+            pending_reads.erase(it);
+        }
+        pending_reads_lock.Unlock();
+        return rs;
+    }
     /* todo: since currently the only urgenmessage is split request we do not generalize */
-    RetStatus CheckUrgentMessages(std::vector<UrgentSplitRequestMessage>& messages);
+    RetStatus CheckUrgentMessages(std::vector<UrgentSplitRequestMessage>& messages) {
+        messages.clear();
+        RDMA_Manager* rdma_manager = RDMA_Manager::GetInstance();
+        CHECK_NOT_NULLPTR(rdma_manager, LOG_TAG_COMM_LAYER);
+        std::vector<std::pair<UrgentMessageData, uint8_t>> raw_messages;
+        RetStatus rs = rdma_manager->PollUrgentMessages(raw_messages);
+        if (!rs.IsOK()) {
+            FatalAssert(false, LOG_TAG_COMM_LAYER,
+                        "Failed to poll urgent messages: %s",
+                        rs.Msg());
+            return rs;
+        }
+
+        messages.reserve(raw_messages.size());
+        for (const auto& pair : raw_messages) {
+            const UrgentMessageData& raw_msg = pair.first;
+            uint8_t msg_len = pair.second;
+            MessageType type = *(reinterpret_cast<const MessageType*>(raw_msg.data));
+            FatalAssert(type == MessageType::URGENT_MN_TO_CN_SPLIT_REQUEST,
+                        LOG_TAG_COMM_LAYER,
+                        "Invalid urgent message type %u with length %hhu",
+                        static_cast<uint8_t>(type),
+                        msg_len);
+            /* todo: remove additional copy */
+            messages.emplace_back();
+            memccpy(&messages.back(), &raw_msg, 0, msg_len);
+        }
+
+        return rs;
+    }
 #endif
 };
 

@@ -112,6 +112,12 @@ union ConnTaskId {
     }
 };
 
+struct ConnTaskIdHash {
+    size_t operator()(const ConnTaskId& p) const {
+        return splitmix64(p._raw);
+    }
+};
+
 enum CommBufferState : uint8_t {
     BUFFER_STATE_READY = 0,
     BUFFER_STATE_IN_USE

@@ -438,34 +438,50 @@ constexpr inline uint64_t GET_MASK() {
     return (uint64_t)0;
 }
 
+uint32_t splitmix32(uint32_t x) {
+    x += 0x9e3779b9;
+    x = (x ^ (x >> 16)) * 0x85ebca6b;
+    x = (x ^ (x >> 13)) * 0xc2b2ae35;
+    return x ^ (x >> 16);
+}
+
+inline uint64_t splitmix64(uint64_t x) {
+    x += 0x9e3779b97f4a7c15ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    return x ^ (x >> 31);
+}
+
+inline uint64_t wycombine(uint64_t a, uint64_t b) {
+    a ^= b;
+    a *= 0xd6e8feb86659fd93ULL;
+    a ^= a >> 32;
+    return a;
+}
+
 struct VersionHash {
     size_t operator()(const Version& p) const {
-        return std::hash<uint32_t>()(p._raw);
+        return splitmix32(p._raw);
     }
 };
 
 struct VectorIDHash {
     size_t operator()(const VectorID& p) const {
-        return std::hash<uint64_t>()(p._id);
+        return splitmix64(p._id);
     }
 };
 
 struct VectorIDVersionPairHash {
     size_t operator()(const std::pair<VectorID, Version>& p) const {
         if (p.first.IsCentroid()) {
-            /*
-             * use the first 4 bits of level as level will not exceed 10
-             * use the first 4 bits of creator Id as we won't have too many nodes in our tests
-             * use all 48 bits of valud
-             * use the first 1 byte of version as it is highly unlikely to have two versions with 256 or more distance
-             * in the same function
-             */
-            return ((((((p.first._creator_node_id & GET_HALF_MASK<4>()) << 4) |
-                    (p.first._level & GET_HALF_MASK<4>()) << 48) |
-                    p.first._val) << 8) |
-                    (p.second._raw & GET_MASK<1>()));
+            uint64_t h = wycombine(p.first._id, p.second._raw);
+
+            h ^= h >> 30; h *= 0xbf58476d1ce4e5b9ULL;
+            h ^= h >> 27; h *= 0x94d049bb133111ebULL;
+            h ^= h >> 31;
+            return h;
         } else {
-            return std::hash<uint64_t>()(p.first._id);
+            return splitmix64(p.first._id);
         }
     }
 };
